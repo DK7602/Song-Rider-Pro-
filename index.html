@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#e9e9ea" />
+  <title>Song Rider Pro</title>
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <style>
+    :root{
+      --bg:#e9e9ea;
+      --card:#ffffff;
+      --ink:#1b1b1b;
+      --muted:#666;
+      --accent:#7b2e3b;      /* light burgundy target */
+      --beat24:#93c5fd;      /* baby blue for beats 2 and 4 */
+      --beatYellow:#ffd54a;  /* highlight */
+      --line:#d9d9dd;
+      --shadow: 0 8px 22px rgba(0,0,0,.08);
+      --radius:16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background:var(--bg);
+      color:var(--ink);
+    }
+
+    header{
+      position:sticky;
+      top:0;
+      z-index:50;
+      background:linear-gradient(#efeff1, #e9e9ea);
+      border-bottom:1px solid rgba(0,0,0,.06);
+      padding:10px 12px 8px;
+    }
+    .topRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .brand{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .brand h1{
+      margin:0;
+      font-size:20px;
+      letter-spacing:.2px;
+    }
+    .brand .sub{
+      font-size:12px;
+      color:var(--muted);
+    }
+
+    /* headshot with blinking eyes */
+    .headshotWrap{
+      position:relative;
+      width:46px;
+      height:46px;
+      border-radius:999px;
+      overflow:hidden;
+      border:2px solid rgba(0,0,0,.08);
+      background:#fff;
+      box-shadow:0 6px 16px rgba(0,0,0,.10);
+      flex:0 0 auto;
+    }
+    .headshotWrap img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+    }
+    .eye{
+      position:absolute;
+      width:8px;
+      height:8px;
+      border-radius:999px;
+      background:rgba(255,0,0,.05);
+      box-shadow:0 0 0 rgba(255,0,0,0);
+      opacity:0;
+      transition:opacity 80ms linear, box-shadow 80ms linear, background 80ms linear;
+      pointer-events:none;
+    }
+    /* You can tweak these positions depending on your headshot */
+    .eye.left{ left:16px; top:18px; }
+    .eye.right{ left:27px; top:18px; }
+
+    .headshotWrap.blink .eye{
+      opacity:1;
+      background:rgba(255,0,0,.85);
+      box-shadow: 0 0 14px rgba(255,0,0,.8);
+    }
+
+    /* Collapsible control panel */
+    .panel{
+      margin-top:10px;
+      background:var(--card);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      border:1px solid rgba(0,0,0,.06);
+    }
+    .panelOpen{
+      display:block;
+      padding:12px;
+    }
+    .panelClosed{
+      display:none;
+      padding:12px;
+    }
+
+    .panel.is-collapsed .panelOpen{ display:none; }
+    .panel.is-collapsed .panelClosed{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+
+    .row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+    }
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:140px;
+      flex:1 1 160px;
+    }
+    label{
+      font-size:12px;
+      color:var(--muted);
+    }
+    select, input[type="text"], input[type="number"]{
+      width:100%;
+      padding:10px 10px;
+      border-radius:12px;
+      border:1px solid rgba(0,0,0,.10);
+      background:#fff;
+      font-size:14px;
+      outline:none;
+    }
+    input[readonly]{
+      background:#f7f7f8;
+      color:#2b2b2b;
+    }
+
+    .btn{
+      border:none;
+      border-radius:12px;
+      padding:10px 12px;
+      font-weight:700;
+      background:#1f2937;
+      color:#fff;
+      cursor:pointer;
+      user-select:none;
+      box-shadow:0 10px 20px rgba(0,0,0,.10);
+    }
+    .btn.secondary{
+      background:#ffffff;
+      color:#111;
+      border:1px solid rgba(0,0,0,.12);
+      box-shadow:none;
+      font-weight:700;
+    }
+    .btn.warn{
+      background:#7b2e3b;
+    }
+    .btn.small{
+      padding:8px 10px;
+      font-size:13px;
+      border-radius:10px;
+    }
+    .toggleGroup{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .pill{
+      border:1px solid rgba(0,0,0,.12);
+      background:#fff;
+      border-radius:999px;
+      padding:8px 10px;
+      font-weight:800;
+      cursor:pointer;
+      user-select:none;
+      font-size:13px;
+    }
+    .pill.active{
+      background:#111;
+      color:#fff;
+      border-color:#111;
+    }
+
+    .miniBar{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-top:12px;
+    }
+
+    main{
+      padding:12px 12px 90px;
+      max-width:1100px;
+      margin:0 auto;
+    }
+
+    /* Tabs */
+    .tabs{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin:12px 0;
+    }
+    .tab{
+      padding:10px 12px;
+      border-radius:999px;
+      border:1px solid rgba(0,0,0,.12);
+      background:#fff;
+      cursor:pointer;
+      user-select:none;
+      font-weight:900;
+      font-size:13px;
+    }
+    .tab.active{
+      background:#111;
+      color:#fff;
+      border-color:#111;
+    }
+
+    .pageTitle{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin:10px 2px 12px;
+    }
+    .pageTitle h2{
+      margin:0;
+      font-size:16px;
+    }
+    .hint{
+      font-size:12px;
+      color:var(--muted);
+    }
+
+    /* Editor cards */
+    .sectionCard{
+      background:var(--card);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      border:1px solid rgba(0,0,0,.06);
+      overflow:hidden;
+      margin-bottom:12px;
+    }
+    .sectionHeader{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(0,0,0,.06);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .sectionHeader .name{
+      font-weight:1000;
+      letter-spacing:.4px;
+    }
+    .sectionHeader .tools{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    .lines{
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .line{
+      border:1px solid rgba(0,0,0,.08);
+      border-radius:14px;
+      padding:10px;
+      background:#fafafa;
+    }
+
+    .noteRow{
+      display:grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap:6px;
+      margin-bottom:8px;
+    }
+    .noteCell{
+      border-radius:10px;
+      border:1px solid rgba(0,0,0,.10);
+      background:#fff;
+      padding:8px 6px;
+      font-family:var(--mono);
+      font-size:12px;
+      text-align:center;
+      outline:none;
+    }
+    .noteCell.hl{
+      background:var(--beatYellow);
+      border-color:rgba(0,0,0,.18);
+    }
+
+    .lyricRow{
+      display:flex;
+      gap:8px;
+      align-items:stretch;
+      margin-bottom:10px;
+    }
+    textarea.lyrics{
+      flex:1;
+      resize:vertical;
+      min-height:54px;
+      max-height:180px;
+      padding:10px;
+      border-radius:12px;
+      border:1px solid rgba(0,0,0,.10);
+      font-size:14px;
+      outline:none;
+      background:#fff;
+    }
+
+    /* 4 beats box */
+    .beatRow{
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap:8px;
+    }
+    .beatBox{
+      border-radius:14px;
+      padding:10px 10px 8px;
+      border:1px solid rgba(0,0,0,.10);
+      background:color-mix(in srgb, var(--accent) 25%, #fff 75%);
+    }
+    .beatBox.b24{
+      background:color-mix(in srgb, var(--beat24) 55%, #fff 45%);
+    }
+    .beatBox.hl{
+      outline:3px solid rgba(255, 213, 74, .85);
+      box-shadow:0 0 0 2px rgba(255, 213, 74, .25);
+    }
+    .beatTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:8px;
+    }
+    .beatTop .bNum{
+      font-weight:1000;
+      font-size:12px;
+      opacity:.85;
+    }
+    .beatTop .chord{
+      font-family:var(--mono);
+      font-weight:900;
+      font-size:12px;
+      padding:4px 6px;
+      border-radius:10px;
+      background:rgba(255,255,255,.75);
+      border:1px solid rgba(0,0,0,.08);
+      min-width:56px;
+      text-align:center;
+    }
+
+    /* syllable row under each line */
+    .syllRow{
+      display:grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap:6px;
+      margin-top:10px;
+    }
+    .syllCell{
+      border-radius:10px;
+      border:1px solid rgba(0,0,0,.10);
+      padding:7px 6px;
+      font-size:12px;
+      background:#fff;
+      text-align:center;
+      min-height:30px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      line-height:1.1;
+      word-break:break-word;
+    }
+    .syllCell.hl{
+      background:var(--beatYellow);
+      border-color:rgba(0,0,0,.18);
+    }
+
+    .footerBar{
+      position:fixed;
+      left:0;
+      right:0;
+      bottom:0;
+      z-index:60;
+      background:rgba(233,233,234,.92);
+      backdrop-filter: blur(10px);
+      border-top:1px solid rgba(0,0,0,.08);
+      padding:10px 12px;
+    }
+    .footerInner{
+      max-width:1100px;
+      margin:0 auto;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+    .status{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .spacer{ flex:1 1 auto; }
+
+    .danger{
+      color:#b91c1c;
+      font-weight:900;
+    }
+
+    @media (max-width:560px){
+      .field{ min-width: 46%; }
+      .noteRow, .syllRow{ gap:5px; }
+      .noteCell{ padding:7px 4px; font-size:11px; }
+      .beatBox{ padding:9px 9px 7px; }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="topRow">
+      <div class="brand">
+        <h1>Song Rider Pro</h1>
+        <div class="sub">Plan chords • notes • syllables • lyrics</div>
+      </div>
+
+      <div class="headshotWrap" id="headshotWrap" title="Eyes blink to the beat">
+        <img src="headshot.png" alt="Headshot" />
+        <div class="eye left"></div>
+        <div class="eye right"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel">
+      <!-- OPEN -->
+      <div class="panelOpen">
+        <div class="row">
+          <div class="field">
+            <label>Project</label>
+            <select id="projectSelect"></select>
+          </div>
+
+          <div class="field">
+            <label>Auto-split syllables</label>
+            <div class="toggleGroup">
+              <button class="pill" id="splitOff">OFF (manual “/”)</button>
+              <button class="pill" id="splitOn">ON (auto)</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>BPM</label>
+            <input id="bpmInput" type="number" min="40" max="220" step="1" value="95" />
+          </div>
+
+          <div class="field">
+            <label>Key (auto)</label>
+            <input id="keyOutput" type="text" readonly value="—" />
+          </div>
+
+          <div class="field">
+            <label>Capo (0 = none)</label>
+            <input id="capoInput" type="number" min="0" max="12" step="1" value="0" />
+          </div>
+        </div>
+
+        <div class="miniBar">
+          <div class="toggleGroup">
+            <span style="font-size:12px;color:var(--muted);font-weight:900;">Instrument:</span>
+            <button class="pill" id="instAcoustic">Guitar 1 (Acoustic)</button>
+            <button class="pill" id="instElectric">Guitar 2 (Electric)</button>
+            <button class="pill" id="instPiano">Piano</button>
+          </div>
+
+          <div class="spacer"></div>
+
+          <button class="btn secondary small" id="collapseBtn">Hide</button>
+        </div>
+      </div>
+
+      <!-- CLOSED (shows only drums + record + show) -->
+      <div class="panelClosed">
+        <div class="toggleGroup">
+          <span style="font-size:12px;color:var(--muted);font-weight:900;">Drums:</span>
+          <button class="pill" id="drumRock2">Rock</button>
+          <button class="pill" id="drumHardRock2">Hard Rock</button>
+          <button class="pill" id="drumPop2">Pop</button>
+          <button class="pill" id="drumRap2">Rap</button>
+          <button class="btn small" id="playStopBtn2">Play</button>
+        </div>
+
+        <div class="toggleGroup">
+          <button class="btn warn small" id="recordBtn2">Record</button>
+          <button class="btn secondary small" id="showBtn">Show</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Always-visible drums/record row (when OPEN too) -->
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div class="toggleGroup">
+        <span style="font-size:12px;color:var(--muted);font-weight:900;">Drums:</span>
+        <button class="pill" id="drumRock">Rock</button>
+        <button class="pill" id="drumHardRock">Hard Rock</button>
+        <button class="pill" id="drumPop">Pop</button>
+        <button class="pill" id="drumRap">Rap</button>
+        <button class="btn small" id="playStopBtn">Play</button>
+      </div>
+
+      <div class="toggleGroup">
+        <button class="btn warn small" id="recordBtn">Record</button>
+        <button class="btn secondary small" id="stopRecordBtn" disabled>Stop</button>
+        <a class="btn secondary small" id="downloadLink" style="display:none;text-decoration:none;" download>Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="tabs" id="tabs"></div>
+
+    <div class="pageTitle">
+      <h2 id="pageHeading">Full</h2>
+      <div class="hint" id="pageHint">Full editor auto-populates section pages.</div>
+    </div>
+
+    <div id="editorRoot"></div>
+  </main>
+
+  <div class="footerBar">
+    <div class="footerInner">
+      <div class="status" id="status">Ready.</div>
+      <div class="spacer"></div>
+      <div class="status">Tip: Manual syllables use <span class="danger">/</span> (e.g., “ste/reo/ty/pi/cal”).</div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+            </html>
