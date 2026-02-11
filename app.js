@@ -351,7 +351,7 @@ function renderFullView(){
       (line.notes||Array(8).fill("Not")).forEach((n)=>{
         const inp = document.createElement("input");
         inp.className="noteCell";
-        inp.value = n || "Not";
+        inp.value = notes[i] ?? "";
         inp.readOnly = true;
         notesRow.appendChild(inp);
       });
