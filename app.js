@@ -1,4 +1,4 @@
-/* Song Rider Pro - app.js (FULL REPLACE v11) */
+/* Song Rider Pro - app.js (FULL REPLACE v12) */
 (function(){
   "use strict";
 
@@ -21,6 +21,7 @@
 
     var togglePanelBtn=$("#togglePanelBtn");
     var panelBody=$("#panelBody");
+    var miniBar=$("#miniBar");
 
     var autoSplitBtn=$("#autoSplitBtn");
     var bpmInput=$("#bpmInput");
@@ -39,13 +40,17 @@
     var autoPlayBtn=$("#autoPlayBtn");
     var recordBtn=$("#recordBtn");
 
+    // mini bar mirrors
+    var mRock=$("#mRock");
+    var mHardRock=$("#mHardRock");
+    var mPop=$("#mPop");
+    var mRap=$("#mRap");
+    var mScrollBtn=$("#mScrollBtn");
+    var mRecordBtn=$("#mRecordBtn");
+
     var sortSelect=$("#sortSelect");
     var projectSelect=$("#projectSelect");
     var renameProjectBtn=$("#renameProjectBtn");
-
-    var eyeX1=$("#eyeX1");
-    var eyeX2=$("#eyeX2");
-    var eyeY=$("#eyeY");
 
     var recordingsList=$("#recordingsList");
 
@@ -71,23 +76,9 @@
       setTimeout(function(){ headshotWrap.classList.remove("blink"); }, 80);
     }
 
-    function applyEyeVars(){
-      var r=document.documentElement;
-      var x1=Number(eyeX1.value)||18;
-      var x2=Number(eyeX2.value)||38;
-      var y =Number(eyeY.value)||20;
-      r.style.setProperty("--eyeX1", x1+"px");
-      r.style.setProperty("--eyeX2", x2+"px");
-      r.style.setProperty("--eyeY",  y+"px");
-      saveAll();
-    }
-    if(eyeX1){ eyeX1.addEventListener("change", applyEyeVars); }
-    if(eyeX2){ eyeX2.addEventListener("change", applyEyeVars); }
-    if(eyeY){  eyeY.addEventListener("change", applyEyeVars); }
-
     if(headshotImg){
       headshotImg.addEventListener("error", function(){
-        headshotImg.src = "headshot.png?v=11";
+        headshotImg.src = "headshot.png?v=12";
       });
     }
 
@@ -208,7 +199,7 @@
     }
 
     /**********************
-     * NEW Projects model
+     * Projects model
      **********************/
     function makeProjectId(){
       return "p_"+Date.now().toString(36)+"_"+Math.floor(Math.random()*1e6).toString(36);
@@ -223,12 +214,9 @@
      **********************/
     var state={
       pageId:"full",
-
-      // projects: [{id,name,updatedAt}]
       projects:[],
       projectId:null,
       dataByProject:{},
-
       sortMode:"az",
 
       autoSplit:false,
@@ -240,19 +228,13 @@
       playing:false,
       tickIndex:0,
 
-      // play mode
       autoPlay:false,
-      playQueue:[],   // [{sectionId, idx}]
+      playQueue:[],
       playPos:0,
 
-      // full editor collapse
       fullPasteCollapsed:false,
 
-      // rhyme
-      activeLyricEl:null,
-
-      // eye vars
-      eyeVars:{ x1:18, x2:38, y:20 }
+      activeLyricEl:null
     };
 
     function getProjectMeta(){
@@ -261,7 +243,6 @@
     }
     function getProject(){
       if(!state.projectId){
-        // create first project
         var id=makeProjectId();
         state.projects=[{id:id, name:"My Song", updatedAt:Date.now()}];
         state.projectId=id;
@@ -281,55 +262,10 @@
     }
 
     /**********************
-     * Migration from old A/B/C projects
-     **********************/
-    function migrateOld(){
-      var oldData=lsGet("dataByProject", null);
-      var oldNames=lsGet("projectNames", null);
-      var oldState=lsGet("state", null);
-
-      // If new projects already exist, do nothing
-      var already=lsGet("v11_projects", null);
-      if(already) return;
-
-      if(oldData && typeof oldData==="object" && Object.keys(oldData).length){
-        // convert letter keys into projects
-        var keys=Object.keys(oldData);
-        var projects=[];
-        keys.forEach(function(k){
-          var d=oldData[k];
-          if(!d || typeof d!=="object") return;
-          // accept single-letter legacy
-          if(/^[A-Z]$/.test(k)){
-            var id=makeProjectId();
-            var nm=(oldNames && oldNames[k]) ? oldNames[k] : ("Project "+k);
-            projects.push({id:id, name:nm, updatedAt:(d.updatedAt||Date.now())});
-            state.dataByProject[id]=d;
-          }
-        });
-        if(projects.length){
-          state.projects=projects;
-          // choose previously selected letter if possible
-          if(oldState && oldState.projectId && /^[A-Z]$/.test(oldState.projectId)){
-            var wanted="Project "+oldState.projectId;
-            var pick=state.projects.find(function(p){ return p.name===wanted; }) || state.projects[0];
-            state.projectId=pick.id;
-          }else{
-            state.projectId=state.projects[0].id;
-          }
-          lsSet("v11_projects", true);
-          return;
-        }
-      }
-      // mark migration done anyway
-      lsSet("v11_projects", true);
-    }
-
-    /**********************
      * Save / load
      **********************/
     function saveAll(){
-      lsSet("state_v11", {
+      lsSet("state_v12", {
         pageId:state.pageId,
         projectId:state.projectId,
         projects:state.projects,
@@ -340,39 +276,33 @@
         instrument:state.instrument,
         drumStyle:state.drumStyle,
         autoPlay:state.autoPlay,
-        fullPasteCollapsed:state.fullPasteCollapsed,
-        eyeVars:state.eyeVars
+        fullPasteCollapsed:state.fullPasteCollapsed
       });
-      lsSet("dataByProject_v11", state.dataByProject);
+      lsSet("dataByProject_v12", state.dataByProject);
     }
     function loadAll(){
-      migrateOld();
+      var saved=lsGet("state_v12", null);
+      var data=lsGet("dataByProject_v12", null);
 
-      var saved=lsGet("state_v11", null);
-      var data=lsGet("dataByProject_v11", null);
+      // migrate forward from v11 if present
+      if(!saved){
+        var s11=lsGet("state_v11", null);
+        var d11=lsGet("dataByProject_v11", null);
+        if(s11) saved=s11;
+        if(d11) data=d11;
+      }
 
       if(data && typeof data==="object") state.dataByProject=data;
       if(saved && typeof saved==="object"){
         for(var k in saved) state[k]=saved[k];
       }
 
-      // safety
       if(!Array.isArray(state.projects)) state.projects=[];
       if(!state.projectId && state.projects.length) state.projectId=state.projects[0].id;
-      getProject(); // ensure exists
 
+      getProject();
       syncMetaFromProject();
-
-      // restore eye vars
-      if(state.eyeVars){
-        eyeX1.value=state.eyeVars.x1||18;
-        eyeX2.value=state.eyeVars.x2||38;
-        eyeY.value=state.eyeVars.y||20;
-        applyEyeVars();
-      }
-
-      // restore autoPlay btn
-      setAutoPlayBtn();
+      setScrollBtn();
     }
 
     function syncMetaFromProject(){
@@ -404,9 +334,15 @@
       autoSplitBtn.classList.toggle("active", state.autoSplit);
       autoSplitBtn.textContent = state.autoSplit ? "AutoSplit: ON" : "AutoSplit: OFF";
     }
-    function setAutoPlayBtn(){
-      autoPlayBtn.classList.toggle("active", state.autoPlay);
-      autoPlayBtn.textContent = state.autoPlay ? "AutoScroll: ON" : "AutoScroll: OFF";
+    function setScrollBtn(){
+      // main
+      autoPlayBtn.classList.toggle("on", state.autoPlay);
+      autoPlayBtn.textContent="Scroll";
+      // mini
+      if(mScrollBtn){
+        mScrollBtn.classList.toggle("on", state.autoPlay);
+        mScrollBtn.textContent="Scroll";
+      }
     }
     function setInstrumentButtons(){
       instAcoustic.classList.toggle("active", state.instrument==="acoustic");
@@ -418,6 +354,13 @@
       drumHardRock.classList.toggle("active", state.drumStyle==="hardrock");
       drumPop.classList.toggle("active", state.drumStyle==="pop");
       drumRap.classList.toggle("active", state.drumStyle==="rap");
+
+      if(mRock){
+        mRock.classList.toggle("active", state.drumStyle==="rock");
+        mHardRock.classList.toggle("active", state.drumStyle==="hardrock");
+        mPop.classList.toggle("active", state.drumStyle==="pop");
+        mRap.classList.toggle("active", state.drumStyle==="rap");
+      }
     }
 
     /**********************
@@ -472,7 +415,7 @@
     }
 
     /**********************
-     * Notes transpose + key detect (unchanged from v10)
+     * Notes transpose + key detect
      **********************/
     var SHARP=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
     var FLAT =["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
@@ -550,11 +493,11 @@
       }
       var total=hist.reduce(function(a,b){return a+b;},0);
       if(total<3) return "—";
-      return keyFromHistogram(hist)+" (auto)";
+      return keyFromHistogram(hist); // ✅ no "(auto)"
     }
 
     /**********************
-     * Full parsing
+     * Full parsing (apply only on button / blur to prevent keyboard collapse)
      **********************/
     var HEADER_TO_ID = {
       "VERSE 1":"v1","CHORUS 1":"c1","VERSE 2":"v2","CHORUS 2":"c2",
@@ -653,7 +596,6 @@
     function buildProjectSelect(){
       projectSelect.innerHTML="";
       var arr=sortedProjects();
-
       arr.forEach(function(p){
         var opt=document.createElement("option");
         opt.value=p.id;
@@ -670,17 +612,22 @@
       sortSelect.value=state.sortMode;
     }
 
+    // ✅ preview container for full page (so we can update without re-rendering textarea)
+    var fullPreviewMount=null;
+
     function render(){
       buildTabs();
       buildProjectSelect();
       setAutoSplitButton();
       setInstrumentButtons();
       setDrumButtons();
-      setAutoPlayBtn();
+      setScrollBtn();
 
       keyOutput.value = computeKey();
 
       editorRoot.innerHTML="";
+      fullPreviewMount=null;
+
       var header=document.createElement("div");
       header.className="sheetHeader";
       var h2=document.createElement("h2");
@@ -690,8 +637,7 @@
       var name="Full";
       for(var i=0;i<PAGES.length;i++) if(PAGES[i].id===state.pageId) name=PAGES[i].name;
       h2.textContent=name;
-
-      hint.textContent = (state.pageId==="full") ? "Full page + preview. Collapse paste area when practicing." : "";
+      hint.textContent = (state.pageId==="full") ? "" : "";
 
       header.appendChild(h2);
       header.appendChild(hint);
@@ -712,8 +658,14 @@
       var wrap=document.createElement("div");
       wrap.className="fullBoxWrap";
 
-      var collapseRow=document.createElement("div");
-      collapseRow.className="collapseRow";
+      // ✅ Paste area collapse + Apply button
+      var topBar=document.createElement("div");
+      topBar.style.display="flex";
+      topBar.style.gap="8px";
+      topBar.style.justifyContent="flex-end";
+      topBar.style.marginBottom="8px";
+      topBar.style.flexWrap="wrap";
+
       var collapseBtn=document.createElement("button");
       collapseBtn.className="btn secondary";
       collapseBtn.textContent = state.fullPasteCollapsed ? "Show Paste Area" : "Hide Paste Area";
@@ -722,8 +674,20 @@
         saveAll();
         render();
       });
-      collapseRow.appendChild(collapseBtn);
-      wrap.appendChild(collapseRow);
+
+      var applyBtn=document.createElement("button");
+      applyBtn.className="btn secondary";
+      applyBtn.textContent="Apply to Sections";
+      applyBtn.addEventListener("click", function(){
+        applyFullTextToSections(proj.fullText||"");
+        keyOutput.value=computeKey();
+        updateFullPreviewOnly();
+        setStatus("Applied → sections populated.");
+      });
+
+      topBar.appendChild(collapseBtn);
+      topBar.appendChild(applyBtn);
+      wrap.appendChild(topBar);
 
       if(!state.fullPasteCollapsed){
         var ta=document.createElement("textarea");
@@ -738,15 +702,19 @@ CHORUS 1
 @ F | | Am | | G | |
 ...`;
 
-        var timer=null;
+        // ✅ IMPORTANT: DO NOT RERENDER WHILE TYPING (prevents keyboard collapsing)
         ta.addEventListener("input", function(){
-          if(timer) clearTimeout(timer);
-          timer=setTimeout(function(){
-            applyFullTextToSections(ta.value);
-            keyOutput.value = computeKey();
-            setStatus("Full updated → sections populated.");
-            render();
-          }, 250);
+          proj.fullText = ta.value;
+          touchProject();
+          setStatus("Typing… (tap Apply to populate sections)");
+        });
+
+        // optional: apply on blur
+        ta.addEventListener("blur", function(){
+          applyFullTextToSections(proj.fullText||"");
+          keyOutput.value=computeKey();
+          updateFullPreviewOnly();
+          setStatus("Applied on blur.");
         });
 
         var help=document.createElement("div");
@@ -762,7 +730,19 @@ CHORUS 1
       previewTitle.textContent="Full Sheet Preview (auto from your cards):";
       wrap.appendChild(previewTitle);
 
-      // render preview lines (non-empty only)
+      fullPreviewMount=document.createElement("div");
+      wrap.appendChild(fullPreviewMount);
+
+      updateFullPreviewOnly();
+
+      return wrap;
+    }
+
+    function updateFullPreviewOnly(){
+      if(!fullPreviewMount) return;
+      var proj=getProject();
+      fullPreviewMount.innerHTML="";
+
       for(var s=0;s<SECTIONS.length;s++){
         var sid=SECTIONS[s].id;
         var sec=proj.sections[sid];
@@ -770,7 +750,7 @@ CHORUS 1
         var sh=document.createElement("div");
         sh.className="sectionHeader";
         sh.textContent=SECTIONS[s].title;
-        wrap.appendChild(sh);
+        fullPreviewMount.appendChild(sh);
 
         for(var i=0;i<sec.cards.length;i++){
           var c=sec.cards[i];
@@ -780,10 +760,9 @@ CHORUS 1
           cardEl.dataset.section=sid;
           cardEl.dataset.idx=String(i);
           cardEl.appendChild(renderPreviewLine(sid, i, c));
-          wrap.appendChild(cardEl);
+          fullPreviewMount.appendChild(cardEl);
         }
       }
-      return wrap;
     }
 
     function renderPreviewLine(sectionId, idx, card){
@@ -903,7 +882,7 @@ CHORUS 1
       timingRow.className="timingRow";
       for(var j=0;j<4;j++){
         var cell=document.createElement("div");
-        cell.className="timingCell"+((j===1||j===3)?" backbeat":""); // ✅ 2&4 orange
+        cell.className="timingCell"+((j===1||j===3)?" backbeat":"");
         cell.textContent = t.slots[j] || "";
         cell.dataset.section=sectionId;
         cell.dataset.idx=String(idx);
@@ -930,13 +909,18 @@ CHORUS 1
     }
 
     /**********************
-     * Collapsible panel
+     * Panel hide/show behavior (tabs hidden, miniBar shown)
      **********************/
     var panelHidden=false;
+    function applyPanelMode(){
+      panelBody.classList.toggle("hidden", panelHidden);
+      tabsEl.classList.toggle("hidden", panelHidden);
+      miniBar.classList.toggle("show", panelHidden);
+      togglePanelBtn.textContent = panelHidden ? "Show" : "Hide";
+    }
     togglePanelBtn.addEventListener("click", function(){
       panelHidden=!panelHidden;
-      panelBody.classList.toggle("hidden", panelHidden);
-      togglePanelBtn.textContent = panelHidden ? "Show" : "Hide";
+      applyPanelMode();
     });
 
     /**********************
@@ -968,13 +952,15 @@ CHORUS 1
     instElectric.addEventListener("click", function(){ state.instrument="electric"; setInstrumentButtons(); syncMetaToProject(); });
     instPiano.addEventListener("click", function(){ state.instrument="piano"; setInstrumentButtons(); syncMetaToProject(); });
 
-    autoPlayBtn.addEventListener("click", function(){
+    function toggleScroll(){
       state.autoPlay=!state.autoPlay;
-      setAutoPlayBtn();
+      setScrollBtn();
       buildPlayQueue();
       saveAll();
-      setStatus(state.autoPlay ? "AutoScroll Play ON (plays line-by-line)." : "AutoScroll Play OFF.");
-    });
+      setStatus(state.autoPlay ? "Scroll ON (plays line-by-line)." : "Scroll OFF.");
+    }
+    autoPlayBtn.addEventListener("click", toggleScroll);
+    if(mScrollBtn) mScrollBtn.addEventListener("click", toggleScroll);
 
     sortSelect.addEventListener("change", function(){
       state.sortMode=sortSelect.value;
@@ -1019,7 +1005,7 @@ CHORUS 1
     });
 
     /**********************
-     * Rhymes (FIXED: previous line in SAME section)
+     * Rhymes (same as v11)
      **********************/
     function showRhymes(){
       rhymeDock.style.display="block";
@@ -1043,9 +1029,7 @@ CHORUS 1
     var RHYME_SETS = {
       "wife": ["life","strife","knife","five"],
       "dear": ["near","fear","clear","cheer","steer","year","sincere","here"],
-      "love": ["dove","glove","above"],
-      "day": ["way","say","play","stay","gray","okay","away"],
-      "mind": ["grind","shine","time","line","fine","mine","kind"]
+      "love": ["dove","glove","above"]
     };
 
     function buildWordBank(){
@@ -1104,8 +1088,6 @@ CHORUS 1
       var sec=el.dataset.section;
       var idx=Number(el.dataset.idx);
       if(!sec || !isFinite(idx)) return "";
-
-      // previous card in same section
       var prevIdx=idx-1;
       if(prevIdx<0) return "";
       var proj=getProject();
@@ -1203,7 +1185,7 @@ CHORUS 1
     }
 
     /**********************
-     * DRUMS + AUDIO (improved instruments + line-by-line notes)
+     * DRUMS + AUDIO (✅ sustain until next note)
      **********************/
     var audioCtx=null;
     var drumTimer=null;
@@ -1213,7 +1195,6 @@ CHORUS 1
       audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     }
 
-    // Helpers
     function noiseBuffer(seconds){
       var len=Math.floor(audioCtx.sampleRate*seconds);
       var buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate);
@@ -1283,7 +1264,6 @@ CHORUS 1
           hat:[1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]
         };
       }
-      // rap
       return {
         kick:[1,0,0,0, 0,1,0,0, 1,0,0,1, 0,0,1,0],
         snare:[0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
@@ -1291,7 +1271,7 @@ CHORUS 1
       };
     }
 
-    // Note root -> freq (simple)
+    // Note -> freq (root only)
     var NOTE_TO_SEMI=(function(){
       var map={};
       var SH=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
@@ -1311,43 +1291,37 @@ CHORUS 1
       return 440*Math.pow(2,(midi-69)/12);
     }
 
-    // HIGHLIGHTS
+    // highlights
     function clearHighlights(){
       document.querySelectorAll(".noteCell.hl").forEach(function(el){ el.classList.remove("hl"); });
       document.querySelectorAll(".timingCell.hl").forEach(function(el){ el.classList.remove("hl"); });
     }
     function highlightActiveLine(sectionId, idx, eighthIndex, beatIndex){
       clearHighlights();
-
-      // highlight within active line only (cleaner)
       document.querySelectorAll('.noteCell[data-section="'+sectionId+'"][data-idx="'+String(idx)+'"][data-ni="'+String(eighthIndex)+'"]')
         .forEach(function(el){ el.classList.add("hl"); });
-
       document.querySelectorAll('.timingCell[data-section="'+sectionId+'"][data-idx="'+String(idx)+'"][data-bi="'+String(beatIndex)+'"]')
         .forEach(function(el){ el.classList.add("hl"); });
     }
 
     /**********************
-     * Instruments (improved)
+     * Instruments (same as v11)
      **********************/
-    // Karplus-Strong plucked string
     function pluckString(freq, t, duration, brightness){
       var sr=audioCtx.sampleRate;
       var period=Math.max(2, Math.floor(sr / Math.max(40, freq)));
-      var noiseLen=period;
-      var buf=audioCtx.createBuffer(1, noiseLen, sr);
+      var buf=audioCtx.createBuffer(1, period, sr);
       var d=buf.getChannelData(0);
-      for(var i=0;i<noiseLen;i++) d[i]=(Math.random()*2-1);
+      for(var i=0;i<period;i++) d[i]=(Math.random()*2-1);
 
       var src=audioCtx.createBufferSource();
-      src.buffer=buf;
-      src.loop=true;
+      src.buffer=buf; src.loop=true;
 
       var delay=audioCtx.createDelay();
       delay.delayTime.setValueAtTime(period/sr, t);
 
       var fb=audioCtx.createGain();
-      fb.gain.setValueAtTime(0.995, t); // sustain
+      fb.gain.setValueAtTime(0.995, t);
 
       var lp=audioCtx.createBiquadFilter();
       lp.type="lowpass";
@@ -1375,7 +1349,6 @@ CHORUS 1
       o.type="sawtooth";
       o.frequency.setValueAtTime(freq, t);
 
-      // distortion curve
       var n=2048, curve=new Float32Array(n);
       for(var i=0;i<n;i++){
         var x=(i*2/n)-1;
@@ -1396,7 +1369,6 @@ CHORUS 1
     }
 
     function playPiano(freq, t, duration){
-      // hammer noise
       var src=audioCtx.createBufferSource();
       src.buffer=noiseBuffer(0.03);
       var hp=audioCtx.createBiquadFilter();
@@ -1437,7 +1409,7 @@ CHORUS 1
     }
 
     /**********************
-     * Drums engine + line-by-line note driver
+     * Drums engine + sustained note driver
      **********************/
     function stopDrums(){
       state.playing=false;
@@ -1451,17 +1423,15 @@ CHORUS 1
     }
 
     function stepMs(){ return (60/state.bpm)*1000/4; } // 16ths
+    function stepSec(){ return (60/state.bpm)/4; }      // 16ths seconds
 
     function currentLineRef(){
-      // if autoPlay and queue built, use queue; else use current page section + first non-empty card
       if(state.autoPlay && state.playQueue.length){
         return state.playQueue[state.playPos] || state.playQueue[0];
       }
-      // fallback: current section page
       if(state.pageId!=="full"){
         return {sectionId:state.pageId, idx:0};
       }
-      // full page fallback: first in queue
       if(state.playQueue.length) return state.playQueue[0];
       return {sectionId:"v1", idx:0};
     }
@@ -1470,6 +1440,17 @@ CHORUS 1
       if(!state.autoPlay || !state.playQueue.length) return;
       state.playPos++;
       if(state.playPos>=state.playQueue.length) state.playPos=0;
+    }
+
+    // ✅ duration until next non-empty note (in eighths)
+    function durationUntilNextNote(ref, startEighth){
+      // check next eighth slots in same line
+      for(var e=startEighth+1; e<8; e++){
+        var el=document.querySelector('.noteCell[data-section="'+ref.sectionId+'"][data-idx="'+String(ref.idx)+'"][data-ni="'+String(e)+'"]');
+        if(el && String(el.value||"").trim()) return (e - startEighth);
+      }
+      // none found → hold to end of bar
+      return (8 - startEighth);
     }
 
     function startDrums(style){
@@ -1494,11 +1475,10 @@ CHORUS 1
         var now=audioCtx.currentTime;
         var step=state.tickIndex % 16;
 
-        // line switch on bar boundary
         if(step===0){
           if(state.tickIndex>0) advanceLine();
-          var ref=currentLineRef();
-          markActiveLine(ref.sectionId, ref.idx);
+          var ref0=currentLineRef();
+          markActiveLine(ref0.sectionId, ref0.idx);
         }
 
         blinkHead();
@@ -1517,22 +1497,23 @@ CHORUS 1
         var ref=currentLineRef();
         highlightActiveLine(ref.sectionId, ref.idx, eighthIndex, beatIndex);
 
-        // play note on each eighth boundary
+        // ✅ play note ONLY when this cell is non-empty; duration extends until next note
         if(step % 2 === 0){
           var noteEl=document.querySelector('.noteCell[data-section="'+ref.sectionId+'"][data-idx="'+String(ref.idx)+'"][data-ni="'+String(eighthIndex)+'"]');
           if(noteEl){
             var token=String(noteEl.value||"").trim();
-            var f=noteToFreq(token);
-            if(f){
-              // duration until next eighth
-              var dur = (60/state.bpm) / 2; // seconds (eighth note)
-              playInstrument(f, now, Math.max(0.15, dur*0.95));
+            if(token){
+              var f=noteToFreq(token);
+              if(f){
+                var eighths=durationUntilNextNote(ref, eighthIndex);
+                var dur = Math.max(0.18, (stepSec()*2) * eighths * 0.98); // eighth = 2 steps
+                playInstrument(f, now, dur);
+              }
             }
           }
         }
 
         state.tickIndex++;
-
       }, stepMs());
 
       setStatus("Playing: "+style.toUpperCase()+" (tap style again to stop)");
@@ -1560,8 +1541,15 @@ CHORUS 1
     drumPop.addEventListener("click", function(){ toggleDrum("pop"); });
     drumRap.addEventListener("click", function(){ toggleDrum("rap"); });
 
+    if(mRock){
+      mRock.addEventListener("click", function(){ toggleDrum("rock"); });
+      mHardRock.addEventListener("click", function(){ toggleDrum("hardrock"); });
+      mPop.addEventListener("click", function(){ toggleDrum("pop"); });
+      mRap.addEventListener("click", function(){ toggleDrum("rap"); });
+    }
+
     /**********************
-     * Recording (single button toggle)
+     * Recording (mirrored button)
      **********************/
     var mediaRecorder=null;
     var chunks=[];
@@ -1578,6 +1566,7 @@ CHORUS 1
         mediaRecorder.onstop=async function(){
           recording=false;
           recordBtn.textContent="Record";
+          if(mRecordBtn) mRecordBtn.textContent="Record";
 
           var blob=new Blob(chunks, { type:"audio/webm" });
           var id="rec_"+Date.now();
@@ -1592,6 +1581,7 @@ CHORUS 1
         mediaRecorder.start();
         recording=true;
         recordBtn.textContent="Stop";
+        if(mRecordBtn) mRecordBtn.textContent="Stop";
         setStatus("Recording…");
       }catch(e){
         alert("Mic permission needed to record.");
@@ -1606,11 +1596,13 @@ CHORUS 1
       }catch(e){}
     }
 
-    recordBtn.addEventListener("click", function(){
+    function toggleRecord(){
       try{ ensureAudio(); if(audioCtx && audioCtx.state==="suspended") audioCtx.resume(); }catch(e){}
       if(!recording) startRecording();
       else stopRecording();
-    });
+    }
+    recordBtn.addEventListener("click", toggleRecord);
+    if(mRecordBtn) mRecordBtn.addEventListener("click", toggleRecord);
 
     async function renderRecordings(){
       recordingsList.innerHTML="";
@@ -1637,7 +1629,6 @@ CHORUS 1
         row.style.padding="10px";
         row.style.background="#fff";
 
-        // ✅ keep timestamp but cleaner; you can rename later if you want
         var title=document.createElement("div");
         title.style.fontWeight="1100";
         title.style.fontSize="13px";
@@ -1695,6 +1686,8 @@ CHORUS 1
     loadAll();
     buildPlayQueue();
     render();
+    applyPanelMode = applyPanelMode || function(){};
+    applyPanelMode();
     setStatus("Ready.");
     setBoot("JS running ✓ (editor rendered)", true);
 
