@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#e9e9ea" />
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=10" />
+  <link rel="manifest" href="./manifest.webmanifest?v=11" />
 
   <style>
     :root{
@@ -17,13 +17,20 @@
       --radius:16px;
 
       --beatHL:#ffd54a;
+      --dangerRed:#dc2626;
 
-      --dangerRed:#dc2626; /* use same red for record */
-      --warnYellow:#f59e0b;
-      --safeGreen:#16a34a;
+      /* ✅ your requested colors */
+      --noteBlue:#e6f2ff;     /* note boxes */
+      --lyricPink:#ffe4ee;    /* lyric boxes */
+      --backbeatOrange:#ffe9c7; /* timing boxes (2&4) */
 
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+
+      /* ✅ eye calibration defaults (adjustable in UI now) */
+      --eyeX1: 18px;
+      --eyeX2: 38px;
+      --eyeY: 20px;
     }
     *{ box-sizing:border-box; }
     body{ margin:0; font-family:var(--sans); background:var(--bg); color:var(--ink); }
@@ -38,7 +45,7 @@
     .brand h1{ margin:0; font-size:20px; letter-spacing:.2px; }
     .brand .sub{ margin-top:2px; font-size:12px; color:var(--muted); font-weight:900; }
 
-    /* Floating headshot (no circle/border) */
+    /* Floating headshot */
     .headshotFloat{
       position:fixed;
       top:10px; right:10px;
@@ -48,19 +55,13 @@
     }
     .headshotFloat img{
       width:100%; height:100%;
-      object-fit:contain;       /* ✅ prevents top/bottom crop */
+      object-fit:contain;
       border-radius:999px;
       opacity:.98;
       filter: drop-shadow(0 10px 18px rgba(0,0,0,.20));
       background:transparent;
     }
 
-    /* tweak these if needed */
-    :root{
-      --eyeX1: 19px;
-      --eyeX2: 36px;
-      --eyeY: 23px;
-    }
     .eye{
       position:absolute;
       width:10px; height:10px;
@@ -107,11 +108,7 @@
       font-weight:1100; font-size:12px; letter-spacing:.3px;
       color:#111;
     }
-    #panelBody{
-      max-height:26vh;
-      overflow:auto;
-      -webkit-overflow-scrolling: touch;
-    }
+    #panelBody{ max-height:28vh; overflow:auto; -webkit-overflow-scrolling: touch; }
     #panelBody.hidden{ display:none; }
 
     .row{
@@ -119,8 +116,8 @@
       display:flex;
       gap:8px;
       align-items:center;
-      flex-wrap:nowrap; /* ✅ keep on one line */
-      overflow-x:auto;  /* if super tiny device, allow horizontal scroll */
+      flex-wrap:nowrap;
+      overflow-x:auto;
       -webkit-overflow-scrolling: touch;
     }
 
@@ -140,7 +137,7 @@
     .tinyBtn.active{ background:#111; color:#fff; border-color:#111; }
 
     .tinyField input{
-      width:74px;                 /* ✅ tightened */
+      width:74px;
       padding:8px 8px;
       border-radius:12px;
       border:1px solid rgba(0,0,0,.12);
@@ -152,7 +149,7 @@
       text-align:center;
     }
     .tinyField.key input{
-      width:140px;                /* ✅ key fits on same line */
+      width:140px;
       text-align:left;
       padding-left:10px;
     }
@@ -189,13 +186,17 @@
       color:#111;
       border:1px solid rgba(0,0,0,.12);
     }
-    .btn.rec{
-      background:var(--dangerRed); /* ✅ matches syllable red */
-    }
+    .btn.rec{ background:var(--dangerRed); }
 
+    /* ✅ Tabs: single-line horizontal scroll */
     .tabs{
-      display:flex; gap:8px; flex-wrap:wrap;
+      display:flex;
+      gap:8px;
+      flex-wrap:nowrap;
+      overflow-x:auto;
+      -webkit-overflow-scrolling: touch;
       margin:12px 0 10px;
+      padding-bottom:2px;
     }
     .tab{
       padding:10px 12px;
@@ -206,6 +207,8 @@
       user-select:none;
       font-weight:1100;
       font-size:13px;
+      flex:0 0 auto;
+      white-space:nowrap;
     }
     .tab.active{ background:#111; color:#fff; border-color:#111; }
 
@@ -247,6 +250,11 @@
       background:#fff;
       padding:10px;
     }
+    .card.activeLine{
+      outline:3px solid rgba(255,213,74,.65);
+      outline-offset:2px;
+    }
+
     .cardTop{
       display:flex; align-items:center; gap:10px;
       flex-wrap:wrap;
@@ -269,10 +277,8 @@
       border-radius:999px;
       color:#fff;
       border:1px solid rgba(0,0,0,.12);
+      background:var(--dangerRed);
     }
-    .syllPill.green{ background:var(--safeGreen); }
-    .syllPill.yellow{ background:var(--warnYellow); }
-    .syllPill.red{ background:var(--dangerRed); }
 
     .notesRow{
       display:grid;
@@ -283,7 +289,7 @@
     .noteCell{
       border-radius:10px;
       border:1px solid rgba(0,0,0,.12);
-      background:#fff;
+      background:var(--noteBlue); /* ✅ */
       padding:8px 6px;
       font-family:var(--mono);
       font-size:12px;
@@ -296,7 +302,6 @@
       border-color:rgba(0,0,0,.20);
     }
 
-    .lyricRow{ display:flex; gap:8px; align-items:stretch; margin-bottom:10px; }
     textarea.lyrics{
       width:100%;
       resize:vertical;
@@ -307,7 +312,7 @@
       border:1px solid rgba(0,0,0,.12);
       font-size:14px;
       outline:none;
-      background:#fff;
+      background:var(--lyricPink); /* ✅ */
     }
 
     .timingRow{
@@ -329,13 +334,18 @@
       line-height:1.1;
       word-break:break-word;
     }
+    .timingCell.backbeat{ background:var(--backbeatOrange); } /* ✅ beats 2 & 4 */
     .timingCell.hl{
       background:var(--beatHL);
       border-color:rgba(0,0,0,.20);
     }
 
-    /* Full page paste + preview */
+    /* Full page paste + preview + collapse */
     .fullBoxWrap{ padding:12px; }
+    .collapseRow{
+      display:flex; gap:8px; align-items:center; justify-content:flex-end;
+      margin-bottom:8px;
+    }
     textarea.fullBox{
       width:100%;
       min-height:34vh;
@@ -468,7 +478,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=10" alt="Headshot" />
+    <img id="headshotImg" src="./headshot.png?v=11" alt="Headshot" />
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -491,7 +501,7 @@
     </div>
 
     <div id="panelBody">
-      <!-- ONE LINE: AutoSplit + BPM + Capo + Key -->
+      <!-- ONE LINE: AutoSplit + BPM + Capo + Key + Instruments -->
       <div class="row">
         <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
 
@@ -504,28 +514,38 @@
         <button class="pill" id="instPiano">Piano</button>
       </div>
 
-      <!-- Drums + Record on same line -->
+      <!-- Drums + Record + AutoScroll Play -->
       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
         <button class="pill" id="drumRock">Rock</button>
         <button class="pill" id="drumHardRock">Hard Rock</button>
         <button class="pill" id="drumPop">Pop</button>
         <button class="pill" id="drumRap">Rap</button>
 
+        <button class="tinyBtn" id="autoPlayBtn">AutoScroll: OFF</button>
+
         <button class="btn rec" id="recordBtn">Record</button>
       </div>
 
-      <!-- Sort + project + edit/clear -->
+      <!-- Sort + projects + rename -->
       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
         <select id="sortSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;">
           <option value="az">A–Z</option>
           <option value="recent">Recent</option>
         </select>
 
-        <select id="projectSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;min-width:220px;">
-        </select>
+        <select id="projectSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;min-width:240px;"></select>
 
         <button class="btn secondary" id="renameProjectBtn">Edit</button>
-        <button class="btn secondary" id="clearProjectBtn">Clear</button>
+      </div>
+
+      <!-- Eye calibration (quick fix) -->
+      <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
+        <div style="font-weight:1000;color:#444;white-space:nowrap;">Eye X1</div>
+        <input id="eyeX1" type="number" style="width:70px;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);" value="18" />
+        <div style="font-weight:1000;color:#444;white-space:nowrap;">X2</div>
+        <input id="eyeX2" type="number" style="width:70px;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);" value="38" />
+        <div style="font-weight:1000;color:#444;white-space:nowrap;">Y</div>
+        <input id="eyeY" type="number" style="width:70px;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);" value="20" />
       </div>
 
       <!-- Recordings list -->
@@ -547,10 +567,8 @@
   </div>
 </main>
 
-<!-- Floating R button -->
 <div class="rBtn" id="rBtn">R</div>
 
-<!-- Rhymes window -->
 <div class="rhymeDock" id="rhymeDock">
   <div class="rhymeBox">
     <div class="rhymeTop">
@@ -568,6 +586,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=10"></script>
+<script src="./app.js?v=11"></script>
 </body>
 </html>
