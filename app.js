@@ -1,4 +1,4 @@
-/* Song Rider Pro - app.js (FULL REPLACE v14) */
+/* Song Rider Pro - app.js (FULL REPLACE v15) */
 (() => {
 "use strict";
 
@@ -42,6 +42,7 @@ const mRecordBtn = $("mRecordBtn");
 const sortSelect = $("sortSelect");
 const projectSelect = $("projectSelect");
 const renameProjectBtn = $("renameProjectBtn");
+const deleteProjectBtn = $("deleteProjectBtn");
 const recordingsList = $("recordingsList");
 
 const rBtn = $("rBtn");
@@ -62,8 +63,8 @@ let state = {
   bpm: 95,
   capo: 0,
   key: "—",
-  instrument: "Piano",      // Acoustic / Electric / Piano
-  drumStyle: "Rap",         // Rock / Hard Rock / Pop / Rap
+  instrument: "Piano",
+  drumStyle: "Rap",
   autoPlay: false,
   currentSection: "Full",
   pasteOpen: false
@@ -77,9 +78,9 @@ document.addEventListener("focusin", (e) => {
 });
 
 /* -----------------------------
-   IndexedDB (projects + recordings)
+   IndexedDB
 ------------------------------*/
-const DB_NAME = "songriderpro_db_v14";
+const DB_NAME = "songriderpro_db_v15";
 const DB_VER = 1;
 const STORE_PROJECTS = "projects";
 const STORE_RECORDINGS = "recordings";
@@ -104,7 +105,6 @@ function openDB(){
     req.onerror = () => reject(req.error);
   });
 }
-
 async function dbPut(store, obj){
   const db = await openDB();
   return new Promise((resolve,reject)=>{
@@ -143,32 +143,25 @@ async function dbDelete(store, key){
 }
 
 /* -----------------------------
-   Default project + data model
+   Default project + model
 ------------------------------*/
 function emptyLine(){
-  return {
-    notes: Array(8).fill("Not"),
-    lyrics: "",
-    timing: ["","","",""]   // 4 chunks
-  };
+  return { notes: Array(8).fill("Not"), lyrics: "", timing: ["","","",""] };
 }
 function defaultProject(){
   const sections = {};
   SECTIONS.forEach(s=>{
     sections[s] = Array.from({length: (s==="Full"? 0: 8)}, ()=>emptyLine());
   });
-  // Full is special: used for paste + preview (not a line list)
   return {
     id: "proj_"+Date.now(),
     name: "Dave song",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     sections,
-    fullPaste: "VERSE 1\n\nI love you sweet wife\n\nCHORUS 1\n\nYou are the love of my life\n",
-    // for preview sheet derived from section cards
+    fullPaste: "VERSE 1\n\nI love you sweet wife\n\nCHORUS 1\n\nYou are the love of my life\n"
   };
 }
-
 let project = null;
 
 /* -----------------------------
@@ -235,7 +228,6 @@ function syllableCount(word){
   if(!word) return 0;
   let w = String(word).toLowerCase().replace(/[^a-z']/g,"");
   if(!w) return 0;
-  // very simple heuristic
   w = w.replace(/'s$/,"");
   if(w.length<=3) return 1;
   const vowels = w.match(/[aeiouy]+/g);
@@ -244,21 +236,21 @@ function syllableCount(word){
   if(w.endsWith("le") && w.length>3) n += 1;
   return Math.max(1,n);
 }
-
+function countSyllablesInLine(text){
+  const words = String(text||"").trim().split(/\s+/).filter(Boolean);
+  return words.reduce((a,w)=>a+syllableCount(w),0);
+}
 function autosplitTiming(text){
   const words = String(text||"").trim().split(/\s+/).filter(Boolean);
   if(words.length===0) return ["","","",""];
-
   const syls = words.map(w=>syllableCount(w));
   const total = syls.reduce((a,b)=>a+b,0);
   const target = total/4;
-
   const chunks = ["","","",""];
   let ci=0, acc=0;
   for(let i=0;i<words.length;i++){
     if(ci<3 && acc + syls[i] > target && chunks[ci].trim().length>0){
-      ci++;
-      acc=0;
+      ci++; acc=0;
     }
     chunks[ci] += (chunks[ci] ? " ":"") + words[i];
     acc += syls[i];
@@ -266,9 +258,21 @@ function autosplitTiming(text){
   return chunks;
 }
 
+function renderTimingRow(timingRow, line){
+  timingRow.innerHTML = "";
+  const parts = line.timing || ["","","",""];
+  for(let i=0;i<4;i++){
+    const d = document.createElement("div");
+    d.className = "timingCell" + ((i===1 || i===3) ? " backbeat":"");
+    d.textContent = parts[i] || "";
+    timingRow.appendChild(d);
+  }
+}
+
 function renderFullView(){
   sheetTitleEl.textContent = "Full";
   sheetBodyEl.innerHTML = "";
+
   const wrap = document.createElement("div");
   wrap.className = "fullBoxWrap";
 
@@ -284,7 +288,6 @@ function renderFullView(){
   togglePaste.addEventListener("click", ()=>{
     state.pasteOpen = !state.pasteOpen;
     renderAll();
-    // keep keyboard stable: focus back if open
     setTimeout(()=>{
       if(state.pasteOpen){
         const ta = document.querySelector("textarea.fullBox");
@@ -296,9 +299,7 @@ function renderFullView(){
   const applyBtn = document.createElement("button");
   applyBtn.className="btn secondary";
   applyBtn.textContent="Apply to Sections";
-  applyBtn.addEventListener("click", ()=>{
-    applyPasteToSections();
-  });
+  applyBtn.addEventListener("click", applyPasteToSections);
 
   row.appendChild(togglePaste);
   row.appendChild(applyBtn);
@@ -317,11 +318,10 @@ function renderFullView(){
 
     const help = document.createElement("div");
     help.className="fullHelp";
-    help.textContent = 'Tip: Put section headers like "VERSE 1", "CHORUS 1", etc. Lines under each become lyric lines. (Notes stay as-is.)';
+    help.textContent = 'Tip: Put section headers like "VERSE 1", "CHORUS 1", etc. Lines under each become lyric lines.';
     wrap.appendChild(help);
   }
 
-  // Preview sheet (auto from cards)
   const previewTitle = document.createElement("div");
   previewTitle.style.marginTop="14px";
   previewTitle.style.fontWeight="1100";
@@ -340,7 +340,7 @@ function renderFullView(){
     const cards = document.createElement("div");
     cards.className="cards";
 
-    (project.sections[sec]||[]).forEach((line, idx)=>{
+    (project.sections[sec]||[]).forEach((line)=>{
       if(!String(line.lyrics||"").trim()) return;
 
       const card = document.createElement("div");
@@ -428,7 +428,7 @@ function renderSection(sec){
         line.timing = autosplitTiming(line.lyrics);
       }
       syll.textContent = "Syllables: " + countSyllablesInLine(line.lyrics);
-      renderTimingRow(timingRow, line, idx);
+      renderTimingRow(timingRow, line);
       project.updatedAt = Date.now();
       saveProjectSoon();
     });
@@ -437,28 +437,12 @@ function renderSection(sec){
     const timingRow = document.createElement("div");
     timingRow.className="timingRow";
     card.appendChild(timingRow);
-    renderTimingRow(timingRow, line, idx);
+    renderTimingRow(timingRow, line);
 
     cardsWrap.appendChild(card);
   });
 
   sheetBodyEl.appendChild(cardsWrap);
-}
-
-function renderTimingRow(timingRow, line, idx){
-  timingRow.innerHTML = "";
-  const parts = line.timing || ["","","",""];
-  for(let i=0;i<4;i++){
-    const d = document.createElement("div");
-    d.className = "timingCell" + ((i===1 || i===3) ? " backbeat":"");
-    d.textContent = parts[i] || "";
-    timingRow.appendChild(d);
-  }
-}
-
-function countSyllablesInLine(text){
-  const words = String(text||"").trim().split(/\s+/).filter(Boolean);
-  return words.reduce((a,w)=>a+syllableCount(w),0);
 }
 
 function renderAll(){
@@ -471,15 +455,12 @@ function renderAll(){
   setScrollUI();
   renderTabs();
 
-  if(state.currentSection === "Full"){
-    renderFullView();
-  }else{
-    renderSection(state.currentSection);
-  }
+  if(state.currentSection === "Full") renderFullView();
+  else renderSection(state.currentSection);
+
   renderProjectsDropdown();
   renderRecordings();
 }
-
 function renderAllSoon(){
   clearTimeout(renderAllSoon._t);
   renderAllSoon._t = setTimeout(renderAll, 50);
@@ -494,21 +475,16 @@ function applyPasteToSections(){
 
   let cur = null;
   const newMap = {};
-  SECTIONS.forEach(s=>{
-    if(s!=="Full") newMap[s] = [];
-  });
+  SECTIONS.forEach(s=>{ if(s!=="Full") newMap[s] = []; });
 
   for(const raw of lines){
-    const line = raw.trimEnd();
-    const t = line.trim();
+    const t = raw.trim();
     if(!t) continue;
 
     const upper = t.toUpperCase();
     const match = SECTIONS.find(s=>s!=="Full" && s===upper);
-    if(match){
-      cur = match;
-      continue;
-    }
+    if(match){ cur = match; continue; }
+
     if(cur){
       const obj = emptyLine();
       obj.lyrics = t;
@@ -517,7 +493,6 @@ function applyPasteToSections(){
     }
   }
 
-  // keep at least 8 lines per section so UI has room
   for(const sec of Object.keys(newMap)){
     while(newMap[sec].length < 8) newMap[sec].push(emptyLine());
     newMap[sec] = newMap[sec].slice(0, 32);
@@ -530,7 +505,7 @@ function applyPasteToSections(){
 }
 
 /* -----------------------------
-   Projects UI
+   Projects
 ------------------------------*/
 async function ensureProject(){
   const all = await dbGetAll(STORE_PROJECTS);
@@ -540,14 +515,12 @@ async function ensureProject(){
     state.projectName = project.name;
     await dbPut(STORE_PROJECTS, project);
   }else{
-    // load most recent
     all.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
     project = all[0];
     state.projectId = project.id;
     state.projectName = project.name;
   }
 }
-
 async function renderProjectsDropdown(){
   const all = await dbGetAll(STORE_PROJECTS);
   const mode = sortSelect.value || "az";
@@ -568,13 +541,8 @@ async function renderProjectsDropdown(){
     projectSelect.appendChild(opt);
   });
 
-  // ensure a selection exists
-  if(!projectSelect.value && list[0]){
-    projectSelect.value = list[0].id;
-  }
+  if(!projectSelect.value && list[0]) projectSelect.value = list[0].id;
 }
-
-/* create project if user types a new name in rename prompt */
 async function renameProject(){
   const name = prompt("Project name:", project.name || "");
   if(name===null) return;
@@ -584,6 +552,35 @@ async function renameProject(){
   state.projectName = nm;
   await dbPut(STORE_PROJECTS, project);
   renderAllSoon();
+}
+async function deleteCurrentProject(){
+  if(!project) return;
+  const ok = confirm(`Delete project "${project.name}" and all its recordings?`);
+  if(!ok) return;
+
+  // delete recordings for this project
+  const recs = await dbGetAll(STORE_RECORDINGS);
+  const mine = recs.filter(r=>r.projectId === project.id);
+  for(const r of mine){
+    await dbDelete(STORE_RECORDINGS, r.id);
+  }
+  await dbDelete(STORE_PROJECTS, project.id);
+
+  // load another project or create one
+  const all = await dbGetAll(STORE_PROJECTS);
+  if(all.length===0){
+    project = defaultProject();
+    state.projectId = project.id;
+    state.projectName = project.name;
+    await dbPut(STORE_PROJECTS, project);
+  }else{
+    all.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+    project = all[0];
+    state.projectId = project.id;
+    state.projectName = project.name;
+  }
+  updateKeyFromAllNotes();
+  renderAll();
 }
 
 /* -----------------------------
@@ -623,7 +620,7 @@ async function renderRecordings(){
     const label = (rec.title && rec.title.trim()) ? rec.title.trim()+" • " : "";
     title.textContent = label + d.toLocaleString();
 
-    // ✅ edit pencil BEFORE play
+    // ✅ edit pencil BETWEEN title and play
     const edit = document.createElement("button");
     edit.className="btn secondary";
     edit.textContent="✏️";
@@ -640,7 +637,7 @@ async function renderRecordings(){
     play.className="btn secondary";
     play.textContent="▶";
     play.title="Play";
-    play.addEventListener("click", async ()=>{
+    play.addEventListener("click", ()=>{
       const blob = rec.blob;
       if(!blob) return;
       const url = URL.createObjectURL(blob);
@@ -659,7 +656,7 @@ async function renderRecordings(){
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = (rec.title && rec.title.trim() ? rec.title.trim() : "recording")+"."+ (rec.mime==="audio/webm" ? "webm":"webm");
+      a.download = (rec.title && rec.title.trim() ? rec.title.trim() : "recording") + ".webm";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -669,7 +666,7 @@ async function renderRecordings(){
     const del = document.createElement("button");
     del.className="btn secondary";
     del.textContent="🗑";
-    del.title="Delete";
+    del.title="Delete recording";
     del.addEventListener("click", async ()=>{
       if(!confirm("Delete this recording?")) return;
       await dbDelete(STORE_RECORDINGS, rec.id);
@@ -698,7 +695,7 @@ function saveProjectSoon(){
 }
 
 /* -----------------------------
-   Key detection from notes (simple)
+   Key detection
 ------------------------------*/
 const SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const KK_MAJOR = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
@@ -711,33 +708,20 @@ function rotate(arr, t){
   for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
   return out;
 }
-
 function noteToPC(n){
   const s = String(n||"").trim().toUpperCase();
   if(!s || s==="NOT") return null;
-
-  // chord root detection
   const m = s.match(/^([A-G])(#|B)?/);
   if(!m) return null;
   let root = m[1];
   let acc = m[2] || "";
   if(acc==="B") acc="b";
-
   const map = {
-    "C":0,"C#":1,"DB":1,
-    "D":2,"D#":3,"EB":3,
-    "E":4,
-    "F":5,"F#":6,"GB":6,
-    "G":7,"G#":8,"AB":8,
-    "A":9,"A#":10,"BB":10,
-    "B":11
+    "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
   };
-  const key = root + (acc==="#" ? "#" : (acc==="b" ? "b" : ""));
-  // normalize flats
-  const k2 = key.replace("b","B");
-  return map[k2] ?? null;
+  const key = (root + (acc==="#" ? "#" : (acc==="b" ? "b" : ""))).replace("b","B");
+  return map[key] ?? null;
 }
-
 function keyFromHistogram(hist){
   let best = { score:-1e9, name:"" };
   const hnorm = norm(hist);
@@ -751,7 +735,6 @@ function keyFromHistogram(hist){
   }
   return best.name || "—";
 }
-
 function updateKeyFromAllNotes(){
   const hist = Array(12).fill(0);
   SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
@@ -767,14 +750,13 @@ function updateKeyFromAllNotes(){
 }
 
 /* -----------------------------
-   Rhymes (improved + stopwords)
+   Rhymes (REAL: Datamuse)
 ------------------------------*/
 const STOPWORDS = new Set([
   "the","a","an","and","or","but","to","of","in","on","at","for","with","from",
   "is","are","was","were","be","been","being",
   "i","im","i'm","you","your","you're","we","they","he","she","it","me","my","mine","our","ours",
-  "this","that","these","those",
-  "love"
+  "this","that","these","those"
 ]);
 
 function cleanWord(w){
@@ -783,21 +765,40 @@ function cleanWord(w){
     .replace(/^[^a-z]+|[^a-z]+$/g,"");
 }
 
-/* rime key: last vowel group + tail, e.g. "wife" => "ife", "knife" => "ife" */
-function rimeKey(word){
-  const w = cleanWord(word);
-  if(!w || w.length<2) return "";
-  // find last vowel group index
-  const m = w.match(/([aeiouy]+[^aeiouy]*)$/);
-  if(m && m[1]){
-    const k = m[1];
-    // shorten super long tails
-    return k.length>5 ? k.slice(-5) : k;
+async function fetchRhymes(word){
+  // Datamuse: real rhymes + near rhymes
+  const q = encodeURIComponent(word);
+  const urls = [
+    `https://api.datamuse.com/words?rel_rhy=${q}&max=24`,
+    `https://api.datamuse.com/words?rel_nry=${q}&max=24`
+  ];
+  const out = [];
+  for(const u of urls){
+    try{
+      const res = await fetch(u, { mode:"cors" });
+      const json = await res.json();
+      for(const item of (json||[])){
+        if(item && item.word) out.push(String(item.word));
+      }
+    }catch(e){}
   }
-  return w.slice(-3);
+  return out;
 }
 
-function buildWordBank(){
+function uniq(arr){
+  const s = new Set();
+  const out = [];
+  for(const x of arr){
+    const k = String(x).toLowerCase();
+    if(!s.has(k)){
+      s.add(k);
+      out.push(x);
+    }
+  }
+  return out;
+}
+
+function buildLocalWordBank(){
   const set = new Set();
   SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
     (project.sections[sec]||[]).forEach(line=>{
@@ -810,51 +811,63 @@ function buildWordBank(){
   return Array.from(set);
 }
 
-function showRhymesFor(word){
+async function showRhymesFor(word){
   const w = cleanWord(word);
   if(!w || STOPWORDS.has(w)) return;
-
-  const key = rimeKey(w);
-  const bank = buildWordBank();
-  const picks = bank
-    .filter(x=>x!==w)
-    .map(x=>({ w:x, k:rimeKey(x) }))
-    .filter(o=>o.k === key)
-    .map(o=>o.w)
-    .slice(0, 10);
 
   rhymeTitle.textContent = `Rhymes for "${w}"`;
   rhymeWords.innerHTML = "";
 
+  // quick loading pill
+  const loading = document.createElement("div");
+  loading.style.color="#666";
+  loading.style.fontWeight="900";
+  loading.textContent = "Loading rhymes…";
+  rhymeWords.appendChild(loading);
+  rhymeDock.style.display="block";
+
+  // fetch real rhymes
+  const apiRhymes = await fetchRhymes(w);
+
+  // local words that also rhyme (bonus)
+  const local = buildLocalWordBank();
+  const combined = uniq([...apiRhymes, ...local])
+    .map(x=>cleanWord(x))
+    .filter(Boolean)
+    .filter(x=>x!==w)
+    .filter(x=>x.length>=2)
+    .filter(x=>!STOPWORDS.has(x));
+
+  rhymeWords.innerHTML = "";
+
+  const picks = combined.slice(0, 18); // ✅ multiple suggestions
   if(picks.length===0){
     const d = document.createElement("div");
     d.style.color="#666";
     d.style.fontWeight="900";
-    d.textContent = "No rhymes found in your lyrics yet.";
+    d.textContent = "No rhymes found (try another word).";
     rhymeWords.appendChild(d);
-  }else{
-    picks.forEach(r=>{
-      const b = document.createElement("button");
-      b.className="rWord";
-      b.textContent = r;
-      b.addEventListener("click", ()=>{
-        if(lastFocusedTextarea){
-          // insert replacement of last word
-          const t = lastFocusedTextarea.value;
-          const parts = t.split(/\s+/);
-          if(parts.length>0){
-            parts[parts.length-1] = r;
-            lastFocusedTextarea.value = parts.join(" ");
-            lastFocusedTextarea.dispatchEvent(new Event("input",{bubbles:true}));
-            lastFocusedTextarea.focus();
-          }
-        }
-      });
-      rhymeWords.appendChild(b);
-    });
+    return;
   }
 
-  rhymeDock.style.display="block";
+  picks.forEach(r=>{
+    const b = document.createElement("button");
+    b.className="rWord";
+    b.textContent = r;
+    b.addEventListener("click", ()=>{
+      if(lastFocusedTextarea){
+        const t = lastFocusedTextarea.value;
+        const parts = t.trimEnd().split(/\s+/);
+        if(parts.length>0){
+          parts[parts.length-1] = r;
+          lastFocusedTextarea.value = parts.join(" ") + " ";
+          lastFocusedTextarea.dispatchEvent(new Event("input",{bubbles:true}));
+          lastFocusedTextarea.focus();
+        }
+      }
+    });
+    rhymeWords.appendChild(b);
+  });
 }
 
 function getLastWordFromFocused(){
@@ -865,38 +878,45 @@ function getLastWordFromFocused(){
 }
 
 /* -----------------------------
-   Audio engine (drums + notes + recording mix)
+   Audio engine + Recording MIX (FIXED)
+   ✅ We now create a REAL mixed stream:
+      recordDest = mix of (app audio masterOut) + (mic)
 ------------------------------*/
 let audioCtx = null;
 let masterOut = null;
-let mediaDest = null;
+let recordDest = null;     // ✅ single mixed output stream
+let appToRecordGain = null;
 
 function ensureAudio(){
   if(audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
   masterOut = audioCtx.createGain();
   masterOut.gain.value = 0.9;
+
+  // hear app audio
   masterOut.connect(audioCtx.destination);
 
-  mediaDest = audioCtx.createMediaStreamDestination();
-  masterOut.connect(mediaDest);
+  // ✅ recording destination (single mixed track)
+  recordDest = audioCtx.createMediaStreamDestination();
+
+  // ✅ feed app audio into recording
+  appToRecordGain = audioCtx.createGain();
+  appToRecordGain.gain.value = 1.0;
+  masterOut.connect(appToRecordGain).connect(recordDest);
 }
 
 function hzFromNoteName(name){
   const s = String(name||"").trim();
   if(!s || s.toLowerCase()==="not") return null;
-
-  // chord like Am, C, G, D: use root
   const m = s.match(/^([A-G])(#|b)?/);
   if(!m) return null;
   const root = m[1] + (m[2]||"");
   const map = {C:0,"C#":1,"Db":1,D:2,"D#":3,"Eb":3,E:4,F:5,"F#":6,"Gb":6,G:7,"G#":8,"Ab":8,A:9,"A#":10,"Bb":10,B:11};
   const pc = map[root] ?? null;
   if(pc===null) return null;
-
-  // base octave 4
   const a4 = 440;
-  const n = pc - 9; // distance from A
+  const n = pc - 9;
   return a4 * Math.pow(2, n/12);
 }
 
@@ -908,14 +928,12 @@ function playTone(freq, t0, t1, type){
   f.type = "lowpass";
   f.frequency.setValueAtTime(type==="Acoustic" ? 2200 : type==="Electric" ? 3200 : 1800, t0);
 
-  // instrument character
   if(type==="Electric") o.type="sawtooth";
   else if(type==="Piano") o.type="triangle";
   else o.type="triangle";
 
   o.frequency.setValueAtTime(freq, t0);
 
-  // envelope (sustained until next note)
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(type==="Piano" ? 0.35 : 0.25, t0 + 0.01);
   g.gain.setValueAtTime(type==="Piano" ? 0.20 : 0.18, Math.max(t0+0.02, t1-0.03));
@@ -937,10 +955,8 @@ function drumKick(t){
   g.gain.exponentialRampToValueAtTime(0.8, t+0.01);
   g.gain.exponentialRampToValueAtTime(0.0001, t+0.18);
   o.connect(g).connect(masterOut);
-  o.start(t);
-  o.stop(t+0.22);
+  o.start(t); o.stop(t+0.22);
 }
-
 function drumSnare(t){
   ensureAudio();
   const n = audioCtx.createBufferSource();
@@ -960,10 +976,8 @@ function drumSnare(t){
   g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
 
   n.connect(f).connect(g).connect(masterOut);
-  n.start(t);
-  n.stop(t+dur);
+  n.start(t); n.stop(t+dur);
 }
-
 function drumHat(t, open=false){
   ensureAudio();
   const dur = open ? 0.14 : 0.05;
@@ -982,8 +996,7 @@ function drumHat(t, open=false){
   g.gain.setValueAtTime(open?0.35:0.22, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
   src.connect(f).connect(g).connect(masterOut);
-  src.start(t);
-  src.stop(t+dur);
+  src.start(t); src.stop(t+dur);
 }
 
 function scheduleDrums(t0, bars){
@@ -994,17 +1007,13 @@ function scheduleDrums(t0, bars){
 
   for(let b=0;b<bars;b++){
     const base = t0 + b*barDur;
-
     if(state.drumStyle==="Rap"){
-      // kick on 1, “and” of 2, 3; snare on 2/4; hats 8ths
       drumKick(base + 0*beat);
       drumKick(base + 1.5*beat);
       drumKick(base + 2*beat);
       drumSnare(base + 1*beat);
       drumSnare(base + 3*beat);
-      for(let i=0;i<8;i++){
-        drumHat(base + i*(beat/2), i===7);
-      }
+      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), i===7);
     }else if(state.drumStyle==="Pop"){
       drumKick(base + 0*beat);
       drumKick(base + 2*beat);
@@ -1018,7 +1027,6 @@ function scheduleDrums(t0, bars){
       drumSnare(base + 3*beat);
       for(let i=0;i<8;i++) drumHat(base + i*(beat/2), i===7);
     }else{
-      // Hard Rock
       drumKick(base + 0*beat);
       drumKick(base + 2*beat);
       drumKick(base + 2.75*beat);
@@ -1031,10 +1039,9 @@ function scheduleDrums(t0, bars){
 
 function scheduleLineNotes(line, t0){
   const bpm = state.bpm;
-  const step = (60/bpm)/2; // eighth note
+  const step = (60/bpm)/2;
   const notes = (line.notes||[]).map(x=>String(x||"Not"));
 
-  // sustained: each note holds until next non-Not (or end)
   for(let i=0;i<8;i++){
     const n = notes[i];
     if(!n || n.toLowerCase()==="not") continue;
@@ -1061,7 +1068,6 @@ function clearActiveCard(){
   if(activeCard) activeCard.classList.remove("activeLine");
   activeCard = null;
 }
-
 function highlightCard(sec, idx){
   clearActiveCard();
   const card = document.querySelector(`.card[data-section="${sec}"][data-index="${idx}"]`);
@@ -1071,9 +1077,7 @@ function highlightCard(sec, idx){
     card.scrollIntoView({ behavior:"smooth", block:"center" });
   }
 }
-
 function getPlayableSequence(){
-  // if on Full, play all sections in order
   const order = SECTIONS.filter(s=>s!=="Full");
   const seq = [];
   order.forEach(sec=>{
@@ -1085,13 +1089,10 @@ function getPlayableSequence(){
   });
   return seq;
 }
-
 async function startAutoPlay(){
   ensureAudio();
   if(audioCtx.state==="suspended") await audioCtx.resume();
-
-  state.autoPlay = true;
-  setScrollUI();
+  state.autoPlay = true; setScrollUI();
 
   playing = true;
   const bpm = state.bpm;
@@ -1099,20 +1100,13 @@ async function startAutoPlay(){
   const lineDur = step*8;
 
   const seq = getPlayableSequence();
-  if(seq.length===0){
-    state.autoPlay=false;
-    setScrollUI();
-    return;
-  }
+  if(seq.length===0){ state.autoPlay=false; setScrollUI(); return; }
 
   let cursor = 0;
-
-  const loop = async ()=>{
+  const loop = ()=>{
     if(!playing) return;
-
     const now = audioCtx.currentTime + 0.05;
 
-    // schedule 2 lines ahead
     for(let k=0;k<2;k++){
       const item = seq[(cursor+k) % seq.length];
       const t0 = now + k*lineDur;
@@ -1120,10 +1114,8 @@ async function startAutoPlay(){
       scheduleDrums(t0, 1);
       scheduleLineNotes(item.line, t0);
 
-      // visual highlight near time
       setTimeout(()=>{
         if(!playing) return;
-        // if user is not on that section, switch view automatically
         if(state.currentSection !== item.sec){
           state.currentSection = item.sec;
           renderAll();
@@ -1135,10 +1127,8 @@ async function startAutoPlay(){
     cursor = (cursor + 1) % seq.length;
     playTimer = setTimeout(loop, lineDur*1000);
   };
-
   loop();
 }
-
 function stopAutoPlay(){
   playing = false;
   clearTimeout(playTimer);
@@ -1149,42 +1139,43 @@ function stopAutoPlay(){
 }
 
 /* -----------------------------
-   Recording (MIC + APP AUDIO)
+   Recording (FIXED MIX)
+   ✅ MediaRecorder records ONE mixed stream (recordDest)
 ------------------------------*/
 let mediaRecorder = null;
 let recChunks = [];
 let recording = false;
+let micStream = null;
+let micNode = null;
+let micGain = null;
 
 async function startRecording(){
   try{
     ensureAudio();
     if(audioCtx.state==="suspended") await audioCtx.resume();
 
-    const mic = await navigator.mediaDevices.getUserMedia({ audio:true });
+    // ✅ mic
+    micStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    micNode = audioCtx.createMediaStreamSource(micStream);
+    micGain = audioCtx.createGain();
+    micGain.gain.value = 1.0;
 
-    const tracks = [];
-    mic.getAudioTracks().forEach(t=>tracks.push(t));
-    if(mediaDest && mediaDest.stream){
-      mediaDest.stream.getAudioTracks().forEach(t=>tracks.push(t));
-    }
+    // ✅ mic goes ONLY into recordDest (not to speakers)
+    micNode.connect(micGain).connect(recordDest);
 
-    const mixed = new MediaStream(tracks);
     recChunks = [];
-
-    mediaRecorder = new MediaRecorder(mixed);
+    mediaRecorder = new MediaRecorder(recordDest.stream);
     mediaRecorder.ondataavailable = (e)=>{
       if(e.data && e.data.size>0) recChunks.push(e.data);
     };
-
     mediaRecorder.onstop = async ()=>{
       recording = false;
       recordBtn.textContent = "Record";
       mRecordBtn.textContent = "Record";
 
       const blob = new Blob(recChunks, { type:"audio/webm" });
-      const id = "rec_"+Date.now();
       await dbPut(STORE_RECORDINGS, {
-        id,
+        id: "rec_"+Date.now(),
         projectId: state.projectId,
         createdAt: Date.now(),
         mime: "audio/webm",
@@ -1192,7 +1183,12 @@ async function startRecording(){
         blob
       });
 
-      mic.getTracks().forEach(t=>t.stop());
+      // cleanup mic
+      try{ micNode && micNode.disconnect(); }catch(e){}
+      try{ micGain && micGain.disconnect(); }catch(e){}
+      if(micStream) micStream.getTracks().forEach(t=>t.stop());
+      micStream = null; micNode = null; micGain = null;
+
       renderRecordings();
     };
 
@@ -1200,12 +1196,10 @@ async function startRecording(){
     recording = true;
     recordBtn.textContent = "Stop";
     mRecordBtn.textContent = "Stop";
-
   }catch(e){
     alert("Mic permission is required to record.");
   }
 }
-
 function stopRecording(){
   if(mediaRecorder && recording){
     mediaRecorder.stop();
@@ -1213,7 +1207,7 @@ function stopRecording(){
 }
 
 /* -----------------------------
-   Headshot blink hook
+   Blink
 ------------------------------*/
 function blinkOnce(){
   const w = $("headshotWrap");
@@ -1233,7 +1227,6 @@ togglePanelBtn.addEventListener("click", ()=>{
 autoSplitBtn.addEventListener("click", ()=>{
   state.autoSplit = !state.autoSplit;
   setAutoSplitUI();
-  // recompute timing for current section
   if(state.currentSection !== "Full"){
     const sec = state.currentSection;
     (project.sections[sec]||[]).forEach(line=>{
@@ -1245,21 +1238,14 @@ autoSplitBtn.addEventListener("click", ()=>{
   }
 });
 
-bpmInput.addEventListener("input", ()=>{
-  state.bpm = Math.max(40, Math.min(220, Number(bpmInput.value||95)));
-});
-capoInput.addEventListener("input", ()=>{
-  state.capo = Math.max(0, Math.min(12, Number(capoInput.value||0)));
-});
+bpmInput.addEventListener("input", ()=>{ state.bpm = Math.max(40, Math.min(220, Number(bpmInput.value||95))); });
+capoInput.addEventListener("input", ()=>{ state.capo = Math.max(0, Math.min(12, Number(capoInput.value||0))); });
 
 instAcoustic.addEventListener("click", ()=>{ state.instrument="Acoustic"; setInstrumentUI(); });
 instElectric.addEventListener("click", ()=>{ state.instrument="Electric"; setInstrumentUI(); });
 instPiano.addEventListener("click", ()=>{ state.instrument="Piano"; setInstrumentUI(); });
 
-function setDrumStyle(s){
-  state.drumStyle = s;
-  setDrumUI();
-}
+function setDrumStyle(s){ state.drumStyle = s; setDrumUI(); }
 drumRock.addEventListener("click", ()=>setDrumStyle("Rock"));
 drumHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
 drumPop.addEventListener("click", ()=>setDrumStyle("Pop"));
@@ -1269,29 +1255,11 @@ mHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
 mPop.addEventListener("click", ()=>setDrumStyle("Pop"));
 mRap.addEventListener("click", ()=>setDrumStyle("Rap"));
 
-autoPlayBtn.addEventListener("click", async ()=>{
-  if(state.autoPlay){
-    stopAutoPlay();
-  }else{
-    await startAutoPlay();
-  }
-});
-mScrollBtn.addEventListener("click", async ()=>{
-  if(state.autoPlay){
-    stopAutoPlay();
-  }else{
-    await startAutoPlay();
-  }
-});
+autoPlayBtn.addEventListener("click", async ()=>{ state.autoPlay ? stopAutoPlay() : await startAutoPlay(); });
+mScrollBtn.addEventListener("click", async ()=>{ state.autoPlay ? stopAutoPlay() : await startAutoPlay(); });
 
-recordBtn.addEventListener("click", async ()=>{
-  if(recording) stopRecording();
-  else await startRecording();
-});
-mRecordBtn.addEventListener("click", async ()=>{
-  if(recording) stopRecording();
-  else await startRecording();
-});
+recordBtn.addEventListener("click", async ()=>{ recording ? stopRecording() : await startRecording(); });
+mRecordBtn.addEventListener("click", async ()=>{ recording ? stopRecording() : await startRecording(); });
 
 sortSelect.addEventListener("change", renderProjectsDropdown);
 
@@ -1308,15 +1276,14 @@ projectSelect.addEventListener("change", async ()=>{
 });
 
 renameProjectBtn.addEventListener("click", renameProject);
+deleteProjectBtn.addEventListener("click", deleteCurrentProject);
 
-rBtn.addEventListener("click", ()=>{
+rBtn.addEventListener("click", async ()=>{
   blinkOnce();
   const w = getLastWordFromFocused();
-  showRhymesFor(w);
+  await showRhymesFor(w);
 });
-hideRhymeBtn.addEventListener("click", ()=>{
-  rhymeDock.style.display="none";
-});
+hideRhymeBtn.addEventListener("click", ()=>{ rhymeDock.style.display="none"; });
 
 /* -----------------------------
    Init
