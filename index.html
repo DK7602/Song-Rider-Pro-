@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#e9e9ea" />
   <title>Song Rider Pro</title>
 
-  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="manifest" href="./manifest.webmanifest?v=7" />
 
   <style>
     :root{
@@ -92,7 +92,6 @@
     }
     .eye.left{ left:16px; top:19px; }
     .eye.right{ left:29px; top:19px; }
-
     .headshotWrap.blink .eye{
       opacity:1;
       background:rgba(255,0,0,.85);
@@ -124,7 +123,6 @@
       letter-spacing:.3px;
     }
 
-    /* ONE-LINE controls */
     .controlsLine{
       padding:10px 12px;
       display:flex;
@@ -154,7 +152,7 @@
       display:flex;
       flex-direction:column;
       gap:4px;
-      min-width:82px;
+      min-width:74px;
     }
     .tinyField label{
       font-size:11px;
@@ -251,6 +249,7 @@
       box-shadow:var(--shadow);
       border:1px solid rgba(0,0,0,.06);
       overflow:hidden;
+      min-height:220px;
     }
 
     .sheetHeader{
@@ -278,7 +277,7 @@
       padding:12px 12px 6px;
       font-weight:1100;
       letter-spacing:.8px;
-      color:#b00020; /* bold red section headers */
+      color:#b00020;
     }
 
     .cards{
@@ -288,7 +287,6 @@
       gap:12px;
     }
 
-    /* Card layout for section pages */
     .card{
       border:1px solid rgba(0,0,0,.10);
       border-radius:14px;
@@ -364,7 +362,6 @@
       background:#fff;
     }
 
-    /* 4 timing boxes */
     .timingRow{
       display:grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -389,7 +386,6 @@
       border-color:rgba(0,0,0,.20);
     }
 
-    /* Rhyme box (floating) */
     .rhymeDock{
       position:fixed;
       left:0; right:0; bottom:58px;
@@ -432,7 +428,6 @@
       font-size:13px;
     }
 
-    /* Bottom status bar */
     .footerBar{
       position:fixed;
       left:0; right:0; bottom:0;
@@ -457,12 +452,46 @@
       font-weight:800;
     }
 
+    /* DEBUG BAR (shows if JS loaded) */
+    #jsBoot{
+      margin-top:10px;
+      font-size:12px;
+      font-weight:1000;
+      color:#111;
+      background:#fff;
+      border:1px solid rgba(0,0,0,.10);
+      border-radius:14px;
+      padding:10px 12px;
+      box-shadow:var(--shadow);
+    }
+    #jsBoot.ok{ border-color: rgba(22,163,74,.5); }
+    #jsBoot.err{ border-color: rgba(220,38,38,.55); color:#7f1d1d; }
+
     @media (max-width:560px){
       .controlsLine{ gap:8px; }
-      .tinyField{ min-width:76px; }
+      .tinyField{ min-width:70px; }
       .noteCell{ font-size:11px; padding:7px 4px; }
     }
   </style>
+
+  <!-- If app.js crashes, we show it here -->
+  <script>
+    (function(){
+      window.__SRP_BOOT = { loaded:false };
+      window.addEventListener("error", function(e){
+        var el = document.getElementById("jsBoot");
+        if (!el) return;
+        el.className = "err";
+        el.textContent = "JS ERROR: " + (e && e.message ? e.message : "unknown") + " (app.js did not finish)";
+      });
+      window.addEventListener("unhandledrejection", function(e){
+        var el = document.getElementById("jsBoot");
+        if (!el) return;
+        el.className = "err";
+        el.textContent = "JS PROMISE ERROR: " + (e && e.reason ? (e.reason.message || String(e.reason)) : "unknown");
+      });
+    })();
+  </script>
 </head>
 
 <body>
@@ -474,12 +503,13 @@
     </div>
 
     <div class="headshotWrap" id="headshotWrap">
-      <!-- Try both paths; keep image visible even if load fails -->
-      <img id="headshotImg" src="./headshot.png?v=2" alt="Headshot" />
+      <img id="headshotImg" src="./headshot.png?v=7" alt="Headshot" />
       <div class="eye left"></div>
       <div class="eye right"></div>
     </div>
   </div>
+
+  <div id="jsBoot">JS not loaded yet…</div>
 
   <div class="panel">
     <div class="panelTop">
@@ -488,9 +518,8 @@
     </div>
 
     <div id="panelBody">
-      <!-- ONE LINE controls -->
       <div class="controlsLine">
-        <button class="tinyBtn" id="autoSplitBtn" title="Auto-split timing on/off">AutoSplit: OFF</button>
+        <button class="tinyBtn" id="autoSplitBtn">AutoSplit: OFF</button>
 
         <div class="tinyField">
           <label>BPM</label>
@@ -517,7 +546,6 @@
         </div>
       </div>
 
-      <!-- Drums + Record button (no Play button) -->
       <div class="rowBlock">
         <span style="font-size:12px;color:var(--muted);font-weight:1000;">Drums:</span>
         <button class="pill" id="drumRock">Rock</button>
@@ -531,7 +559,6 @@
         <button class="btn secondary" id="stopRecordBtn" disabled>Stop</button>
       </div>
 
-      <!-- Projects section -->
       <div class="rowBlock">
         <span style="font-size:12px;color:var(--muted);font-weight:1000;">Project:</span>
         <select id="projectSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;">
@@ -540,13 +567,11 @@
         <button class="btn secondary" id="clearProjectBtn">Clear Project</button>
       </div>
 
-      <!-- Recordings section -->
       <div class="rowBlock" style="align-items:flex-start;">
         <div style="display:flex;flex-direction:column;gap:6px;min-width:150px;">
           <div style="font-size:12px;color:var(--muted);font-weight:1000;">Recordings</div>
           <div style="font-size:12px;color:var(--muted);font-weight:800;">(tap a row)</div>
         </div>
-
         <div id="recordingsList" style="flex:1 1 520px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
     </div>
@@ -556,10 +581,14 @@
 </header>
 
 <main>
-  <div class="sheet" id="editorRoot"></div>
+  <div class="sheet" id="editorRoot">
+    <div class="sheetHeader">
+      <h2>Loading…</h2>
+      <div class="hint">If this stays blank, app.js didn’t load.</div>
+    </div>
+  </div>
 </main>
 
-<!-- Rhyme box -->
 <div class="rhymeDock" id="rhymeDock">
   <div class="rhymeBox">
     <div class="rhymeTop">
@@ -577,6 +606,7 @@
   </div>
 </div>
 
-<script src="./app.js"></script>
+<!-- cache-bust app.js -->
+<script src="./app.js?v=7"></script>
 </body>
 </html>
