@@ -1,1698 +1,1332 @@
-/* Song Rider Pro - app.js (FULL REPLACE v12) */
-(function(){
-  "use strict";
+/* Song Rider Pro - app.js (FULL REPLACE v14) */
+(() => {
+"use strict";
 
-  function $(s){ return document.querySelector(s); }
-  function setBoot(msg, ok){
-    var el=$("#jsBoot");
-    if(!el) return;
-    el.textContent=msg;
-    el.className=ok ? "ok" : "err";
+/* -----------------------------
+   DOM
+------------------------------*/
+const $ = (id) => document.getElementById(id);
+
+const tabsEl = $("tabs");
+const sheetTitleEl = $("sheetTitle");
+const sheetBodyEl = $("sheetBody");
+
+const togglePanelBtn = $("togglePanelBtn");
+const panelBody = $("panelBody");
+const miniBar = $("miniBar");
+
+const autoSplitBtn = $("autoSplitBtn");
+const bpmInput = $("bpmInput");
+const capoInput = $("capoInput");
+const keyOutput = $("keyOutput");
+
+const instAcoustic = $("instAcoustic");
+const instElectric = $("instElectric");
+const instPiano = $("instPiano");
+
+const drumRock = $("drumRock");
+const drumHardRock = $("drumHardRock");
+const drumPop = $("drumPop");
+const drumRap = $("drumRap");
+
+const autoPlayBtn = $("autoPlayBtn");
+const recordBtn = $("recordBtn");
+
+const mRock = $("mRock");
+const mHardRock = $("mHardRock");
+const mPop = $("mPop");
+const mRap = $("mRap");
+const mScrollBtn = $("mScrollBtn");
+const mRecordBtn = $("mRecordBtn");
+
+const sortSelect = $("sortSelect");
+const projectSelect = $("projectSelect");
+const renameProjectBtn = $("renameProjectBtn");
+const recordingsList = $("recordingsList");
+
+const rBtn = $("rBtn");
+const rhymeDock = $("rhymeDock");
+const rhymeTitle = $("rhymeTitle");
+const rhymeWords = $("rhymeWords");
+const hideRhymeBtn = $("hideRhymeBtn");
+
+/* -----------------------------
+   State
+------------------------------*/
+const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
+
+let state = {
+  projectId: null,
+  projectName: "Dave song",
+  autoSplit: true,
+  bpm: 95,
+  capo: 0,
+  key: "—",
+  instrument: "Piano",      // Acoustic / Electric / Piano
+  drumStyle: "Rap",         // Rock / Hard Rock / Pop / Rap
+  autoPlay: false,
+  currentSection: "Full",
+  pasteOpen: false
+};
+
+let lastFocusedTextarea = null;
+document.addEventListener("focusin", (e) => {
+  if(e.target && e.target.tagName === "TEXTAREA"){
+    lastFocusedTextarea = e.target;
+  }
+});
+
+/* -----------------------------
+   IndexedDB (projects + recordings)
+------------------------------*/
+const DB_NAME = "songriderpro_db_v14";
+const DB_VER = 1;
+const STORE_PROJECTS = "projects";
+const STORE_RECORDINGS = "recordings";
+
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(STORE_PROJECTS)){
+        const s = db.createObjectStore(STORE_PROJECTS, { keyPath:"id" });
+        s.createIndex("name","name",{ unique:false });
+        s.createIndex("updatedAt","updatedAt",{ unique:false });
+      }
+      if(!db.objectStoreNames.contains(STORE_RECORDINGS)){
+        const s = db.createObjectStore(STORE_RECORDINGS, { keyPath:"id" });
+        s.createIndex("projectId","projectId",{ unique:false });
+        s.createIndex("createdAt","createdAt",{ unique:false });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbPut(store, obj){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,"readwrite");
+    tx.objectStore(store).put(obj);
+    tx.oncomplete = ()=>resolve(true);
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+async function dbGet(store, key){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,"readonly");
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = ()=>resolve(req.result || null);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function dbGetAll(store){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,"readonly");
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = ()=>resolve(req.result || []);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function dbDelete(store, key){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,"readwrite");
+    tx.objectStore(store).delete(key);
+    tx.oncomplete = ()=>resolve(true);
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+
+/* -----------------------------
+   Default project + data model
+------------------------------*/
+function emptyLine(){
+  return {
+    notes: Array(8).fill("Not"),
+    lyrics: "",
+    timing: ["","","",""]   // 4 chunks
+  };
+}
+function defaultProject(){
+  const sections = {};
+  SECTIONS.forEach(s=>{
+    sections[s] = Array.from({length: (s==="Full"? 0: 8)}, ()=>emptyLine());
+  });
+  // Full is special: used for paste + preview (not a line list)
+  return {
+    id: "proj_"+Date.now(),
+    name: "Dave song",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    sections,
+    fullPaste: "VERSE 1\n\nI love you sweet wife\n\nCHORUS 1\n\nYou are the love of my life\n",
+    // for preview sheet derived from section cards
+  };
+}
+
+let project = null;
+
+/* -----------------------------
+   UI helpers
+------------------------------*/
+function setActivePillGroup(btns, activeText){
+  btns.forEach(b=>{
+    if(!b) return;
+    b.classList.toggle("active", b.textContent.trim().toLowerCase() === activeText.toLowerCase());
+  });
+}
+function setInstrumentUI(){
+  setActivePillGroup([instAcoustic,instElectric,instPiano], state.instrument);
+}
+function setDrumUI(){
+  setActivePillGroup([drumRock,drumHardRock,drumPop,drumRap], state.drumStyle);
+  setActivePillGroup([mRock,mHardRock,mPop,mRap], state.drumStyle);
+}
+function setScrollUI(){
+  autoPlayBtn.classList.toggle("on", state.autoPlay);
+  mScrollBtn.classList.toggle("on", state.autoPlay);
+  autoPlayBtn.textContent="⇅";
+  mScrollBtn.textContent="⇅";
+}
+function setAutoSplitUI(){
+  autoSplitBtn.classList.toggle("active", state.autoSplit);
+  autoSplitBtn.textContent = "AutoSplit: " + (state.autoSplit ? "ON" : "OFF");
+}
+function setKeyUI(){
+  keyOutput.value = state.key || "—";
+}
+function setPanelCollapsed(collapsed){
+  if(collapsed){
+    panelBody.classList.add("hidden");
+    tabsEl.classList.add("hidden");
+    miniBar.classList.add("show");
+    togglePanelBtn.textContent = "Show";
+  }else{
+    panelBody.classList.remove("hidden");
+    tabsEl.classList.remove("hidden");
+    miniBar.classList.remove("show");
+    togglePanelBtn.textContent = "Hide";
+  }
+}
+
+/* -----------------------------
+   Tabs + Render
+------------------------------*/
+function renderTabs(){
+  tabsEl.innerHTML = "";
+  SECTIONS.forEach(sec=>{
+    const b = document.createElement("button");
+    b.className = "tab" + (state.currentSection===sec ? " active":"");
+    b.textContent = sec;
+    b.addEventListener("click", ()=>{
+      state.currentSection = sec;
+      renderAll();
+    });
+    tabsEl.appendChild(b);
+  });
+}
+
+function syllableCount(word){
+  if(!word) return 0;
+  let w = String(word).toLowerCase().replace(/[^a-z']/g,"");
+  if(!w) return 0;
+  // very simple heuristic
+  w = w.replace(/'s$/,"");
+  if(w.length<=3) return 1;
+  const vowels = w.match(/[aeiouy]+/g);
+  let n = vowels ? vowels.length : 1;
+  if(w.endsWith("e")) n = Math.max(1, n-1);
+  if(w.endsWith("le") && w.length>3) n += 1;
+  return Math.max(1,n);
+}
+
+function autosplitTiming(text){
+  const words = String(text||"").trim().split(/\s+/).filter(Boolean);
+  if(words.length===0) return ["","","",""];
+
+  const syls = words.map(w=>syllableCount(w));
+  const total = syls.reduce((a,b)=>a+b,0);
+  const target = total/4;
+
+  const chunks = ["","","",""];
+  let ci=0, acc=0;
+  for(let i=0;i<words.length;i++){
+    if(ci<3 && acc + syls[i] > target && chunks[ci].trim().length>0){
+      ci++;
+      acc=0;
+    }
+    chunks[ci] += (chunks[ci] ? " ":"") + words[i];
+    acc += syls[i];
+  }
+  return chunks;
+}
+
+function renderFullView(){
+  sheetTitleEl.textContent = "Full";
+  sheetBodyEl.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "fullBoxWrap";
+
+  const row = document.createElement("div");
+  row.style.display="flex";
+  row.style.gap="8px";
+  row.style.flexWrap="wrap";
+  row.style.marginBottom="10px";
+
+  const togglePaste = document.createElement("button");
+  togglePaste.className="btn secondary";
+  togglePaste.textContent = state.pasteOpen ? "Hide Paste Area" : "Show Paste Area";
+  togglePaste.addEventListener("click", ()=>{
+    state.pasteOpen = !state.pasteOpen;
+    renderAll();
+    // keep keyboard stable: focus back if open
+    setTimeout(()=>{
+      if(state.pasteOpen){
+        const ta = document.querySelector("textarea.fullBox");
+        if(ta) ta.focus();
+      }
+    }, 60);
+  });
+
+  const applyBtn = document.createElement("button");
+  applyBtn.className="btn secondary";
+  applyBtn.textContent="Apply to Sections";
+  applyBtn.addEventListener("click", ()=>{
+    applyPasteToSections();
+  });
+
+  row.appendChild(togglePaste);
+  row.appendChild(applyBtn);
+  wrap.appendChild(row);
+
+  if(state.pasteOpen){
+    const ta = document.createElement("textarea");
+    ta.className="fullBox";
+    ta.value = project.fullPaste || "";
+    ta.addEventListener("input", ()=>{
+      project.fullPaste = ta.value;
+      project.updatedAt = Date.now();
+      saveProjectSoon();
+    });
+    wrap.appendChild(ta);
+
+    const help = document.createElement("div");
+    help.className="fullHelp";
+    help.textContent = 'Tip: Put section headers like "VERSE 1", "CHORUS 1", etc. Lines under each become lyric lines. (Notes stay as-is.)';
+    wrap.appendChild(help);
   }
 
-  try{
-    setBoot("JS loaded ✓ (building…)", true);
-
-    /**********************
-     * DOM
-     **********************/
-    var headshotWrap=$("#headshotWrap");
-    var headshotImg=$("#headshotImg");
-
-    var togglePanelBtn=$("#togglePanelBtn");
-    var panelBody=$("#panelBody");
-    var miniBar=$("#miniBar");
-
-    var autoSplitBtn=$("#autoSplitBtn");
-    var bpmInput=$("#bpmInput");
-    var capoInput=$("#capoInput");
-    var keyOutput=$("#keyOutput");
-
-    var instAcoustic=$("#instAcoustic");
-    var instElectric=$("#instElectric");
-    var instPiano=$("#instPiano");
-
-    var drumRock=$("#drumRock");
-    var drumHardRock=$("#drumHardRock");
-    var drumPop=$("#drumPop");
-    var drumRap=$("#drumRap");
-
-    var autoPlayBtn=$("#autoPlayBtn");
-    var recordBtn=$("#recordBtn");
-
-    // mini bar mirrors
-    var mRock=$("#mRock");
-    var mHardRock=$("#mHardRock");
-    var mPop=$("#mPop");
-    var mRap=$("#mRap");
-    var mScrollBtn=$("#mScrollBtn");
-    var mRecordBtn=$("#mRecordBtn");
-
-    var sortSelect=$("#sortSelect");
-    var projectSelect=$("#projectSelect");
-    var renameProjectBtn=$("#renameProjectBtn");
-
-    var recordingsList=$("#recordingsList");
-
-    var tabsEl=$("#tabs");
-    var editorRoot=$("#editorRoot");
-    var statusEl=$("#status");
-
-    var rBtn=$("#rBtn");
-    var rhymeDock=$("#rhymeDock");
-    var rhymeTitle=$("#rhymeTitle");
-    var rhymeWords=$("#rhymeWords");
-    var hideRhymeBtn=$("#hideRhymeBtn");
-
-    if(!tabsEl || !editorRoot){
-      setBoot("JS ERROR: missing #tabs or #editorRoot", false);
-      return;
-    }
-
-    function setStatus(t){ if(statusEl) statusEl.textContent=t; }
-    function blinkHead(){
-      if(!headshotWrap) return;
-      headshotWrap.classList.add("blink");
-      setTimeout(function(){ headshotWrap.classList.remove("blink"); }, 80);
-    }
-
-    if(headshotImg){
-      headshotImg.addEventListener("error", function(){
-        headshotImg.src = "headshot.png?v=12";
-      });
-    }
-
-    /**********************
-     * Storage isolation
-     **********************/
-    var APP_SCOPE=(function(){
-      try{
-        var parts=location.pathname.split("/").filter(Boolean);
-        return parts.length ? parts[0] : "root";
-      }catch(e){ return "root"; }
-    })();
-    function lsKey(k){ return APP_SCOPE+"::songriderpro::"+k; }
-    function lsGet(k, fb){
-      try{
-        var v=localStorage.getItem(lsKey(k));
-        return v ? JSON.parse(v) : fb;
-      }catch(e){ return fb; }
-    }
-    function lsSet(k,v){
-      try{ localStorage.setItem(lsKey(k), JSON.stringify(v)); }catch(e){}
-    }
-
-    /**********************
-     * IndexedDB for recordings
-     **********************/
-    var DB_NAME = "songriderpro_db";
-    var DB_STORE = "recordings";
-    function openDB(){
-      return new Promise(function(resolve,reject){
-        var req=indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded=function(){
-          var db=req.result;
-          if(!db.objectStoreNames.contains(DB_STORE)){
-            db.createObjectStore(DB_STORE, { keyPath:"id" });
-          }
-        };
-        req.onsuccess=function(){ resolve(req.result); };
-        req.onerror=function(){ reject(req.error); };
-      });
-    }
-    async function dbPut(rec){
-      var db=await openDB();
-      return new Promise(function(resolve,reject){
-        var tx=db.transaction(DB_STORE,"readwrite");
-        tx.objectStore(DB_STORE).put(rec);
-        tx.oncomplete=function(){ resolve(); db.close(); };
-        tx.onerror=function(){ reject(tx.error); db.close(); };
-      });
-    }
-    async function dbGetAll(){
-      var db=await openDB();
-      return new Promise(function(resolve,reject){
-        var tx=db.transaction(DB_STORE,"readonly");
-        var req=tx.objectStore(DB_STORE).getAll();
-        req.onsuccess=function(){ resolve(req.result||[]); db.close(); };
-        req.onerror=function(){ reject(req.error); db.close(); };
-      });
-    }
-    async function dbDel(id){
-      var db=await openDB();
-      return new Promise(function(resolve,reject){
-        var tx=db.transaction(DB_STORE,"readwrite");
-        tx.objectStore(DB_STORE).delete(id);
-        tx.oncomplete=function(){ resolve(); db.close(); };
-        tx.onerror=function(){ reject(tx.error); db.close(); };
-      });
-    }
-
-    /**********************
-     * Pages / sections
-     **********************/
-    var PAGES=[
-      {id:"full", name:"Full"},
-      {id:"v1", name:"VERSE 1"},
-      {id:"c1", name:"CHORUS 1"},
-      {id:"v2", name:"VERSE 2"},
-      {id:"c2", name:"CHORUS 2"},
-      {id:"v3", name:"VERSE 3"},
-      {id:"br", name:"BRIDGE"},
-      {id:"c3", name:"CHORUS 3"}
-    ];
-    var SECTIONS=[
-      {id:"v1", title:"VERSE 1"},
-      {id:"c1", title:"CHORUS 1"},
-      {id:"v2", title:"VERSE 2"},
-      {id:"c2", title:"CHORUS 2"},
-      {id:"v3", title:"VERSE 3"},
-      {id:"br", title:"BRIDGE"},
-      {id:"c3", title:"CHORUS 3"}
-    ];
-    var CARDS_PER_SECTION=20;
-
-    function emptyCard(){ return { notesRaw:["","","","","","","",""], lyric:"" }; }
-    function emptySection(title){
-      var cards=[]; for(var i=0;i<CARDS_PER_SECTION;i++) cards.push(emptyCard());
-      return { title:title, cards:cards };
-    }
-    function defaultProjectData(){
-      var sections={};
-      for(var i=0;i<SECTIONS.length;i++){
-        sections[SECTIONS[i].id]=emptySection(SECTIONS[i].title);
-      }
-      return {
-        meta:{ bpm:95, capo:0, autoSplit:false, instrument:"acoustic" },
-        fullText:"",
-        sections:sections,
-        updatedAt:Date.now()
-      };
-    }
-    function clampInt(v,a,b){
-      v=Number(v);
-      if(!isFinite(v)) v=a;
-      v=Math.round(v);
-      if(v<a) v=a;
-      if(v>b) v=b;
-      return v;
-    }
-
-    /**********************
-     * Projects model
-     **********************/
-    function makeProjectId(){
-      return "p_"+Date.now().toString(36)+"_"+Math.floor(Math.random()*1e6).toString(36);
-    }
-    function projectDisplayName(p){
-      var n=(p && p.name) ? p.name.trim() : "";
-      return n ? n : "Untitled";
-    }
-
-    /**********************
-     * State
-     **********************/
-    var state={
-      pageId:"full",
-      projects:[],
-      projectId:null,
-      dataByProject:{},
-      sortMode:"az",
-
-      autoSplit:false,
-      bpm:95,
-      capo:0,
-      instrument:"acoustic",
-
-      drumStyle:null,
-      playing:false,
-      tickIndex:0,
-
-      autoPlay:false,
-      playQueue:[],
-      playPos:0,
-
-      fullPasteCollapsed:false,
-
-      activeLyricEl:null
-    };
-
-    function getProjectMeta(){
-      var p=state.projects.find(function(x){ return x.id===state.projectId; });
-      return p || null;
-    }
-    function getProject(){
-      if(!state.projectId){
-        var id=makeProjectId();
-        state.projects=[{id:id, name:"My Song", updatedAt:Date.now()}];
-        state.projectId=id;
-        state.dataByProject[id]=defaultProjectData();
-      }
-      if(!state.dataByProject[state.projectId]){
-        state.dataByProject[state.projectId]=defaultProjectData();
-      }
-      return state.dataByProject[state.projectId];
-    }
-    function touchProject(){
-      var meta=getProjectMeta();
-      if(meta) meta.updatedAt=Date.now();
-      var p=getProject();
-      p.updatedAt=Date.now();
-      saveAll();
-    }
-
-    /**********************
-     * Save / load
-     **********************/
-    function saveAll(){
-      lsSet("state_v12", {
-        pageId:state.pageId,
-        projectId:state.projectId,
-        projects:state.projects,
-        sortMode:state.sortMode,
-        autoSplit:state.autoSplit,
-        bpm:state.bpm,
-        capo:state.capo,
-        instrument:state.instrument,
-        drumStyle:state.drumStyle,
-        autoPlay:state.autoPlay,
-        fullPasteCollapsed:state.fullPasteCollapsed
-      });
-      lsSet("dataByProject_v12", state.dataByProject);
-    }
-    function loadAll(){
-      var saved=lsGet("state_v12", null);
-      var data=lsGet("dataByProject_v12", null);
-
-      // migrate forward from v11 if present
-      if(!saved){
-        var s11=lsGet("state_v11", null);
-        var d11=lsGet("dataByProject_v11", null);
-        if(s11) saved=s11;
-        if(d11) data=d11;
-      }
-
-      if(data && typeof data==="object") state.dataByProject=data;
-      if(saved && typeof saved==="object"){
-        for(var k in saved) state[k]=saved[k];
-      }
-
-      if(!Array.isArray(state.projects)) state.projects=[];
-      if(!state.projectId && state.projects.length) state.projectId=state.projects[0].id;
-
-      getProject();
-      syncMetaFromProject();
-      setScrollBtn();
-    }
-
-    function syncMetaFromProject(){
-      var p=getProject(), m=p.meta||{};
-      state.bpm=clampInt(m.bpm!=null?m.bpm:state.bpm,40,220);
-      state.capo=clampInt(m.capo!=null?m.capo:state.capo,0,12);
-      state.autoSplit=!!(m.autoSplit!=null?m.autoSplit:state.autoSplit);
-      state.instrument=m.instrument||state.instrument;
-
-      bpmInput.value=state.bpm;
-      capoInput.value=state.capo;
-      setAutoSplitButton();
-      setInstrumentButtons();
-    }
-    function syncMetaToProject(){
-      var p=getProject();
-      if(!p.meta) p.meta={};
-      p.meta.bpm=state.bpm;
-      p.meta.capo=state.capo;
-      p.meta.autoSplit=state.autoSplit;
-      p.meta.instrument=state.instrument;
-      touchProject();
-    }
-
-    /**********************
-     * UI helpers
-     **********************/
-    function setAutoSplitButton(){
-      autoSplitBtn.classList.toggle("active", state.autoSplit);
-      autoSplitBtn.textContent = state.autoSplit ? "AutoSplit: ON" : "AutoSplit: OFF";
-    }
-    function setScrollBtn(){
-      // main
-      autoPlayBtn.classList.toggle("on", state.autoPlay);
-      autoPlayBtn.textContent="Scroll";
-      // mini
-      if(mScrollBtn){
-        mScrollBtn.classList.toggle("on", state.autoPlay);
-        mScrollBtn.textContent="Scroll";
-      }
-    }
-    function setInstrumentButtons(){
-      instAcoustic.classList.toggle("active", state.instrument==="acoustic");
-      instElectric.classList.toggle("active", state.instrument==="electric");
-      instPiano.classList.toggle("active", state.instrument==="piano");
-    }
-    function setDrumButtons(){
-      drumRock.classList.toggle("active", state.drumStyle==="rock");
-      drumHardRock.classList.toggle("active", state.drumStyle==="hardrock");
-      drumPop.classList.toggle("active", state.drumStyle==="pop");
-      drumRap.classList.toggle("active", state.drumStyle==="rap");
-
-      if(mRock){
-        mRock.classList.toggle("active", state.drumStyle==="rock");
-        mHardRock.classList.toggle("active", state.drumStyle==="hardrock");
-        mPop.classList.toggle("active", state.drumStyle==="pop");
-        mRap.classList.toggle("active", state.drumStyle==="rap");
-      }
-    }
-
-    /**********************
-     * Syllables
-     **********************/
-    function roughSyllables(word){
-      var w=String(word||"");
-      if(w.length<=3) return [w];
-      var vowels="aeiouyAEIOUY";
-      var out=[], cur="", lastV=vowels.indexOf(w[0])!==-1;
-      for(var i=0;i<w.length;i++){
-        var ch=w[i], isV=vowels.indexOf(ch)!==-1;
-        cur+=ch;
-        if(lastV && !isV){
-          if(i+1<w.length && vowels.indexOf(w[i+1])!==-1){
-            out.push(cur.slice(0,-1));
-            cur=ch;
-          }
-        }
-        lastV=isV;
-      }
-      if(cur) out.push(cur);
-      return out.map(function(s){return s.trim();}).filter(Boolean);
-    }
-    function extractSyllableUnits(text){
-      var cleaned=String(text||"").trim();
-      if(!cleaned) return [];
-      if(!state.autoSplit){
-        return cleaned.split("/").map(function(s){return s.trim();}).filter(Boolean);
-      }
-      var words=cleaned
-        .replace(/[“”"]/g,"")
-        .replace(/[^\w'\- ]+/g," ")
-        .split(/\s+/).filter(Boolean);
-      var parts=[];
-      for(var i=0;i<words.length;i++){
-        var spl=roughSyllables(words[i]);
-        for(var j=0;j<spl.length;j++) parts.push(spl[j]);
-      }
-      return parts;
-    }
-    function timingSlots4(text){
-      var units=extractSyllableUnits(text);
-      var count=units.length;
-      var slots=["","","",""];
-      if(!units.length) return {slots:slots,count:count};
-      var per=Math.ceil(units.length/4);
-      for(var i=0;i<4;i++){
-        slots[i]=units.slice(i*per,(i+1)*per).join(" ");
-      }
-      return {slots:slots,count:count};
-    }
-
-    /**********************
-     * Notes transpose + key detect
-     **********************/
-    var SHARP=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-    var FLAT =["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
-
-    function noteIndex(root){
-      var r=String(root||"").replace(/[^A-Ga-g#b]/g,"");
-      if(!r) return null;
-      r=r[0].toUpperCase()+r.slice(1);
-      var i=SHARP.indexOf(r); if(i!==-1) return i;
-      i=FLAT.indexOf(r); if(i!==-1) return i;
-      return null;
-    }
-    function idxToName(idx, preferFlats){
-      idx=((idx%12)+12)%12;
-      return preferFlats?FLAT[idx]:SHARP[idx];
-    }
-    function transposeToken(tok, semis){
-      var s=String(tok||"").trim();
-      if(!s) return "";
-      var m=s.match(/^([A-Ga-g])([#b]?)(.*)$/);
-      if(!m) return s;
-      var root=(m[1].toUpperCase()+(m[2]||""));
-      var rest=(m[3]||"");
-      var idx=noteIndex(root);
-      if(idx==null) return s;
-      var preferFlats=(root.indexOf("b")!==-1 && root.indexOf("#")===-1);
-      return idxToName(idx+semis, preferFlats)+rest;
-    }
-    function chordRoot(token){
-      var s=String(token||"").trim();
-      if(!s) return null;
-      var m=s.match(/^([A-Ga-g])([#b]?)/);
-      if(!m) return null;
-      return (m[1].toUpperCase()+(m[2]||""));
-    }
-
-    var KK_MAJOR=[6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
-    var KK_MINOR=[6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
-    function rotate(arr,n){
-      var out=new Array(arr.length);
-      for(var i=0;i<arr.length;i++) out[(i+n)%arr.length]=arr[i];
-      return out;
-    }
-    function dot(a,b){ var s=0; for(var i=0;i<a.length;i++) s+=a[i]*b[i]; return s; }
-    function norm(a){ var s=0; for(var i=0;i<a.length;i++) s+=a[i]*a[i]; return Math.sqrt(s)||1; }
-    function keyFromHistogram(hist){
-      var best={score:-1e9, name:""};
-      var hnorm=norm(hist);
-      for(var t=0;t<12;t++){
-        var maj=rotate(KK_MAJOR,t);
-        var min=rotate(KK_MINOR,t);
-        var majScore=dot(hist,maj)/(hnorm*norm(maj));
-        var minScore=dot(hist,min)/(hnorm*norm(min));
-        if(majScore>best.score) best={score:majScore,name:SHARP[t]+" major"};
-        if(minScore>best.score) best={score:minScore,name:SHARP[t]+" minor"};
-      }
-      return best.name;
-    }
-    function computeKey(){
-      var proj=getProject();
-      var hist=new Array(12).fill(0);
-      for(var sid in proj.sections){
-        var sec=proj.sections[sid];
-        for(var i=0;i<sec.cards.length;i++){
-          var card=sec.cards[i];
-          for(var n=0;n<8;n++){
-            var shown=transposeToken(card.notesRaw[n]||"", state.capo);
-            var root=chordRoot(shown);
-            if(!root) continue;
-            var idx=noteIndex(root);
-            if(idx==null) continue;
-            hist[idx]+=1;
-          }
-        }
-      }
-      var total=hist.reduce(function(a,b){return a+b;},0);
-      if(total<3) return "—";
-      return keyFromHistogram(hist); // ✅ no "(auto)"
-    }
-
-    /**********************
-     * Full parsing (apply only on button / blur to prevent keyboard collapse)
-     **********************/
-    var HEADER_TO_ID = {
-      "VERSE 1":"v1","CHORUS 1":"c1","VERSE 2":"v2","CHORUS 2":"c2",
-      "VERSE 3":"v3","BRIDGE":"br","CHORUS 3":"c3"
-    };
-
-    function parseNotesLine(line){
-      var raw=line.replace(/^@\s*/,"").trim();
-      if(!raw) return null;
-      var parts=raw.split("|").map(function(s){ return s.trim(); });
-      var out=new Array(8).fill("");
-      for(var i=0;i<8;i++) out[i]=(parts[i]||"").trim();
-      return out;
-    }
-
-    function applyFullTextToSections(fullText){
-      var proj=getProject();
-      proj.fullText = fullText;
-
-      for(var s=0;s<SECTIONS.length;s++){
-        proj.sections[SECTIONS[s].id]=emptySection(SECTIONS[s].title);
-      }
-
-      var curId=null;
-      var pendingNotes=null;
-      var lineIdxBySection={};
-
-      var lines=String(fullText||"").replace(/\r/g,"").split("\n");
-      for(var i=0;i<lines.length;i++){
-        var line=lines[i];
-        var up=line.trim().toUpperCase();
-
-        if(HEADER_TO_ID[up]){
-          curId=HEADER_TO_ID[up];
-          continue;
-        }
-        if(!curId) continue;
-
-        if(line.trim().startsWith("@")){
-          pendingNotes=parseNotesLine(line.trim());
-          continue;
-        }
-        if(!line.trim()) continue;
-
-        if(lineIdxBySection[curId]==null) lineIdxBySection[curId]=0;
-        var idx=lineIdxBySection[curId];
-        if(idx>=CARDS_PER_SECTION) continue;
-
-        var card=proj.sections[curId].cards[idx];
-        card.lyric=line;
-
-        if(pendingNotes){
-          for(var n=0;n<8;n++){
-            card.notesRaw[n]=transposeToken(pendingNotes[n]||"", -state.capo);
-          }
-          pendingNotes=null;
-        }
-        lineIdxBySection[curId]=idx+1;
-      }
-
-      touchProject();
-    }
-
-    /**********************
-     * Rendering
-     **********************/
-    function buildTabs(){
-      tabsEl.innerHTML="";
-      for(var i=0;i<PAGES.length;i++){
-        (function(p){
-          var b=document.createElement("button");
-          b.className="tab"+(state.pageId===p.id?" active":"");
-          b.textContent=p.name;
-          b.addEventListener("click", function(){
-            state.pageId=p.id;
-            render();
-            saveAll();
-          });
-          tabsEl.appendChild(b);
-        })(PAGES[i]);
-      }
-    }
-
-    function sortedProjects(){
-      var arr=state.projects.slice();
-      if(state.sortMode==="recent"){
-        arr.sort(function(a,b){ return (b.updatedAt||0)-(a.updatedAt||0); });
-      }else{
-        arr.sort(function(a,b){
-          return projectDisplayName(a).toLowerCase().localeCompare(projectDisplayName(b).toLowerCase());
-        });
-      }
-      return arr;
-    }
-
-    function buildProjectSelect(){
-      projectSelect.innerHTML="";
-      var arr=sortedProjects();
-      arr.forEach(function(p){
-        var opt=document.createElement("option");
-        opt.value=p.id;
-        opt.textContent=projectDisplayName(p);
-        projectSelect.appendChild(opt);
-      });
-
-      var newOpt=document.createElement("option");
-      newOpt.value="__new__";
-      newOpt.textContent="+ New Project…";
-      projectSelect.appendChild(newOpt);
-
-      projectSelect.value=state.projectId;
-      sortSelect.value=state.sortMode;
-    }
-
-    // ✅ preview container for full page (so we can update without re-rendering textarea)
-    var fullPreviewMount=null;
-
-    function render(){
-      buildTabs();
-      buildProjectSelect();
-      setAutoSplitButton();
-      setInstrumentButtons();
-      setDrumButtons();
-      setScrollBtn();
-
-      keyOutput.value = computeKey();
-
-      editorRoot.innerHTML="";
-      fullPreviewMount=null;
-
-      var header=document.createElement("div");
-      header.className="sheetHeader";
-      var h2=document.createElement("h2");
-      var hint=document.createElement("div");
-      hint.className="hint";
-
-      var name="Full";
-      for(var i=0;i<PAGES.length;i++) if(PAGES[i].id===state.pageId) name=PAGES[i].name;
-      h2.textContent=name;
-      hint.textContent = (state.pageId==="full") ? "" : "";
-
-      header.appendChild(h2);
-      header.appendChild(hint);
-      editorRoot.appendChild(header);
-
-      if(state.pageId==="full"){
-        editorRoot.appendChild(renderFullEditor());
-      }else{
-        editorRoot.appendChild(renderSection(getProject(), state.pageId));
-      }
-
-      renderRecordings();
-      setBoot("JS running ✓ (editor rendered)", true);
-    }
-
-    function renderFullEditor(){
-      var proj=getProject();
-      var wrap=document.createElement("div");
-      wrap.className="fullBoxWrap";
-
-      // ✅ Paste area collapse + Apply button
-      var topBar=document.createElement("div");
-      topBar.style.display="flex";
-      topBar.style.gap="8px";
-      topBar.style.justifyContent="flex-end";
-      topBar.style.marginBottom="8px";
-      topBar.style.flexWrap="wrap";
-
-      var collapseBtn=document.createElement("button");
-      collapseBtn.className="btn secondary";
-      collapseBtn.textContent = state.fullPasteCollapsed ? "Show Paste Area" : "Hide Paste Area";
-      collapseBtn.addEventListener("click", function(){
-        state.fullPasteCollapsed=!state.fullPasteCollapsed;
-        saveAll();
-        render();
-      });
-
-      var applyBtn=document.createElement("button");
-      applyBtn.className="btn secondary";
-      applyBtn.textContent="Apply to Sections";
-      applyBtn.addEventListener("click", function(){
-        applyFullTextToSections(proj.fullText||"");
-        keyOutput.value=computeKey();
-        updateFullPreviewOnly();
-        setStatus("Applied → sections populated.");
-      });
-
-      topBar.appendChild(collapseBtn);
-      topBar.appendChild(applyBtn);
-      wrap.appendChild(topBar);
-
-      if(!state.fullPasteCollapsed){
-        var ta=document.createElement("textarea");
-        ta.className="fullBox";
-        ta.value = proj.fullText || "";
-        ta.placeholder =
-`VERSE 1
-@ Am | | C | D | G | |
-I love you so much
-
-CHORUS 1
-@ F | | Am | | G | |
-...`;
-
-        // ✅ IMPORTANT: DO NOT RERENDER WHILE TYPING (prevents keyboard collapsing)
-        ta.addEventListener("input", function(){
-          proj.fullText = ta.value;
-          touchProject();
-          setStatus("Typing… (tap Apply to populate sections)");
-        });
-
-        // optional: apply on blur
-        ta.addEventListener("blur", function(){
-          applyFullTextToSections(proj.fullText||"");
-          keyOutput.value=computeKey();
-          updateFullPreviewOnly();
-          setStatus("Applied on blur.");
-        });
-
-        var help=document.createElement("div");
-        help.className="fullHelp";
-        help.textContent='Tip: "@ ..." line fills the 8 note boxes for the next lyric line.';
-
-        wrap.appendChild(ta);
-        wrap.appendChild(help);
-      }
-
-      var previewTitle=document.createElement("div");
-      previewTitle.className="previewTitle";
-      previewTitle.textContent="Full Sheet Preview (auto from your cards):";
-      wrap.appendChild(previewTitle);
-
-      fullPreviewMount=document.createElement("div");
-      wrap.appendChild(fullPreviewMount);
-
-      updateFullPreviewOnly();
-
-      return wrap;
-    }
-
-    function updateFullPreviewOnly(){
-      if(!fullPreviewMount) return;
-      var proj=getProject();
-      fullPreviewMount.innerHTML="";
-
-      for(var s=0;s<SECTIONS.length;s++){
-        var sid=SECTIONS[s].id;
-        var sec=proj.sections[sid];
-
-        var sh=document.createElement("div");
-        sh.className="sectionHeader";
-        sh.textContent=SECTIONS[s].title;
-        fullPreviewMount.appendChild(sh);
-
-        for(var i=0;i<sec.cards.length;i++){
-          var c=sec.cards[i];
-          if(!String(c.lyric||"").trim() && c.notesRaw.join("").trim()==="") continue;
-          var cardEl=document.createElement("div");
-          cardEl.className="card";
-          cardEl.dataset.section=sid;
-          cardEl.dataset.idx=String(i);
-          cardEl.appendChild(renderPreviewLine(sid, i, c));
-          fullPreviewMount.appendChild(cardEl);
-        }
-      }
-    }
-
-    function renderPreviewLine(sectionId, idx, card){
-      var container=document.createElement("div");
-
-      var notesRow=document.createElement("div");
+  // Preview sheet (auto from cards)
+  const previewTitle = document.createElement("div");
+  previewTitle.style.marginTop="14px";
+  previewTitle.style.fontWeight="1100";
+  previewTitle.textContent = "Full Sheet Preview (auto from your cards):";
+  wrap.appendChild(previewTitle);
+
+  SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
+    const hasAny = (project.sections[sec]||[]).some(l=>String(l.lyrics||"").trim().length>0);
+    if(!hasAny) return;
+
+    const sh = document.createElement("div");
+    sh.className="sectionHeader";
+    sh.textContent = sec;
+    wrap.appendChild(sh);
+
+    const cards = document.createElement("div");
+    cards.className="cards";
+
+    (project.sections[sec]||[]).forEach((line, idx)=>{
+      if(!String(line.lyrics||"").trim()) return;
+
+      const card = document.createElement("div");
+      card.className="card";
+
+      const notesRow = document.createElement("div");
       notesRow.className="notesRow";
-      for(var i=0;i<8;i++){
-        var inp=document.createElement("input");
+      (line.notes||Array(8).fill("Not")).forEach((n)=>{
+        const inp = document.createElement("input");
         inp.className="noteCell";
-        inp.value=transposeToken(card.notesRaw[i]||"", state.capo);
-        inp.placeholder="Note";
-        inp.dataset.section=sectionId;
-        inp.dataset.idx=String(idx);
-        inp.dataset.ni=String(i);
-        inp.addEventListener("input", function(){
-          var ni=Number(this.dataset.ni);
-          card.notesRaw[ni]=transposeToken(this.value, -state.capo);
-          touchProject();
-          keyOutput.value=computeKey();
-        });
+        inp.value = n || "Not";
+        inp.readOnly = true;
         notesRow.appendChild(inp);
-      }
-
-      var lyric=document.createElement("textarea");
-      lyric.className="lyrics";
-      lyric.value=card.lyric||"";
-      lyric.dataset.section=sectionId;
-      lyric.dataset.idx=String(idx);
-      lyric.addEventListener("focus", function(){ state.activeLyricEl=lyric; updateRhymeForActiveLine(); });
-      lyric.addEventListener("input", function(){
-        card.lyric=lyric.value;
-        touchProject();
-        updateRhymeForActiveLine();
       });
+      card.appendChild(notesRow);
 
-      container.appendChild(notesRow);
-      container.appendChild(lyric);
-      return container;
-    }
+      const lyr = document.createElement("textarea");
+      lyr.className="lyrics";
+      lyr.value = line.lyrics;
+      lyr.readOnly = true;
+      card.appendChild(lyr);
 
-    function renderSection(project, sectionId){
-      var sec=project.sections[sectionId];
-      var wrap=document.createElement("div");
+      cards.appendChild(card);
+    });
 
-      var sh=document.createElement("div");
-      sh.className="sectionHeader";
-      sh.textContent=sec ? sec.title : sectionId;
-      wrap.appendChild(sh);
+    wrap.appendChild(cards);
+  });
 
-      var cards=document.createElement("div");
-      cards.className="cards";
+  sheetBodyEl.appendChild(wrap);
+}
 
-      for(var i=0;i<CARDS_PER_SECTION;i++){
-        cards.appendChild(renderCard(sectionId, i, sec.cards[i]));
-      }
-      wrap.appendChild(cards);
-      return wrap;
-    }
+function renderSection(sec){
+  sheetTitleEl.textContent = sec;
+  sheetBodyEl.innerHTML = "";
 
-    function renderCard(sectionId, idx, card){
-      var cardEl=document.createElement("div");
-      cardEl.className="card";
-      cardEl.dataset.section=sectionId;
-      cardEl.dataset.idx=String(idx);
+  const cardsWrap = document.createElement("div");
+  cardsWrap.className="cards";
 
-      var t=timingSlots4(card.lyric||"");
+  const lines = project.sections[sec] || [];
+  lines.forEach((line, idx)=>{
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.section = sec;
+    card.dataset.index = String(idx);
 
-      var top=document.createElement("div");
-      top.className="cardTop";
+    const top = document.createElement("div");
+    top.className="cardTop";
 
-      var num=document.createElement("div");
-      num.className="cardNum";
-      num.textContent=String(idx+1);
+    const num = document.createElement("div");
+    num.className="cardNum";
+    num.textContent = String(idx+1);
 
-      var pill=document.createElement("div");
-      pill.className="syllPill";
-      pill.textContent="Syllables: "+t.count;
+    const syll = document.createElement("div");
+    syll.className="syllPill";
+    syll.textContent = "Syllables: " + countSyllablesInLine(line.lyrics);
 
-      top.appendChild(num);
-      top.appendChild(pill);
+    top.appendChild(num);
+    top.appendChild(syll);
+    card.appendChild(top);
 
-      var notesRow=document.createElement("div");
-      notesRow.className="notesRow";
-
-      for(var i=0;i<8;i++){
-        (function(i){
-          var inp=document.createElement("input");
-          inp.className="noteCell";
-          inp.placeholder="Note";
-          inp.value = transposeToken(card.notesRaw[i]||"", state.capo);
-          inp.dataset.section=sectionId;
-          inp.dataset.idx=String(idx);
-          inp.dataset.ni=String(i);
-          inp.addEventListener("input", function(){
-            card.notesRaw[i] = transposeToken(inp.value, -state.capo);
-            touchProject();
-            keyOutput.value = computeKey();
-          });
-          notesRow.appendChild(inp);
-        })(i);
-      }
-
-      var ta=document.createElement("textarea");
-      ta.className="lyrics";
-      ta.value=card.lyric||"";
-      ta.placeholder = state.autoSplit ? "Type lyrics (AutoSplit on)…" : "Type lyrics and split with “/”…";
-      ta.dataset.section=sectionId;
-      ta.dataset.idx=String(idx);
-
-      ta.addEventListener("focus", function(){
-        state.activeLyricEl=ta;
-        updateRhymeForActiveLine();
+    const notesRow = document.createElement("div");
+    notesRow.className="notesRow";
+    const notes = line.notes || Array(8).fill("Not");
+    for(let i=0;i<8;i++){
+      const inp = document.createElement("input");
+      inp.className="noteCell";
+      inp.value = notes[i] ?? "Not";
+      inp.addEventListener("input", ()=>{
+        line.notes[i] = inp.value.trim() || "Not";
+        project.updatedAt = Date.now();
+        updateKeyFromAllNotes();
+        saveProjectSoon();
       });
+      notesRow.appendChild(inp);
+    }
+    card.appendChild(notesRow);
 
-      var timingRow=document.createElement("div");
-      timingRow.className="timingRow";
-      for(var j=0;j<4;j++){
-        var cell=document.createElement("div");
-        cell.className="timingCell"+((j===1||j===3)?" backbeat":"");
-        cell.textContent = t.slots[j] || "";
-        cell.dataset.section=sectionId;
-        cell.dataset.idx=String(idx);
-        cell.dataset.bi=String(j);
-        timingRow.appendChild(cell);
+    const ta = document.createElement("textarea");
+    ta.className="lyrics";
+    ta.placeholder = "Type lyrics (AutoSplit on)…";
+    ta.value = line.lyrics || "";
+    ta.addEventListener("input", ()=>{
+      line.lyrics = ta.value;
+      if(state.autoSplit){
+        line.timing = autosplitTiming(line.lyrics);
       }
+      syll.textContent = "Syllables: " + countSyllablesInLine(line.lyrics);
+      renderTimingRow(timingRow, line, idx);
+      project.updatedAt = Date.now();
+      saveProjectSoon();
+    });
+    card.appendChild(ta);
 
-      ta.addEventListener("input", function(){
-        card.lyric=ta.value;
-        var t2=timingSlots4(card.lyric||"");
-        pill.textContent="Syllables: "+t2.count;
-        var cells=timingRow.querySelectorAll(".timingCell");
-        for(var k=0;k<4;k++) cells[k].textContent=t2.slots[k]||"";
-        touchProject();
-        updateRhymeForActiveLine();
-      });
+    const timingRow = document.createElement("div");
+    timingRow.className="timingRow";
+    card.appendChild(timingRow);
+    renderTimingRow(timingRow, line, idx);
 
-      cardEl.appendChild(top);
-      cardEl.appendChild(notesRow);
-      cardEl.appendChild(ta);
-      cardEl.appendChild(timingRow);
+    cardsWrap.appendChild(card);
+  });
 
-      return cardEl;
+  sheetBodyEl.appendChild(cardsWrap);
+}
+
+function renderTimingRow(timingRow, line, idx){
+  timingRow.innerHTML = "";
+  const parts = line.timing || ["","","",""];
+  for(let i=0;i<4;i++){
+    const d = document.createElement("div");
+    d.className = "timingCell" + ((i===1 || i===3) ? " backbeat":"");
+    d.textContent = parts[i] || "";
+    timingRow.appendChild(d);
+  }
+}
+
+function countSyllablesInLine(text){
+  const words = String(text||"").trim().split(/\s+/).filter(Boolean);
+  return words.reduce((a,w)=>a+syllableCount(w),0);
+}
+
+function renderAll(){
+  setAutoSplitUI();
+  bpmInput.value = String(state.bpm);
+  capoInput.value = String(state.capo);
+  setKeyUI();
+  setInstrumentUI();
+  setDrumUI();
+  setScrollUI();
+  renderTabs();
+
+  if(state.currentSection === "Full"){
+    renderFullView();
+  }else{
+    renderSection(state.currentSection);
+  }
+  renderProjectsDropdown();
+  renderRecordings();
+}
+
+function renderAllSoon(){
+  clearTimeout(renderAllSoon._t);
+  renderAllSoon._t = setTimeout(renderAll, 50);
+}
+
+/* -----------------------------
+   Paste -> Sections
+------------------------------*/
+function applyPasteToSections(){
+  const text = String(project.fullPaste || "");
+  const lines = text.split(/\r?\n/);
+
+  let cur = null;
+  const newMap = {};
+  SECTIONS.forEach(s=>{
+    if(s!=="Full") newMap[s] = [];
+  });
+
+  for(const raw of lines){
+    const line = raw.trimEnd();
+    const t = line.trim();
+    if(!t) continue;
+
+    const upper = t.toUpperCase();
+    const match = SECTIONS.find(s=>s!=="Full" && s===upper);
+    if(match){
+      cur = match;
+      continue;
     }
-
-    /**********************
-     * Panel hide/show behavior (tabs hidden, miniBar shown)
-     **********************/
-    var panelHidden=false;
-    function applyPanelMode(){
-      panelBody.classList.toggle("hidden", panelHidden);
-      tabsEl.classList.toggle("hidden", panelHidden);
-      miniBar.classList.toggle("show", panelHidden);
-      togglePanelBtn.textContent = panelHidden ? "Show" : "Hide";
+    if(cur){
+      const obj = emptyLine();
+      obj.lyrics = t;
+      obj.timing = state.autoSplit ? autosplitTiming(obj.lyrics) : ["","","",""];
+      newMap[cur].push(obj);
     }
-    togglePanelBtn.addEventListener("click", function(){
-      panelHidden=!panelHidden;
-      applyPanelMode();
-    });
+  }
 
-    /**********************
-     * Controls events
-     **********************/
-    autoSplitBtn.addEventListener("click", function(){
-      state.autoSplit=!state.autoSplit;
-      setAutoSplitButton();
-      syncMetaToProject();
-      render();
-      saveAll();
-    });
+  // keep at least 8 lines per section so UI has room
+  for(const sec of Object.keys(newMap)){
+    while(newMap[sec].length < 8) newMap[sec].push(emptyLine());
+    newMap[sec] = newMap[sec].slice(0, 32);
+  }
 
-    bpmInput.addEventListener("change", function(){
-      state.bpm=clampInt(bpmInput.value,40,220);
-      bpmInput.value=state.bpm;
-      syncMetaToProject();
-      if(state.playing) restartDrums();
-    });
+  project.sections = {...project.sections, ...newMap};
+  project.updatedAt = Date.now();
+  saveProjectSoon();
+  renderAll();
+}
 
-    capoInput.addEventListener("change", function(){
-      state.capo=clampInt(capoInput.value,0,12);
-      capoInput.value=state.capo;
-      syncMetaToProject();
-      render();
-    });
+/* -----------------------------
+   Projects UI
+------------------------------*/
+async function ensureProject(){
+  const all = await dbGetAll(STORE_PROJECTS);
+  if(all.length===0){
+    project = defaultProject();
+    state.projectId = project.id;
+    state.projectName = project.name;
+    await dbPut(STORE_PROJECTS, project);
+  }else{
+    // load most recent
+    all.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+    project = all[0];
+    state.projectId = project.id;
+    state.projectName = project.name;
+  }
+}
 
-    instAcoustic.addEventListener("click", function(){ state.instrument="acoustic"; setInstrumentButtons(); syncMetaToProject(); });
-    instElectric.addEventListener("click", function(){ state.instrument="electric"; setInstrumentButtons(); syncMetaToProject(); });
-    instPiano.addEventListener("click", function(){ state.instrument="piano"; setInstrumentButtons(); syncMetaToProject(); });
+async function renderProjectsDropdown(){
+  const all = await dbGetAll(STORE_PROJECTS);
+  const mode = sortSelect.value || "az";
+  let list = [...all];
 
-    function toggleScroll(){
-      state.autoPlay=!state.autoPlay;
-      setScrollBtn();
-      buildPlayQueue();
-      saveAll();
-      setStatus(state.autoPlay ? "Scroll ON (plays line-by-line)." : "Scroll OFF.");
-    }
-    autoPlayBtn.addEventListener("click", toggleScroll);
-    if(mScrollBtn) mScrollBtn.addEventListener("click", toggleScroll);
+  if(mode==="az"){
+    list.sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""), undefined, { sensitivity:"base" }));
+  }else{
+    list.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  }
 
-    sortSelect.addEventListener("change", function(){
-      state.sortMode=sortSelect.value;
-      saveAll();
-      buildProjectSelect();
-    });
+  projectSelect.innerHTML = "";
+  list.forEach(p=>{
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.name || "(untitled)";
+    if(p.id === state.projectId) opt.selected = true;
+    projectSelect.appendChild(opt);
+  });
 
-    projectSelect.addEventListener("change", function(){
-      if(projectSelect.value==="__new__"){
-        var name=prompt("New project name:", "New Song");
-        if(name===null) { projectSelect.value=state.projectId; return; }
-        var clean=name.trim() || "New Song";
-        var id=makeProjectId();
-        state.projects.push({id:id, name:clean, updatedAt:Date.now()});
-        state.projectId=id;
-        state.dataByProject[id]=defaultProjectData();
-        syncMetaFromProject();
-        touchProject();
-        render();
-        saveAll();
-        return;
-      }
+  // ensure a selection exists
+  if(!projectSelect.value && list[0]){
+    projectSelect.value = list[0].id;
+  }
+}
 
-      state.projectId=projectSelect.value;
-      getProject();
-      syncMetaFromProject();
-      touchProject();
-      render();
-      saveAll();
-    });
+/* create project if user types a new name in rename prompt */
+async function renameProject(){
+  const name = prompt("Project name:", project.name || "");
+  if(name===null) return;
+  const nm = name.trim() || "Untitled";
+  project.name = nm;
+  project.updatedAt = Date.now();
+  state.projectName = nm;
+  await dbPut(STORE_PROJECTS, project);
+  renderAllSoon();
+}
 
-    renameProjectBtn.addEventListener("click", function(){
-      var meta=getProjectMeta();
-      if(!meta) return;
-      var cur=meta.name || "";
-      var name=prompt("Rename project:", cur);
+/* -----------------------------
+   Recordings UI
+------------------------------*/
+async function renderRecordings(){
+  const all = await dbGetAll(STORE_RECORDINGS);
+  const mine = all.filter(r=>r.projectId === state.projectId);
+  mine.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+
+  recordingsList.innerHTML = "";
+
+  if(mine.length===0){
+    const d = document.createElement("div");
+    d.style.color="#666";
+    d.style.fontWeight="900";
+    d.textContent = "No recordings yet.";
+    recordingsList.appendChild(d);
+    return;
+  }
+
+  mine.forEach(rec=>{
+    const row = document.createElement("div");
+    row.style.display="flex";
+    row.style.gap="8px";
+    row.style.alignItems="center";
+    row.style.flexWrap="wrap";
+    row.style.border="1px solid rgba(0,0,0,.10)";
+    row.style.borderRadius="14px";
+    row.style.padding="10px";
+
+    const title = document.createElement("div");
+    title.style.flex="1 1 auto";
+    title.style.minWidth="190px";
+    title.style.fontWeight="1100";
+    const d = new Date(rec.createdAt || Date.now());
+    const label = (rec.title && rec.title.trim()) ? rec.title.trim()+" • " : "";
+    title.textContent = label + d.toLocaleString();
+
+    // ✅ edit pencil BEFORE play
+    const edit = document.createElement("button");
+    edit.className="btn secondary";
+    edit.textContent="✏️";
+    edit.title="Rename recording";
+    edit.addEventListener("click", async ()=>{
+      const name = prompt("Recording title:", rec.title || "");
       if(name===null) return;
-      meta.name=(name.trim()||"Untitled").slice(0,50);
-      meta.updatedAt=Date.now();
-      saveAll();
-      buildProjectSelect();
+      rec.title = (name.trim() || "");
+      await dbPut(STORE_RECORDINGS, rec);
+      renderRecordings();
     });
 
-    /**********************
-     * Rhymes (same as v11)
-     **********************/
-    function showRhymes(){
-      rhymeDock.style.display="block";
-      updateRhymeForActiveLine();
-    }
-    function hideRhymes(){ rhymeDock.style.display="none"; }
-    rBtn.addEventListener("click", function(){
-      if(rhymeDock.style.display==="block") hideRhymes();
-      else showRhymes();
+    const play = document.createElement("button");
+    play.className="btn secondary";
+    play.textContent="▶";
+    play.title="Play";
+    play.addEventListener("click", async ()=>{
+      const blob = rec.blob;
+      if(!blob) return;
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play();
+      audio.onended = ()=>URL.revokeObjectURL(url);
     });
-    hideRhymeBtn.addEventListener("click", hideRhymes);
 
-    function lastWord(str){
-      var s=String(str||"").trim();
-      if(!s) return "";
-      s=s.replace(/[^\w'\- ]+/g," ").trim();
-      var parts=s.split(/\s+/).filter(Boolean);
-      return parts.length ? parts[parts.length-1] : "";
+    const download = document.createElement("button");
+    download.className="btn secondary";
+    download.textContent="↓";
+    download.title="Download";
+    download.addEventListener("click", ()=>{
+      const blob = rec.blob;
+      if(!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = (rec.title && rec.title.trim() ? rec.title.trim() : "recording")+"."+ (rec.mime==="audio/webm" ? "webm":"webm");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 1000);
+    });
+
+    const del = document.createElement("button");
+    del.className="btn secondary";
+    del.textContent="🗑";
+    del.title="Delete";
+    del.addEventListener("click", async ()=>{
+      if(!confirm("Delete this recording?")) return;
+      await dbDelete(STORE_RECORDINGS, rec.id);
+      renderRecordings();
+    });
+
+    row.appendChild(title);
+    row.appendChild(edit);
+    row.appendChild(play);
+    row.appendChild(download);
+    row.appendChild(del);
+    recordingsList.appendChild(row);
+  });
+}
+
+/* -----------------------------
+   Save debounce
+------------------------------*/
+function saveProjectSoon(){
+  clearTimeout(saveProjectSoon._t);
+  saveProjectSoon._t = setTimeout(async ()=>{
+    if(!project) return;
+    await dbPut(STORE_PROJECTS, project);
+    renderProjectsDropdown();
+  }, 250);
+}
+
+/* -----------------------------
+   Key detection from notes (simple)
+------------------------------*/
+const SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const KK_MAJOR = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+const KK_MINOR = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+
+function norm(v){ return Math.sqrt(v.reduce((a,x)=>a+x*x,0)) || 1; }
+function dot(a,b){ let s=0; for(let i=0;i<12;i++) s+= (a[i]||0)*(b[i]||0); return s; }
+function rotate(arr, t){
+  const out = Array(12).fill(0);
+  for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
+  return out;
+}
+
+function noteToPC(n){
+  const s = String(n||"").trim().toUpperCase();
+  if(!s || s==="NOT") return null;
+
+  // chord root detection
+  const m = s.match(/^([A-G])(#|B)?/);
+  if(!m) return null;
+  let root = m[1];
+  let acc = m[2] || "";
+  if(acc==="B") acc="b";
+
+  const map = {
+    "C":0,"C#":1,"DB":1,
+    "D":2,"D#":3,"EB":3,
+    "E":4,
+    "F":5,"F#":6,"GB":6,
+    "G":7,"G#":8,"AB":8,
+    "A":9,"A#":10,"BB":10,
+    "B":11
+  };
+  const key = root + (acc==="#" ? "#" : (acc==="b" ? "b" : ""));
+  // normalize flats
+  const k2 = key.replace("b","B");
+  return map[k2] ?? null;
+}
+
+function keyFromHistogram(hist){
+  let best = { score:-1e9, name:"" };
+  const hnorm = norm(hist);
+  for(let t=0;t<12;t++){
+    const maj = rotate(KK_MAJOR, t);
+    const min = rotate(KK_MINOR, t);
+    const majScore = dot(hist, maj) / (hnorm * norm(maj));
+    const minScore = dot(hist, min) / (hnorm * norm(min));
+    if(majScore > best.score) best = { score:majScore, name: SHARP[t] + " maj" };
+    if(minScore > best.score) best = { score:minScore, name: SHARP[t] + " min" };
+  }
+  return best.name || "—";
+}
+
+function updateKeyFromAllNotes(){
+  const hist = Array(12).fill(0);
+  SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
+    (project.sections[sec]||[]).forEach(line=>{
+      (line.notes||[]).forEach(n=>{
+        const pc = noteToPC(n);
+        if(pc!==null) hist[pc] += 1;
+      });
+    });
+  });
+  state.key = keyFromHistogram(hist);
+  setKeyUI();
+}
+
+/* -----------------------------
+   Rhymes (improved + stopwords)
+------------------------------*/
+const STOPWORDS = new Set([
+  "the","a","an","and","or","but","to","of","in","on","at","for","with","from",
+  "is","are","was","were","be","been","being",
+  "i","im","i'm","you","your","you're","we","they","he","she","it","me","my","mine","our","ours",
+  "this","that","these","those",
+  "love"
+]);
+
+function cleanWord(w){
+  return String(w||"")
+    .toLowerCase()
+    .replace(/^[^a-z]+|[^a-z]+$/g,"");
+}
+
+/* rime key: last vowel group + tail, e.g. "wife" => "ife", "knife" => "ife" */
+function rimeKey(word){
+  const w = cleanWord(word);
+  if(!w || w.length<2) return "";
+  // find last vowel group index
+  const m = w.match(/([aeiouy]+[^aeiouy]*)$/);
+  if(m && m[1]){
+    const k = m[1];
+    // shorten super long tails
+    return k.length>5 ? k.slice(-5) : k;
+  }
+  return w.slice(-3);
+}
+
+function buildWordBank(){
+  const set = new Set();
+  SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
+    (project.sections[sec]||[]).forEach(line=>{
+      const words = String(line.lyrics||"").split(/\s+/).map(cleanWord).filter(Boolean);
+      words.forEach(x=>{
+        if(x.length>=2 && !STOPWORDS.has(x)) set.add(x);
+      });
+    });
+  });
+  return Array.from(set);
+}
+
+function showRhymesFor(word){
+  const w = cleanWord(word);
+  if(!w || STOPWORDS.has(w)) return;
+
+  const key = rimeKey(w);
+  const bank = buildWordBank();
+  const picks = bank
+    .filter(x=>x!==w)
+    .map(x=>({ w:x, k:rimeKey(x) }))
+    .filter(o=>o.k === key)
+    .map(o=>o.w)
+    .slice(0, 10);
+
+  rhymeTitle.textContent = `Rhymes for "${w}"`;
+  rhymeWords.innerHTML = "";
+
+  if(picks.length===0){
+    const d = document.createElement("div");
+    d.style.color="#666";
+    d.style.fontWeight="900";
+    d.textContent = "No rhymes found in your lyrics yet.";
+    rhymeWords.appendChild(d);
+  }else{
+    picks.forEach(r=>{
+      const b = document.createElement("button");
+      b.className="rWord";
+      b.textContent = r;
+      b.addEventListener("click", ()=>{
+        if(lastFocusedTextarea){
+          // insert replacement of last word
+          const t = lastFocusedTextarea.value;
+          const parts = t.split(/\s+/);
+          if(parts.length>0){
+            parts[parts.length-1] = r;
+            lastFocusedTextarea.value = parts.join(" ");
+            lastFocusedTextarea.dispatchEvent(new Event("input",{bubbles:true}));
+            lastFocusedTextarea.focus();
+          }
+        }
+      });
+      rhymeWords.appendChild(b);
+    });
+  }
+
+  rhymeDock.style.display="block";
+}
+
+function getLastWordFromFocused(){
+  if(!lastFocusedTextarea) return "";
+  const txt = lastFocusedTextarea.value || "";
+  const parts = txt.trim().split(/\s+/);
+  return parts[parts.length-1] || "";
+}
+
+/* -----------------------------
+   Audio engine (drums + notes + recording mix)
+------------------------------*/
+let audioCtx = null;
+let masterOut = null;
+let mediaDest = null;
+
+function ensureAudio(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterOut = audioCtx.createGain();
+  masterOut.gain.value = 0.9;
+  masterOut.connect(audioCtx.destination);
+
+  mediaDest = audioCtx.createMediaStreamDestination();
+  masterOut.connect(mediaDest);
+}
+
+function hzFromNoteName(name){
+  const s = String(name||"").trim();
+  if(!s || s.toLowerCase()==="not") return null;
+
+  // chord like Am, C, G, D: use root
+  const m = s.match(/^([A-G])(#|b)?/);
+  if(!m) return null;
+  const root = m[1] + (m[2]||"");
+  const map = {C:0,"C#":1,"Db":1,D:2,"D#":3,"Eb":3,E:4,F:5,"F#":6,"Gb":6,G:7,"G#":8,"Ab":8,A:9,"A#":10,"Bb":10,B:11};
+  const pc = map[root] ?? null;
+  if(pc===null) return null;
+
+  // base octave 4
+  const a4 = 440;
+  const n = pc - 9; // distance from A
+  return a4 * Math.pow(2, n/12);
+}
+
+function playTone(freq, t0, t1, type){
+  ensureAudio();
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  const f = audioCtx.createBiquadFilter();
+  f.type = "lowpass";
+  f.frequency.setValueAtTime(type==="Acoustic" ? 2200 : type==="Electric" ? 3200 : 1800, t0);
+
+  // instrument character
+  if(type==="Electric") o.type="sawtooth";
+  else if(type==="Piano") o.type="triangle";
+  else o.type="triangle";
+
+  o.frequency.setValueAtTime(freq, t0);
+
+  // envelope (sustained until next note)
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(type==="Piano" ? 0.35 : 0.25, t0 + 0.01);
+  g.gain.setValueAtTime(type==="Piano" ? 0.20 : 0.18, Math.max(t0+0.02, t1-0.03));
+  g.gain.exponentialRampToValueAtTime(0.0001, t1);
+
+  o.connect(f).connect(g).connect(masterOut);
+  o.start(t0);
+  o.stop(t1 + 0.02);
+}
+
+function drumKick(t){
+  ensureAudio();
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type="sine";
+  o.frequency.setValueAtTime(120, t);
+  o.frequency.exponentialRampToValueAtTime(45, t+0.08);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.8, t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+0.18);
+  o.connect(g).connect(masterOut);
+  o.start(t);
+  o.stop(t+0.22);
+}
+
+function drumSnare(t){
+  ensureAudio();
+  const n = audioCtx.createBufferSource();
+  const g = audioCtx.createGain();
+  const f = audioCtx.createBiquadFilter();
+
+  const dur = 0.18;
+  const sr = audioCtx.sampleRate;
+  const buf = audioCtx.createBuffer(1, Math.floor(sr*dur), sr);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * Math.exp(-i/(sr*0.04));
+
+  n.buffer = buf;
+  f.type="highpass";
+  f.frequency.setValueAtTime(800, t);
+  g.gain.setValueAtTime(0.9, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+
+  n.connect(f).connect(g).connect(masterOut);
+  n.start(t);
+  n.stop(t+dur);
+}
+
+function drumHat(t, open=false){
+  ensureAudio();
+  const dur = open ? 0.14 : 0.05;
+  const sr = audioCtx.sampleRate;
+  const buf = audioCtx.createBuffer(1, Math.floor(sr*dur), sr);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++){
+    data[i] = (Math.random()*2-1) * Math.exp(-i/(sr*(open?0.03:0.015)));
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const f = audioCtx.createBiquadFilter();
+  f.type="highpass";
+  f.frequency.setValueAtTime(6000, t);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(open?0.35:0.22, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  src.connect(f).connect(g).connect(masterOut);
+  src.start(t);
+  src.stop(t+dur);
+}
+
+function scheduleDrums(t0, bars){
+  ensureAudio();
+  const bpm = state.bpm;
+  const beat = 60/bpm;
+  const barDur = beat*4;
+
+  for(let b=0;b<bars;b++){
+    const base = t0 + b*barDur;
+
+    if(state.drumStyle==="Rap"){
+      // kick on 1, “and” of 2, 3; snare on 2/4; hats 8ths
+      drumKick(base + 0*beat);
+      drumKick(base + 1.5*beat);
+      drumKick(base + 2*beat);
+      drumSnare(base + 1*beat);
+      drumSnare(base + 3*beat);
+      for(let i=0;i<8;i++){
+        drumHat(base + i*(beat/2), i===7);
+      }
+    }else if(state.drumStyle==="Pop"){
+      drumKick(base + 0*beat);
+      drumKick(base + 2*beat);
+      drumSnare(base + 1*beat);
+      drumSnare(base + 3*beat);
+      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), false);
+    }else if(state.drumStyle==="Rock"){
+      drumKick(base + 0*beat);
+      drumKick(base + 2.5*beat);
+      drumSnare(base + 1*beat);
+      drumSnare(base + 3*beat);
+      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), i===7);
+    }else{
+      // Hard Rock
+      drumKick(base + 0*beat);
+      drumKick(base + 2*beat);
+      drumKick(base + 2.75*beat);
+      drumSnare(base + 1*beat);
+      drumSnare(base + 3*beat);
+      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), i===7);
+    }
+  }
+}
+
+function scheduleLineNotes(line, t0){
+  const bpm = state.bpm;
+  const step = (60/bpm)/2; // eighth note
+  const notes = (line.notes||[]).map(x=>String(x||"Not"));
+
+  // sustained: each note holds until next non-Not (or end)
+  for(let i=0;i<8;i++){
+    const n = notes[i];
+    if(!n || n.toLowerCase()==="not") continue;
+
+    let j=i+1;
+    while(j<8 && (!notes[j] || notes[j].toLowerCase()==="not")) j++;
+    const tStart = t0 + i*step;
+    const tEnd = t0 + (j<8 ? j*step : 8*step);
+
+    const hz = hzFromNoteName(n);
+    if(hz) playTone(hz, tStart, tEnd, state.instrument);
+  }
+  return t0 + 8*step;
+}
+
+/* -----------------------------
+   AutoScroll play
+------------------------------*/
+let playing = false;
+let playTimer = null;
+let activeCard = null;
+
+function clearActiveCard(){
+  if(activeCard) activeCard.classList.remove("activeLine");
+  activeCard = null;
+}
+
+function highlightCard(sec, idx){
+  clearActiveCard();
+  const card = document.querySelector(`.card[data-section="${sec}"][data-index="${idx}"]`);
+  if(card){
+    activeCard = card;
+    card.classList.add("activeLine");
+    card.scrollIntoView({ behavior:"smooth", block:"center" });
+  }
+}
+
+function getPlayableSequence(){
+  // if on Full, play all sections in order
+  const order = SECTIONS.filter(s=>s!=="Full");
+  const seq = [];
+  order.forEach(sec=>{
+    (project.sections[sec]||[]).forEach((line, idx)=>{
+      if(String(line.lyrics||"").trim().length>0 || (line.notes||[]).some(n=>String(n||"").toLowerCase()!=="not")){
+        seq.push({sec, idx, line});
+      }
+    });
+  });
+  return seq;
+}
+
+async function startAutoPlay(){
+  ensureAudio();
+  if(audioCtx.state==="suspended") await audioCtx.resume();
+
+  state.autoPlay = true;
+  setScrollUI();
+
+  playing = true;
+  const bpm = state.bpm;
+  const step = (60/bpm)/2;
+  const lineDur = step*8;
+
+  const seq = getPlayableSequence();
+  if(seq.length===0){
+    state.autoPlay=false;
+    setScrollUI();
+    return;
+  }
+
+  let cursor = 0;
+
+  const loop = async ()=>{
+    if(!playing) return;
+
+    const now = audioCtx.currentTime + 0.05;
+
+    // schedule 2 lines ahead
+    for(let k=0;k<2;k++){
+      const item = seq[(cursor+k) % seq.length];
+      const t0 = now + k*lineDur;
+
+      scheduleDrums(t0, 1);
+      scheduleLineNotes(item.line, t0);
+
+      // visual highlight near time
+      setTimeout(()=>{
+        if(!playing) return;
+        // if user is not on that section, switch view automatically
+        if(state.currentSection !== item.sec){
+          state.currentSection = item.sec;
+          renderAll();
+        }
+        highlightCard(item.sec, item.idx);
+      }, Math.max(0, (t0 - audioCtx.currentTime)*1000));
     }
 
-    var RHYME_SETS = {
-      "wife": ["life","strife","knife","five"],
-      "dear": ["near","fear","clear","cheer","steer","year","sincere","here"],
-      "love": ["dove","glove","above"]
+    cursor = (cursor + 1) % seq.length;
+    playTimer = setTimeout(loop, lineDur*1000);
+  };
+
+  loop();
+}
+
+function stopAutoPlay(){
+  playing = false;
+  clearTimeout(playTimer);
+  playTimer = null;
+  clearActiveCard();
+  state.autoPlay = false;
+  setScrollUI();
+}
+
+/* -----------------------------
+   Recording (MIC + APP AUDIO)
+------------------------------*/
+let mediaRecorder = null;
+let recChunks = [];
+let recording = false;
+
+async function startRecording(){
+  try{
+    ensureAudio();
+    if(audioCtx.state==="suspended") await audioCtx.resume();
+
+    const mic = await navigator.mediaDevices.getUserMedia({ audio:true });
+
+    const tracks = [];
+    mic.getAudioTracks().forEach(t=>tracks.push(t));
+    if(mediaDest && mediaDest.stream){
+      mediaDest.stream.getAudioTracks().forEach(t=>tracks.push(t));
+    }
+
+    const mixed = new MediaStream(tracks);
+    recChunks = [];
+
+    mediaRecorder = new MediaRecorder(mixed);
+    mediaRecorder.ondataavailable = (e)=>{
+      if(e.data && e.data.size>0) recChunks.push(e.data);
     };
 
-    function buildWordBank(){
-      var proj=getProject();
-      var set=new Set();
-      for(var sid in proj.sections){
-        var sec=proj.sections[sid];
-        for(var i=0;i<sec.cards.length;i++){
-          var w=String(sec.cards[i].lyric||"")
-            .toLowerCase()
-            .replace(/[^\w'\- ]+/g," ")
-            .split(/\s+/).filter(Boolean);
-          w.forEach(function(x){ if(x.length>=2) set.add(x); });
-        }
-      }
-      return Array.from(set);
-    }
+    mediaRecorder.onstop = async ()=>{
+      recording = false;
+      recordBtn.textContent = "Record";
+      mRecordBtn.textContent = "Record";
 
-    function vowelTail(x){
-      var m=String(x||"").toLowerCase().match(/[aeiouy]+[^aeiouy]*$/);
-      return m?m[0]:"";
-    }
-    function tail(x,n){
-      x=String(x||"").toLowerCase();
-      return x.length>=n ? x.slice(-n) : x;
-    }
-    function scoreRhyme(base, cand){
-      base=String(base||"").toLowerCase();
-      cand=String(cand||"").toLowerCase();
-      if(!base || !cand || base===cand) return -999;
-      var s=0;
-      var vt=vowelTail(base);
-      if(vt && vt===vowelTail(cand)) s+=6;
-      if(tail(base,4)===tail(cand,4)) s+=5;
-      if(tail(base,3)===tail(cand,3)) s+=4;
-      if(tail(base,2)===tail(cand,2)) s+=3;
-      return s;
-    }
-
-    function insertWordAtCursor(textarea, word){
-      var value=textarea.value;
-      var start=textarea.selectionStart||value.length;
-      var end=textarea.selectionEnd||value.length;
-      var before=value.slice(0,start);
-      var after=value.slice(end);
-      var needsSpace = before.length && !/\s$/.test(before);
-      var insert=(needsSpace?" ":"")+word;
-      textarea.value = before + insert + after;
-      var pos = (before + insert).length;
-      textarea.selectionStart = textarea.selectionEnd = pos;
-      textarea.focus();
-    }
-
-    function previousLineWordFromSameSection(el){
-      if(!el) return "";
-      var sec=el.dataset.section;
-      var idx=Number(el.dataset.idx);
-      if(!sec || !isFinite(idx)) return "";
-      var prevIdx=idx-1;
-      if(prevIdx<0) return "";
-      var proj=getProject();
-      var card=proj.sections[sec] && proj.sections[sec].cards[prevIdx];
-      if(!card) return "";
-      return lastWord(card.lyric||"");
-    }
-
-    function updateRhymeForActiveLine(){
-      if(rhymeDock.style.display!=="block") return;
-      if(!state.activeLyricEl) return;
-
-      var baseWord = previousLineWordFromSameSection(state.activeLyricEl);
-      rhymeTitle.textContent = baseWord ? ('Rhymes for "'+baseWord+'"') : "Rhymes";
-      rhymeWords.innerHTML="";
-
-      if(!baseWord){
-        var msg=document.createElement("div");
-        msg.style.color="#666";
-        msg.style.fontWeight="900";
-        msg.style.fontSize="13px";
-        msg.textContent="Tap a lyric line. Rhymes come from the LAST WORD of the PREVIOUS line (same section).";
-        rhymeWords.appendChild(msg);
-        return;
-      }
-
-      var baseLower=baseWord.toLowerCase();
-      var picks=[];
-
-      if(RHYME_SETS[baseLower]) picks = picks.concat(RHYME_SETS[baseLower]);
-
-      var bank=buildWordBank();
-      var scored=bank.map(function(w){ return {w:w, s:scoreRhyme(baseLower,w)}; })
-        .filter(function(o){ return o.s>=6; })
-        .sort(function(a,b){ return b.s-a.s; })
-        .slice(0,18)
-        .map(function(o){ return o.w; });
-
-      scored.forEach(function(w){ if(picks.indexOf(w)===-1) picks.push(w); });
-      picks=picks.slice(0,14);
-
-      if(!picks.length){
-        var none=document.createElement("div");
-        none.style.color="#666";
-        none.style.fontWeight="900";
-        none.style.fontSize="13px";
-        none.textContent="No good matches yet — add more lyrics and try again.";
-        rhymeWords.appendChild(none);
-        return;
-      }
-
-      picks.forEach(function(w){
-        var b=document.createElement("button");
-        b.className="rWord";
-        b.textContent=w;
-        b.addEventListener("click", function(){
-          insertWordAtCursor(state.activeLyricEl, w);
-          state.activeLyricEl.dispatchEvent(new Event("input"));
-        });
-        rhymeWords.appendChild(b);
+      const blob = new Blob(recChunks, { type:"audio/webm" });
+      const id = "rec_"+Date.now();
+      await dbPut(STORE_RECORDINGS, {
+        id,
+        projectId: state.projectId,
+        createdAt: Date.now(),
+        mime: "audio/webm",
+        title: "",
+        blob
       });
-    }
 
-    /**********************
-     * PLAY QUEUE (line-by-line)
-     **********************/
-    function buildPlayQueue(){
-      var proj=getProject();
-      var q=[];
-      for(var s=0;s<SECTIONS.length;s++){
-        var sid=SECTIONS[s].id;
-        var sec=proj.sections[sid];
-        for(var i=0;i<sec.cards.length;i++){
-          var c=sec.cards[i];
-          if(String(c.lyric||"").trim() || c.notesRaw.join("").trim()){
-            q.push({sectionId:sid, idx:i});
-          }
-        }
-      }
-      state.playQueue=q;
-      state.playPos=0;
-    }
+      mic.getTracks().forEach(t=>t.stop());
+      renderRecordings();
+    };
 
-    function markActiveLine(sectionId, idx){
-      document.querySelectorAll(".card.activeLine").forEach(function(el){
-        el.classList.remove("activeLine");
-      });
-      var el=document.querySelector('.card[data-section="'+sectionId+'"][data-idx="'+String(idx)+'"]');
-      if(el){
-        el.classList.add("activeLine");
-        if(state.autoPlay){
-          try{ el.scrollIntoView({behavior:"smooth", block:"center"}); }catch(e){}
-        }
-      }
-    }
+    mediaRecorder.start();
+    recording = true;
+    recordBtn.textContent = "Stop";
+    mRecordBtn.textContent = "Stop";
 
-    /**********************
-     * DRUMS + AUDIO (✅ sustain until next note)
-     **********************/
-    var audioCtx=null;
-    var drumTimer=null;
-
-    function ensureAudio(){
-      if(audioCtx) return;
-      audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    }
-
-    function noiseBuffer(seconds){
-      var len=Math.floor(audioCtx.sampleRate*seconds);
-      var buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate);
-      var d=buf.getChannelData(0);
-      for(var i=0;i<len;i++) d[i]=Math.random()*2-1;
-      return buf;
-    }
-
-    function playKick(t,strength){
-      var o=audioCtx.createOscillator();
-      var g=audioCtx.createGain();
-      o.type="sine";
-      o.frequency.setValueAtTime(150,t);
-      o.frequency.exponentialRampToValueAtTime(55,t+0.08);
-      g.gain.setValueAtTime(0.0001,t);
-      g.gain.exponentialRampToValueAtTime(strength,t+0.003);
-      g.gain.exponentialRampToValueAtTime(0.0001,t+0.16);
-      o.connect(g).connect(audioCtx.destination);
-      o.start(t); o.stop(t+0.20);
-    }
-
-    function playSnare(t,strength){
-      var src=audioCtx.createBufferSource();
-      src.buffer=noiseBuffer(0.12);
-      var hp=audioCtx.createBiquadFilter();
-      hp.type="highpass"; hp.frequency.setValueAtTime(2500,t);
-      var g=audioCtx.createGain();
-      g.gain.setValueAtTime(0.0001,t);
-      g.gain.exponentialRampToValueAtTime(strength,t+0.002);
-      g.gain.exponentialRampToValueAtTime(0.0001,t+0.12);
-      src.connect(hp).connect(g).connect(audioCtx.destination);
-      src.start(t); src.stop(t+0.14);
-    }
-
-    function playHat(t,strength){
-      var src=audioCtx.createBufferSource();
-      src.buffer=noiseBuffer(0.05);
-      var bp=audioCtx.createBiquadFilter();
-      bp.type="bandpass"; bp.frequency.setValueAtTime(8000,t); bp.Q.setValueAtTime(2.5,t);
-      var g=audioCtx.createGain();
-      g.gain.setValueAtTime(0.0001,t);
-      g.gain.exponentialRampToValueAtTime(strength,t+0.0015);
-      g.gain.exponentialRampToValueAtTime(0.0001,t+0.04);
-      src.connect(bp).connect(g).connect(audioCtx.destination);
-      src.start(t); src.stop(t+0.05);
-    }
-
-    function getPattern(style){
-      if(style==="rock"){
-        return {
-          kick:[1,0,0,0, 0,0,1,0, 0,0,0,0, 0,1,0,0],
-          snare:[0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-          hat:[1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]
-        };
-      }
-      if(style==="hardrock"){
-        return {
-          kick:[1,0,0,1, 0,1,0,1, 1,0,0,1, 0,1,0,1],
-          snare:[0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-          hat:[1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1]
-        };
-      }
-      if(style==="pop"){
-        return {
-          kick:[1,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0],
-          snare:[0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-          hat:[1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]
-        };
-      }
-      return {
-        kick:[1,0,0,0, 0,1,0,0, 1,0,0,1, 0,0,1,0],
-        snare:[0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-        hat:[1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]
-      };
-    }
-
-    // Note -> freq (root only)
-    var NOTE_TO_SEMI=(function(){
-      var map={};
-      var SH=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-      for(var i=0;i<12;i++) map[SH[i]]=i;
-      map["Db"]=1; map["Eb"]=3; map["Gb"]=6; map["Ab"]=8; map["Bb"]=10;
-      return map;
-    })();
-    function noteToFreq(token){
-      var s=String(token||"").trim();
-      if(!s) return null;
-      var root=chordRoot(s);
-      if(!root) return null;
-      var pc=NOTE_TO_SEMI[root];
-      if(pc==null) return null;
-      var octave=3;
-      var midi=12*(octave+1)+pc;
-      return 440*Math.pow(2,(midi-69)/12);
-    }
-
-    // highlights
-    function clearHighlights(){
-      document.querySelectorAll(".noteCell.hl").forEach(function(el){ el.classList.remove("hl"); });
-      document.querySelectorAll(".timingCell.hl").forEach(function(el){ el.classList.remove("hl"); });
-    }
-    function highlightActiveLine(sectionId, idx, eighthIndex, beatIndex){
-      clearHighlights();
-      document.querySelectorAll('.noteCell[data-section="'+sectionId+'"][data-idx="'+String(idx)+'"][data-ni="'+String(eighthIndex)+'"]')
-        .forEach(function(el){ el.classList.add("hl"); });
-      document.querySelectorAll('.timingCell[data-section="'+sectionId+'"][data-idx="'+String(idx)+'"][data-bi="'+String(beatIndex)+'"]')
-        .forEach(function(el){ el.classList.add("hl"); });
-    }
-
-    /**********************
-     * Instruments (same as v11)
-     **********************/
-    function pluckString(freq, t, duration, brightness){
-      var sr=audioCtx.sampleRate;
-      var period=Math.max(2, Math.floor(sr / Math.max(40, freq)));
-      var buf=audioCtx.createBuffer(1, period, sr);
-      var d=buf.getChannelData(0);
-      for(var i=0;i<period;i++) d[i]=(Math.random()*2-1);
-
-      var src=audioCtx.createBufferSource();
-      src.buffer=buf; src.loop=true;
-
-      var delay=audioCtx.createDelay();
-      delay.delayTime.setValueAtTime(period/sr, t);
-
-      var fb=audioCtx.createGain();
-      fb.gain.setValueAtTime(0.995, t);
-
-      var lp=audioCtx.createBiquadFilter();
-      lp.type="lowpass";
-      lp.frequency.setValueAtTime(1200 + (brightness||0)*2000, t);
-
-      var out=audioCtx.createGain();
-      out.gain.setValueAtTime(0.0001, t);
-      out.gain.exponentialRampToValueAtTime(0.6, t+0.01);
-      out.gain.exponentialRampToValueAtTime(0.0001, t+duration);
-
-      src.connect(delay);
-      delay.connect(lp).connect(out).connect(audioCtx.destination);
-      delay.connect(fb).connect(delay);
-
-      src.start(t);
-      src.stop(t+duration+0.02);
-    }
-
-    function playElectric(freq, t, duration){
-      var o=audioCtx.createOscillator();
-      var g=audioCtx.createGain();
-      var lp=audioCtx.createBiquadFilter();
-      var ws=audioCtx.createWaveShaper();
-
-      o.type="sawtooth";
-      o.frequency.setValueAtTime(freq, t);
-
-      var n=2048, curve=new Float32Array(n);
-      for(var i=0;i<n;i++){
-        var x=(i*2/n)-1;
-        curve[i]=Math.tanh(2.8*x);
-      }
-      ws.curve=curve;
-
-      lp.type="lowpass";
-      lp.frequency.setValueAtTime(2200, t);
-
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.35, t+0.01);
-      g.gain.exponentialRampToValueAtTime(0.20, t+0.25);
-      g.gain.exponentialRampToValueAtTime(0.0001, t+duration);
-
-      o.connect(ws).connect(lp).connect(g).connect(audioCtx.destination);
-      o.start(t); o.stop(t+duration+0.05);
-    }
-
-    function playPiano(freq, t, duration){
-      var src=audioCtx.createBufferSource();
-      src.buffer=noiseBuffer(0.03);
-      var hp=audioCtx.createBiquadFilter();
-      hp.type="highpass"; hp.frequency.setValueAtTime(1500, t);
-
-      var o1=audioCtx.createOscillator();
-      var o2=audioCtx.createOscillator();
-      o1.type="triangle"; o2.type="sine";
-      o1.frequency.setValueAtTime(freq, t);
-      o2.frequency.setValueAtTime(freq*2, t);
-
-      var g=audioCtx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.55, t+0.006);
-      g.gain.exponentialRampToValueAtTime(0.15, t+0.35);
-      g.gain.exponentialRampToValueAtTime(0.0001, t+duration);
-
-      var lp=audioCtx.createBiquadFilter();
-      lp.type="lowpass"; lp.frequency.setValueAtTime(2800, t);
-
-      src.connect(hp).connect(lp);
-      o1.connect(lp); o2.connect(lp);
-      lp.connect(g).connect(audioCtx.destination);
-
-      src.start(t); src.stop(t+0.04);
-      o1.start(t); o2.start(t);
-      o1.stop(t+duration+0.05); o2.stop(t+duration+0.05);
-    }
-
-    function playInstrument(freq, t, duration){
-      if(state.instrument==="acoustic"){
-        pluckString(freq, t, duration, 0.6);
-      }else if(state.instrument==="electric"){
-        playElectric(freq, t, duration);
-      }else{
-        playPiano(freq, t, duration);
-      }
-    }
-
-    /**********************
-     * Drums engine + sustained note driver
-     **********************/
-    function stopDrums(){
-      state.playing=false;
-      state.tickIndex=0;
-      if(drumTimer){ clearInterval(drumTimer); drumTimer=null; }
-      clearHighlights();
-      document.querySelectorAll(".card.activeLine").forEach(function(el){ el.classList.remove("activeLine"); });
-      setStatus("Drums stopped.");
-      setDrumButtons();
-      saveAll();
-    }
-
-    function stepMs(){ return (60/state.bpm)*1000/4; } // 16ths
-    function stepSec(){ return (60/state.bpm)/4; }      // 16ths seconds
-
-    function currentLineRef(){
-      if(state.autoPlay && state.playQueue.length){
-        return state.playQueue[state.playPos] || state.playQueue[0];
-      }
-      if(state.pageId!=="full"){
-        return {sectionId:state.pageId, idx:0};
-      }
-      if(state.playQueue.length) return state.playQueue[0];
-      return {sectionId:"v1", idx:0};
-    }
-
-    function advanceLine(){
-      if(!state.autoPlay || !state.playQueue.length) return;
-      state.playPos++;
-      if(state.playPos>=state.playQueue.length) state.playPos=0;
-    }
-
-    // ✅ duration until next non-empty note (in eighths)
-    function durationUntilNextNote(ref, startEighth){
-      // check next eighth slots in same line
-      for(var e=startEighth+1; e<8; e++){
-        var el=document.querySelector('.noteCell[data-section="'+ref.sectionId+'"][data-idx="'+String(ref.idx)+'"][data-ni="'+String(e)+'"]');
-        if(el && String(el.value||"").trim()) return (e - startEighth);
-      }
-      // none found → hold to end of bar
-      return (8 - startEighth);
-    }
-
-    function startDrums(style){
-      ensureAudio();
-      if(audioCtx.state==="suspended") audioCtx.resume();
-
-      state.drumStyle=style;
-      state.playing=true;
-      state.tickIndex=0;
-
-      buildPlayQueue();
-
-      setDrumButtons();
-      saveAll();
-
-      var pat=getPattern(style);
-
-      if(drumTimer) clearInterval(drumTimer);
-      drumTimer=setInterval(function(){
-        if(!state.playing) return;
-
-        var now=audioCtx.currentTime;
-        var step=state.tickIndex % 16;
-
-        if(step===0){
-          if(state.tickIndex>0) advanceLine();
-          var ref0=currentLineRef();
-          markActiveLine(ref0.sectionId, ref0.idx);
-        }
-
-        blinkHead();
-
-        var kGain=(style==="hardrock")?0.95:(style==="rap")?1.05:0.75;
-        var sGain=(style==="hardrock")?0.90:0.65;
-        var hGain=(style==="hardrock")?0.38:(style==="rap")?0.30:0.22;
-
-        if(pat.kick[step]) playKick(now,kGain);
-        if(pat.snare[step]) playSnare(now,sGain);
-        if(pat.hat[step]) playHat(now,hGain);
-
-        var eighthIndex = Math.floor(step/2); // 0..7
-        var beatIndex   = Math.floor(step/4); // 0..3
-
-        var ref=currentLineRef();
-        highlightActiveLine(ref.sectionId, ref.idx, eighthIndex, beatIndex);
-
-        // ✅ play note ONLY when this cell is non-empty; duration extends until next note
-        if(step % 2 === 0){
-          var noteEl=document.querySelector('.noteCell[data-section="'+ref.sectionId+'"][data-idx="'+String(ref.idx)+'"][data-ni="'+String(eighthIndex)+'"]');
-          if(noteEl){
-            var token=String(noteEl.value||"").trim();
-            if(token){
-              var f=noteToFreq(token);
-              if(f){
-                var eighths=durationUntilNextNote(ref, eighthIndex);
-                var dur = Math.max(0.18, (stepSec()*2) * eighths * 0.98); // eighth = 2 steps
-                playInstrument(f, now, dur);
-              }
-            }
-          }
-        }
-
-        state.tickIndex++;
-      }, stepMs());
-
-      setStatus("Playing: "+style.toUpperCase()+" (tap style again to stop)");
-    }
-
-    function restartDrums(){
-      if(!state.playing || !state.drumStyle) return;
-      stopDrums();
-      startDrums(state.drumStyle);
-    }
-
-    function toggleDrum(style){
-      if(state.playing && state.drumStyle===style){
-        stopDrums();
-        state.drumStyle=null;
-        setDrumButtons();
-        saveAll();
-        return;
-      }
-      startDrums(style);
-    }
-
-    drumRock.addEventListener("click", function(){ toggleDrum("rock"); });
-    drumHardRock.addEventListener("click", function(){ toggleDrum("hardrock"); });
-    drumPop.addEventListener("click", function(){ toggleDrum("pop"); });
-    drumRap.addEventListener("click", function(){ toggleDrum("rap"); });
-
-    if(mRock){
-      mRock.addEventListener("click", function(){ toggleDrum("rock"); });
-      mHardRock.addEventListener("click", function(){ toggleDrum("hardrock"); });
-      mPop.addEventListener("click", function(){ toggleDrum("pop"); });
-      mRap.addEventListener("click", function(){ toggleDrum("rap"); });
-    }
-
-    /**********************
-     * Recording (mirrored button)
-     **********************/
-    var mediaRecorder=null;
-    var chunks=[];
-    var recording=false;
-
-    async function startRecording(){
-      try{
-        var stream=await navigator.mediaDevices.getUserMedia({ audio:true });
-        mediaRecorder=new MediaRecorder(stream);
-        chunks=[];
-        mediaRecorder.ondataavailable=function(e){
-          if(e.data && e.data.size>0) chunks.push(e.data);
-        };
-        mediaRecorder.onstop=async function(){
-          recording=false;
-          recordBtn.textContent="Record";
-          if(mRecordBtn) mRecordBtn.textContent="Record";
-
-          var blob=new Blob(chunks, { type:"audio/webm" });
-          var id="rec_"+Date.now();
-          await dbPut({ id:id, createdAt:Date.now(), mime:"audio/webm", blob:blob });
-
-          stream.getTracks().forEach(function(t){ t.stop(); });
-
-          renderRecordings();
-          setStatus("Recording saved.");
-        };
-
-        mediaRecorder.start();
-        recording=true;
-        recordBtn.textContent="Stop";
-        if(mRecordBtn) mRecordBtn.textContent="Stop";
-        setStatus("Recording…");
-      }catch(e){
-        alert("Mic permission needed to record.");
-      }
-    }
-
-    function stopRecording(){
-      try{
-        if(mediaRecorder && mediaRecorder.state!=="inactive"){
-          mediaRecorder.stop();
-        }
-      }catch(e){}
-    }
-
-    function toggleRecord(){
-      try{ ensureAudio(); if(audioCtx && audioCtx.state==="suspended") audioCtx.resume(); }catch(e){}
-      if(!recording) startRecording();
-      else stopRecording();
-    }
-    recordBtn.addEventListener("click", toggleRecord);
-    if(mRecordBtn) mRecordBtn.addEventListener("click", toggleRecord);
-
-    async function renderRecordings(){
-      recordingsList.innerHTML="";
-      var recs=await dbGetAll();
-      recs.sort(function(a,b){ return b.createdAt-a.createdAt; });
-
-      if(!recs.length){
-        var none=document.createElement("div");
-        none.style.color="#666";
-        none.style.fontWeight="900";
-        none.textContent="No recordings yet.";
-        recordingsList.appendChild(none);
-        return;
-      }
-
-      recs.forEach(function(r){
-        var row=document.createElement("div");
-        row.style.display="flex";
-        row.style.gap="8px";
-        row.style.alignItems="center";
-        row.style.flexWrap="wrap";
-        row.style.border="1px solid rgba(0,0,0,.10)";
-        row.style.borderRadius="14px";
-        row.style.padding="10px";
-        row.style.background="#fff";
-
-        var title=document.createElement("div");
-        title.style.fontWeight="1100";
-        title.style.fontSize="13px";
-        var d=new Date(r.createdAt);
-        title.textContent = d.toLocaleString();
-
-        var play=document.createElement("button");
-        play.className="btn secondary";
-        play.textContent="▶";
-
-        var stop=document.createElement("button");
-        stop.className="btn secondary";
-        stop.textContent="■";
-
-        var audio=new Audio();
-        audio.src=URL.createObjectURL(r.blob);
-
-        play.addEventListener("click", function(){ audio.play(); });
-        stop.addEventListener("click", function(){ audio.pause(); audio.currentTime=0; });
-
-        var dl=document.createElement("button");
-        dl.className="btn secondary";
-        dl.textContent="⬇";
-        dl.addEventListener("click", function(){
-          var a=document.createElement("a");
-          a.href=audio.src;
-          a.download="songrider_recording_"+r.createdAt+".webm";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-        });
-
-        var del=document.createElement("button");
-        del.className="btn secondary";
-        del.textContent="🗑";
-        del.addEventListener("click", async function(){
-          if(!confirm("Delete this recording?")) return;
-          await dbDel(r.id);
-          renderRecordings();
-        });
-
-        row.appendChild(title);
-        row.appendChild(play);
-        row.appendChild(stop);
-        row.appendChild(dl);
-        row.appendChild(del);
-
-        recordingsList.appendChild(row);
-      });
-    }
-
-    /**********************
-     * Init
-     **********************/
-    loadAll();
-    buildPlayQueue();
-    render();
-    applyPanelMode = applyPanelMode || function(){};
-    applyPanelMode();
-    setStatus("Ready.");
-    setBoot("JS running ✓ (editor rendered)", true);
-
-  }catch(err){
-    console.error(err);
-    setBoot("JS ERROR: "+(err && err.message ? err.message : String(err)), false);
+  }catch(e){
+    alert("Mic permission is required to record.");
   }
+}
+
+function stopRecording(){
+  if(mediaRecorder && recording){
+    mediaRecorder.stop();
+  }
+}
+
+/* -----------------------------
+   Headshot blink hook
+------------------------------*/
+function blinkOnce(){
+  const w = $("headshotWrap");
+  if(!w) return;
+  w.classList.add("blink");
+  setTimeout(()=>w.classList.remove("blink"), 120);
+}
+
+/* -----------------------------
+   Events
+------------------------------*/
+togglePanelBtn.addEventListener("click", ()=>{
+  const collapsed = !panelBody.classList.contains("hidden");
+  setPanelCollapsed(collapsed);
+});
+
+autoSplitBtn.addEventListener("click", ()=>{
+  state.autoSplit = !state.autoSplit;
+  setAutoSplitUI();
+  // recompute timing for current section
+  if(state.currentSection !== "Full"){
+    const sec = state.currentSection;
+    (project.sections[sec]||[]).forEach(line=>{
+      line.timing = state.autoSplit ? autosplitTiming(line.lyrics) : ["","","",""];
+    });
+    project.updatedAt = Date.now();
+    saveProjectSoon();
+    renderAllSoon();
+  }
+});
+
+bpmInput.addEventListener("input", ()=>{
+  state.bpm = Math.max(40, Math.min(220, Number(bpmInput.value||95)));
+});
+capoInput.addEventListener("input", ()=>{
+  state.capo = Math.max(0, Math.min(12, Number(capoInput.value||0)));
+});
+
+instAcoustic.addEventListener("click", ()=>{ state.instrument="Acoustic"; setInstrumentUI(); });
+instElectric.addEventListener("click", ()=>{ state.instrument="Electric"; setInstrumentUI(); });
+instPiano.addEventListener("click", ()=>{ state.instrument="Piano"; setInstrumentUI(); });
+
+function setDrumStyle(s){
+  state.drumStyle = s;
+  setDrumUI();
+}
+drumRock.addEventListener("click", ()=>setDrumStyle("Rock"));
+drumHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
+drumPop.addEventListener("click", ()=>setDrumStyle("Pop"));
+drumRap.addEventListener("click", ()=>setDrumStyle("Rap"));
+mRock.addEventListener("click", ()=>setDrumStyle("Rock"));
+mHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
+mPop.addEventListener("click", ()=>setDrumStyle("Pop"));
+mRap.addEventListener("click", ()=>setDrumStyle("Rap"));
+
+autoPlayBtn.addEventListener("click", async ()=>{
+  if(state.autoPlay){
+    stopAutoPlay();
+  }else{
+    await startAutoPlay();
+  }
+});
+mScrollBtn.addEventListener("click", async ()=>{
+  if(state.autoPlay){
+    stopAutoPlay();
+  }else{
+    await startAutoPlay();
+  }
+});
+
+recordBtn.addEventListener("click", async ()=>{
+  if(recording) stopRecording();
+  else await startRecording();
+});
+mRecordBtn.addEventListener("click", async ()=>{
+  if(recording) stopRecording();
+  else await startRecording();
+});
+
+sortSelect.addEventListener("change", renderProjectsDropdown);
+
+projectSelect.addEventListener("change", async ()=>{
+  const id = projectSelect.value;
+  const p = await dbGet(STORE_PROJECTS, id);
+  if(!p) return;
+  project = p;
+  state.projectId = p.id;
+  state.projectName = p.name;
+  updateKeyFromAllNotes();
+  renderAll();
+  renderRecordings();
+});
+
+renameProjectBtn.addEventListener("click", renameProject);
+
+rBtn.addEventListener("click", ()=>{
+  blinkOnce();
+  const w = getLastWordFromFocused();
+  showRhymesFor(w);
+});
+hideRhymeBtn.addEventListener("click", ()=>{
+  rhymeDock.style.display="none";
+});
+
+/* -----------------------------
+   Init
+------------------------------*/
+(async function init(){
+  await ensureProject();
+  setAutoSplitUI();
+  setPanelCollapsed(false);
+  renderTabs();
+  updateKeyFromAllNotes();
+  renderAll();
+})();
 })();
