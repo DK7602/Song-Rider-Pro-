@@ -1,20 +1,12 @@
 {
   "name": "Song Rider Pro",
   "short_name": "Song Rider",
-  "start_url": "./index.html?v=14",
+  "start_url": "./index.html?v=15",
   "display": "standalone",
   "background_color": "#e9e9ea",
   "theme_color": "#e9e9ea",
   "icons": [
-    {
-      "src": "./icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "./icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
