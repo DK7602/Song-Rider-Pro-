@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#e9e9ea" />
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=11" />
+  <link rel="manifest" href="./manifest.webmanifest?v=12" />
 
   <style>
     :root{
@@ -19,18 +19,18 @@
       --beatHL:#ffd54a;
       --dangerRed:#dc2626;
 
-      /* ✅ your requested colors */
-      --noteBlue:#e6f2ff;     /* note boxes */
-      --lyricPink:#ffe4ee;    /* lyric boxes */
-      --backbeatOrange:#ffe9c7; /* timing boxes (2&4) */
+      /* requested colors */
+      --noteBlue:#e6f2ff;
+      --lyricPink:#ffe4ee;
+      --backbeatOrange:#ffe9c7;
 
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
 
-      /* ✅ eye calibration defaults (adjustable in UI now) */
+      /* ✅ LOCKED eye positions */
       --eyeX1: 18px;
-      --eyeX2: 38px;
-      --eyeY: 20px;
+      --eyeX2: 30px;
+      --eyeY: 14px;
     }
     *{ box-sizing:border-box; }
     body{ margin:0; font-family:var(--sans); background:var(--bg); color:var(--ink); }
@@ -45,10 +45,8 @@
     .brand h1{ margin:0; font-size:20px; letter-spacing:.2px; }
     .brand .sub{ margin-top:2px; font-size:12px; color:var(--muted); font-weight:900; }
 
-    /* Floating headshot */
     .headshotFloat{
-      position:fixed;
-      top:10px; right:10px;
+      position:fixed; top:10px; right:10px;
       width:56px; height:56px;
       z-index:999;
       pointer-events:none;
@@ -61,7 +59,6 @@
       filter: drop-shadow(0 10px 18px rgba(0,0,0,.20));
       background:transparent;
     }
-
     .eye{
       position:absolute;
       width:10px; height:10px;
@@ -108,6 +105,11 @@
       font-weight:1100; font-size:12px; letter-spacing:.3px;
       color:#111;
     }
+
+    /* ✅ mini bar only when panel hidden */
+    .miniBar{ display:none; padding:10px 12px; border-bottom:1px solid rgba(0,0,0,.06); }
+    .miniBar.show{ display:block; }
+
     #panelBody{ max-height:28vh; overflow:auto; -webkit-overflow-scrolling: touch; }
     #panelBody.hidden{ display:none; }
 
@@ -116,42 +118,44 @@
       display:flex;
       gap:8px;
       align-items:center;
-      flex-wrap:nowrap;
-      overflow-x:auto;
-      -webkit-overflow-scrolling: touch;
+      flex-wrap:wrap; /* ✅ wrap allowed so no horizontal scroll */
+      overflow-x:hidden; /* ✅ no side scroll */
     }
 
     .tinyBtn{
       border:1px solid rgba(0,0,0,.12);
       background:#fff;
       border-radius:12px;
-      padding:8px 10px;
+      padding:7px 9px;
       font-weight:1100;
       font-size:13px;
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
-      height:36px;
+      height:34px;
       flex:0 0 auto;
     }
     .tinyBtn.active{ background:#111; color:#fff; border-color:#111; }
 
+    /* ✅ Scroll button: black off, green on */
+    .scrollBtn{ background:#111; color:#fff; border-color:#111; }
+    .scrollBtn.on{ background:#16a34a; border-color:#16a34a; color:#fff; }
+
     .tinyField input{
-      width:74px;
-      padding:8px 8px;
+      width:70px;
+      padding:7px 8px;
       border-radius:12px;
       border:1px solid rgba(0,0,0,.12);
       background:#fff;
       font-size:13px;
       outline:none;
-      height:36px;
-      flex:0 0 auto;
+      height:34px;
       text-align:center;
     }
     .tinyField.key input{
-      width:140px;
-      text-align:left;
-      padding-left:10px;
+      width:110px; /* ✅ smaller key display */
+      text-align:center;
+      padding-left:0;
     }
     .tinyField input[readonly]{ background:#f6f6f7; }
 
@@ -159,27 +163,27 @@
       border:1px solid rgba(0,0,0,.12);
       background:#fff;
       border-radius:999px;
-      padding:8px 10px;
+      padding:7px 9px;
       font-weight:1100;
       font-size:13px;
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
-      flex:0 0 auto;
+      height:34px;
     }
     .pill.active{ background:#111; color:#fff; border-color:#111; }
 
     .btn{
       border:none;
       border-radius:12px;
-      padding:10px 12px;
+      padding:9px 11px;
       font-weight:1100;
       background:#111827;
       color:#fff;
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
-      flex:0 0 auto;
+      height:34px;
     }
     .btn.secondary{
       background:#fff;
@@ -188,7 +192,18 @@
     }
     .btn.rec{ background:var(--dangerRed); }
 
-    /* ✅ Tabs: single-line horizontal scroll */
+    /* ✅ project edit circle */
+    .iconCircle{
+      width:34px; height:34px;
+      border-radius:999px;
+      display:flex; align-items:center; justify-content:center;
+      border:1px solid rgba(0,0,0,.12);
+      background:#fff;
+      font-size:16px;
+      flex:0 0 auto;
+    }
+
+    /* Tabs: single-line scroll */
     .tabs{
       display:flex;
       gap:8px;
@@ -198,6 +213,7 @@
       margin:12px 0 10px;
       padding-bottom:2px;
     }
+    .tabs.hidden{ display:none; } /* ✅ hide when panel hidden */
     .tab{
       padding:10px 12px;
       border-radius:999px;
@@ -289,7 +305,7 @@
     .noteCell{
       border-radius:10px;
       border:1px solid rgba(0,0,0,.12);
-      background:var(--noteBlue); /* ✅ */
+      background:var(--noteBlue);
       padding:8px 6px;
       font-family:var(--mono);
       font-size:12px;
@@ -312,7 +328,7 @@
       border:1px solid rgba(0,0,0,.12);
       font-size:14px;
       outline:none;
-      background:var(--lyricPink); /* ✅ */
+      background:var(--lyricPink);
     }
 
     .timingRow{
@@ -334,18 +350,14 @@
       line-height:1.1;
       word-break:break-word;
     }
-    .timingCell.backbeat{ background:var(--backbeatOrange); } /* ✅ beats 2 & 4 */
+    .timingCell.backbeat{ background:var(--backbeatOrange); }
     .timingCell.hl{
       background:var(--beatHL);
       border-color:rgba(0,0,0,.20);
     }
 
-    /* Full page paste + preview + collapse */
+    /* Full editor */
     .fullBoxWrap{ padding:12px; }
-    .collapseRow{
-      display:flex; gap:8px; align-items:center; justify-content:flex-end;
-      margin-bottom:8px;
-    }
     textarea.fullBox{
       width:100%;
       min-height:34vh;
@@ -478,7 +490,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=11" alt="Headshot" />
+    <img id="headshotImg" src="./headshot.png?v=12" alt="Headshot" />
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -500,56 +512,60 @@
       <button class="btn secondary" id="togglePanelBtn">Hide</button>
     </div>
 
+    <!-- ✅ shows only when panel is hidden -->
+    <div class="miniBar" id="miniBar">
+      <div class="row" style="padding:0;">
+        <button class="pill" id="mRock">Rock</button>
+        <button class="pill" id="mHardRock">Hard Rock</button>
+        <button class="pill" id="mPop">Pop</button>
+        <button class="pill" id="mRap">Rap</button>
+
+        <button class="tinyBtn scrollBtn" id="mScrollBtn">Scroll</button>
+        <button class="btn rec" id="mRecordBtn">Record</button>
+      </div>
+    </div>
+
     <div id="panelBody">
-      <!-- ONE LINE: AutoSplit + BPM + Capo + Key + Instruments -->
+      <!-- ONE LINE: AutoSplit + BPM + Capo + Key -->
       <div class="row">
         <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
-
         <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95" /></div>
         <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0" /></div>
         <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—" /></div>
+      </div>
 
+      <!-- Instruments -->
+      <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
         <button class="pill" id="instAcoustic">Acoustic</button>
         <button class="pill" id="instElectric">Electric</button>
         <button class="pill" id="instPiano">Piano</button>
       </div>
 
-      <!-- Drums + Record + AutoScroll Play -->
+      <!-- ✅ Drums line: Drums → Scroll → Record (no horizontal scroll) -->
       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
         <button class="pill" id="drumRock">Rock</button>
         <button class="pill" id="drumHardRock">Hard Rock</button>
         <button class="pill" id="drumPop">Pop</button>
         <button class="pill" id="drumRap">Rap</button>
 
-        <button class="tinyBtn" id="autoPlayBtn">AutoScroll: OFF</button>
-
+        <button class="tinyBtn scrollBtn" id="autoPlayBtn">Scroll</button>
         <button class="btn rec" id="recordBtn">Record</button>
       </div>
 
-      <!-- Sort + projects + rename -->
+      <!-- ✅ Projects row: no scroll; fixed circle pencil -->
       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
-        <select id="sortSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;">
+        <select id="sortSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;">
           <option value="az">A–Z</option>
           <option value="recent">Recent</option>
         </select>
 
-        <select id="projectSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;min-width:240px;"></select>
+        <select id="projectSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;flex:1 1 auto;min-width:120px;"></select>
 
-        <button class="btn secondary" id="renameProjectBtn">Edit</button>
+        <button class="iconCircle" id="renameProjectBtn" title="Rename">✏️</button>
       </div>
 
-      <!-- Eye calibration (quick fix) -->
-      <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
-        <div style="font-weight:1000;color:#444;white-space:nowrap;">Eye X1</div>
-        <input id="eyeX1" type="number" style="width:70px;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);" value="18" />
-        <div style="font-weight:1000;color:#444;white-space:nowrap;">X2</div>
-        <input id="eyeX2" type="number" style="width:70px;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);" value="38" />
-        <div style="font-weight:1000;color:#444;white-space:nowrap;">Y</div>
-        <input id="eyeY" type="number" style="width:70px;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);" value="20" />
-      </div>
-
-      <!-- Recordings list -->
-      <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06); flex-wrap:wrap;">
+      <!-- Recordings -->
+      <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);">
         <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
       </div>
     </div>
@@ -586,6 +602,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=11"></script>
+<script src="./app.js?v=12"></script>
 </body>
 </html>
