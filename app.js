@@ -403,13 +403,13 @@ function renderSection(sec){
 
     const notesRow = document.createElement("div");
     notesRow.className="notesRow";
-    const notes = line.notes || Array(8).fill("Not");
+    const notes = line.notes || Array(8).fill("");
     for(let i=0;i<8;i++){
       const inp = document.createElement("input");
       inp.className="noteCell";
-      inp.value = notes[i] ?? "Not";
+      inp.value = notes[i] ?? "";
       inp.addEventListener("input", ()=>{
-        line.notes[i] = inp.value.trim() || "Not";
+        line.notes[i] = inp.value.trim() || "";
         project.updatedAt = Date.now();
         updateKeyFromAllNotes();
         saveProjectSoon();
