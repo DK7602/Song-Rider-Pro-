@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#e9e9ea" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=12" />
+  <link rel="manifest" href="./manifest.webmanifest?v=14"/>
 
   <style>
     :root{
@@ -19,7 +19,6 @@
       --beatHL:#ffd54a;
       --dangerRed:#dc2626;
 
-      /* requested colors */
       --noteBlue:#e6f2ff;
       --lyricPink:#ffe4ee;
       --backbeatOrange:#ffe9c7;
@@ -27,7 +26,6 @@
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
 
-      /* ✅ LOCKED eye positions */
       --eyeX1: 18px;
       --eyeX2: 30px;
       --eyeY: 14px;
@@ -76,18 +74,6 @@
       box-shadow: 0 0 14px rgba(255,0,0,.85);
     }
 
-    #jsBoot{
-      margin-top:10px;
-      font-size:12px; font-weight:1000;
-      color:#111; background:#fff;
-      border:1px solid rgba(0,0,0,.10);
-      border-radius:14px;
-      padding:10px 12px;
-      box-shadow:var(--shadow);
-    }
-    #jsBoot.ok{ border-color: rgba(22,163,74,.5); }
-    #jsBoot.err{ border-color: rgba(220,38,38,.55); color:#7f1d1d; }
-
     .panel{
       margin-top:10px;
       background:var(--card);
@@ -106,7 +92,7 @@
       color:#111;
     }
 
-    /* ✅ mini bar only when panel hidden */
+    /* ✅ mini bar shows ONLY drums row when collapsed */
     .miniBar{ display:none; padding:10px 12px; border-bottom:1px solid rgba(0,0,0,.06); }
     .miniBar.show{ display:block; }
 
@@ -118,9 +104,30 @@
       display:flex;
       gap:8px;
       align-items:center;
-      flex-wrap:wrap; /* ✅ wrap allowed so no horizontal scroll */
-      overflow-x:hidden; /* ✅ no side scroll */
+      flex-wrap:wrap;
+      overflow-x:hidden;
     }
+
+    /* ✅ keep drums row on ONE line always */
+    .row.nowrap{
+      flex-wrap:nowrap;
+      overflow-x:hidden;
+    }
+
+    .pill{
+      border:1px solid rgba(0,0,0,.12);
+      background:#fff;
+      border-radius:999px;
+      padding:7px 9px;
+      font-weight:1100;
+      font-size:13px;
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
+      height:34px;
+      flex:0 0 auto;
+    }
+    .pill.active{ background:#111; color:#fff; border-color:#111; }
 
     .tinyBtn{
       border:1px solid rgba(0,0,0,.12);
@@ -137,10 +144,6 @@
     }
     .tinyBtn.active{ background:#111; color:#fff; border-color:#111; }
 
-    /* ✅ Scroll button: black off, green on */
-    .scrollBtn{ background:#111; color:#fff; border-color:#111; }
-    .scrollBtn.on{ background:#16a34a; border-color:#16a34a; color:#fff; }
-
     .tinyField input{
       width:70px;
       padding:7px 8px;
@@ -153,25 +156,34 @@
       text-align:center;
     }
     .tinyField.key input{
-      width:110px; /* ✅ smaller key display */
+      width:92px;
       text-align:center;
       padding-left:0;
     }
     .tinyField input[readonly]{ background:#f6f6f7; }
 
-    .pill{
-      border:1px solid rgba(0,0,0,.12);
-      background:#fff;
-      border-radius:999px;
-      padding:7px 9px;
-      font-weight:1100;
-      font-size:13px;
-      cursor:pointer;
-      user-select:none;
-      white-space:nowrap;
+    /* ✅ scroll icon button (up/down) */
+    .scrollIconBtn{
+      width:40px;
+      padding:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:16px;
+      font-weight:1300;
+      border-radius:12px;
+      border:1px solid #111;
+      background:#111;
+      color:#fff;
       height:34px;
+      flex:0 0 auto;
+      user-select:none;
+      cursor:pointer;
     }
-    .pill.active{ background:#111; color:#fff; border-color:#111; }
+    .scrollIconBtn.on{
+      background:#16a34a;
+      border-color:#16a34a;
+    }
 
     .btn{
       border:none;
@@ -184,6 +196,7 @@
       user-select:none;
       white-space:nowrap;
       height:34px;
+      flex:0 0 auto;
     }
     .btn.secondary{
       background:#fff;
@@ -192,7 +205,6 @@
     }
     .btn.rec{ background:var(--dangerRed); }
 
-    /* ✅ project edit circle */
     .iconCircle{
       width:34px; height:34px;
       border-radius:999px;
@@ -203,7 +215,6 @@
       flex:0 0 auto;
     }
 
-    /* Tabs: single-line scroll */
     .tabs{
       display:flex;
       gap:8px;
@@ -213,7 +224,7 @@
       margin:12px 0 10px;
       padding-bottom:2px;
     }
-    .tabs.hidden{ display:none; } /* ✅ hide when panel hidden */
+    .tabs.hidden{ display:none; }
     .tab{
       padding:10px 12px;
       border-radius:999px;
@@ -228,7 +239,7 @@
     }
     .tab.active{ background:#111; color:#fff; border-color:#111; }
 
-    main{ padding:12px 12px 150px; max-width:1100px; margin:0 auto; }
+    main{ padding:12px 12px 110px; max-width:1100px; margin:0 auto; }
 
     .sheet{
       background:var(--card);
@@ -356,7 +367,6 @@
       border-color:rgba(0,0,0,.20);
     }
 
-    /* Full editor */
     .fullBoxWrap{ padding:12px; }
     textarea.fullBox{
       width:100%;
@@ -377,17 +387,11 @@
       color:var(--muted);
       font-weight:900;
     }
-    .previewTitle{
-      margin-top:14px;
-      font-weight:1100;
-      color:#111;
-    }
 
-    /* Floating R button */
     .rBtn{
       position:fixed;
       right:14px;
-      bottom:74px;
+      bottom:18px;
       z-index:250;
       width:52px;height:52px;
       border-radius:999px;
@@ -406,10 +410,11 @@
 
     .rhymeDock{
       position:fixed;
-      left:0; right:0; bottom:62px;
+      left:0; right:0; bottom:0;
       z-index:260;
       display:none;
-      padding:0 12px;
+      padding:0 12px 10px;
+      pointer-events:none;
     }
     .rhymeBox{
       max-width:1100px;
@@ -419,6 +424,7 @@
       border-radius:16px;
       box-shadow:0 12px 28px rgba(0,0,0,.18);
       overflow:hidden;
+      pointer-events:auto;
     }
     .rhymeTop{
       padding:10px 12px;
@@ -445,52 +451,12 @@
       user-select:none;
       font-size:13px;
     }
-
-    .footerBar{
-      position:fixed; left:0; right:0; bottom:0;
-      z-index:190;
-      background:rgba(233,233,234,.94);
-      backdrop-filter: blur(10px);
-      border-top:1px solid rgba(0,0,0,.10);
-      padding:10px 12px;
-    }
-    .footerInner{
-      max-width:1100px;
-      margin:0 auto;
-      display:flex;
-      gap:10px;
-      align-items:center;
-      justify-content:space-between;
-      flex-wrap:wrap;
-    }
-    .status{
-      font-size:12px;
-      color:var(--muted);
-      font-weight:900;
-    }
   </style>
-
-  <script>
-    (function(){
-      window.addEventListener("error", function(e){
-        var el=document.getElementById("jsBoot");
-        if(!el) return;
-        el.className="err";
-        el.textContent="JS ERROR: "+(e && e.message ? e.message : "unknown");
-      });
-      window.addEventListener("unhandledrejection", function(e){
-        var el=document.getElementById("jsBoot");
-        if(!el) return;
-        el.className="err";
-        el.textContent="JS PROMISE ERROR: "+(e && e.reason ? (e.reason.message || String(e.reason)) : "unknown");
-      });
-    })();
-  </script>
 </head>
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=12" alt="Headshot" />
+    <img id="headshotImg" src="./headshot.png?v=14" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -504,55 +470,49 @@
     <div style="width:56px;height:56px;"></div>
   </div>
 
-  <div id="jsBoot">JS not loaded yet…</div>
-
   <div class="panel">
     <div class="panelTop">
       <div class="left">PROJECTS • CONTROLS • DRUMS • RECORDINGS</div>
       <button class="btn secondary" id="togglePanelBtn">Hide</button>
     </div>
 
-    <!-- ✅ shows only when panel is hidden -->
+    <!-- ✅ shows ONLY when collapsed -->
     <div class="miniBar" id="miniBar">
-      <div class="row" style="padding:0;">
+      <div class="row nowrap" style="padding:0;">
         <button class="pill" id="mRock">Rock</button>
         <button class="pill" id="mHardRock">Hard Rock</button>
         <button class="pill" id="mPop">Pop</button>
         <button class="pill" id="mRap">Rap</button>
 
-        <button class="tinyBtn scrollBtn" id="mScrollBtn">Scroll</button>
+        <button class="scrollIconBtn" id="mScrollBtn" title="AutoScroll">⇅</button>
         <button class="btn rec" id="mRecordBtn">Record</button>
       </div>
     </div>
 
     <div id="panelBody">
-      <!-- ONE LINE: AutoSplit + BPM + Capo + Key -->
       <div class="row">
         <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
-        <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95" /></div>
-        <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0" /></div>
-        <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—" /></div>
+        <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95"/></div>
+        <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0"/></div>
+        <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—"/></div>
       </div>
 
-      <!-- Instruments -->
       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
         <button class="pill" id="instAcoustic">Acoustic</button>
         <button class="pill" id="instElectric">Electric</button>
         <button class="pill" id="instPiano">Piano</button>
       </div>
 
-      <!-- ✅ Drums line: Drums → Scroll → Record (no horizontal scroll) -->
-      <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
+      <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
         <button class="pill" id="drumRock">Rock</button>
         <button class="pill" id="drumHardRock">Hard Rock</button>
         <button class="pill" id="drumPop">Pop</button>
         <button class="pill" id="drumRap">Rap</button>
 
-        <button class="tinyBtn scrollBtn" id="autoPlayBtn">Scroll</button>
+        <button class="scrollIconBtn" id="autoPlayBtn" title="AutoScroll">⇅</button>
         <button class="btn rec" id="recordBtn">Record</button>
       </div>
 
-      <!-- ✅ Projects row: no scroll; fixed circle pencil -->
       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
         <select id="sortSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;">
           <option value="az">A–Z</option>
@@ -564,7 +524,6 @@
         <button class="iconCircle" id="renameProjectBtn" title="Rename">✏️</button>
       </div>
 
-      <!-- Recordings -->
       <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);">
         <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
       </div>
@@ -577,9 +536,10 @@
 <main>
   <div class="sheet" id="editorRoot">
     <div class="sheetHeader">
-      <h2>Loading…</h2>
-      <div class="hint">If blank, app.js didn’t load.</div>
+      <h2 id="sheetTitle">Full</h2>
+      <div class="hint" id="sheetHint"></div>
     </div>
+    <div id="sheetBody"></div>
   </div>
 </main>
 
@@ -595,13 +555,6 @@
   </div>
 </div>
 
-<div class="footerBar">
-  <div class="footerInner">
-    <div class="status" id="status">Ready.</div>
-    <div class="status">Manual timing: use <b>/</b> in lyrics (example: <span style="font-family:var(--mono)">ste/reo/ty/pi/cal</span>)</div>
-  </div>
-</div>
-
-<script src="./app.js?v=12"></script>
+<script src="./app.js?v=14"></script>
 </body>
 </html>
