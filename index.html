@@ -6,24 +6,32 @@
   <meta name="theme-color" content="#e9e9ea" />
   <title>Song Rider Pro</title>
 
-  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+
   <style>
     :root{
       --bg:#e9e9ea;
       --card:#ffffff;
-      --ink:#1b1b1b;
+      --ink:#151515;
       --muted:#666;
-      --accent:#7b2e3b;      /* light burgundy target */
-      --beat24:#93c5fd;      /* baby blue for beats 2 and 4 */
-      --beatYellow:#ffd54a;  /* highlight */
-      --line:#d9d9dd;
-      --shadow: 0 8px 22px rgba(0,0,0,.08);
+      --line:#d7d7dd;
+      --shadow: 0 10px 24px rgba(0,0,0,.10);
       --radius:16px;
+
+      /* your color vision */
+      --barBurgundy:#8a3a48;   /* lyric bar box tint */
+      --beat24:#93c5fd;        /* beats 2 & 4 baby blue */
+      --beatHL:#ffd54a;        /* yellow highlight */
+      --safeGreen:#16a34a;
+      --warnYellow:#f59e0b;
+      --dangerRed:#dc2626;
+
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
     }
 
-    *{box-sizing:border-box}
+    *{ box-sizing:border-box; }
     body{
       margin:0;
       font-family:var(--sans);
@@ -36,19 +44,15 @@
       top:0;
       z-index:50;
       background:linear-gradient(#efeff1, #e9e9ea);
-      border-bottom:1px solid rgba(0,0,0,.06);
-      padding:10px 12px 8px;
+      border-bottom:1px solid rgba(0,0,0,.08);
+      padding:10px 12px 10px;
     }
+
     .topRow{
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:10px;
-    }
-    .brand{
-      display:flex;
-      flex-direction:column;
-      gap:2px;
+      gap:12px;
     }
     .brand h1{
       margin:0;
@@ -56,20 +60,21 @@
       letter-spacing:.2px;
     }
     .brand .sub{
+      margin-top:2px;
       font-size:12px;
       color:var(--muted);
+      font-weight:700;
     }
 
-    /* headshot with blinking eyes */
     .headshotWrap{
       position:relative;
-      width:46px;
-      height:46px;
+      width:48px;
+      height:48px;
       border-radius:999px;
       overflow:hidden;
-      border:2px solid rgba(0,0,0,.08);
+      border:2px solid rgba(0,0,0,.10);
       background:#fff;
-      box-shadow:0 6px 16px rgba(0,0,0,.10);
+      box-shadow:0 10px 20px rgba(0,0,0,.12);
       flex:0 0 auto;
     }
     .headshotWrap img{
@@ -84,41 +89,39 @@
       height:8px;
       border-radius:999px;
       background:rgba(255,0,0,.05);
-      box-shadow:0 0 0 rgba(255,0,0,0);
       opacity:0;
-      transition:opacity 80ms linear, box-shadow 80ms linear, background 80ms linear;
+      transition:opacity 80ms linear, box-shadow 80ms linear;
       pointer-events:none;
     }
-    /* You can tweak these positions depending on your headshot */
-    .eye.left{ left:16px; top:18px; }
-    .eye.right{ left:27px; top:18px; }
+    /* tweak these if your eyes aren't lined up */
+    .eye.left{ left:16px; top:19px; }
+    .eye.right{ left:29px; top:19px; }
 
     .headshotWrap.blink .eye{
       opacity:1;
       background:rgba(255,0,0,.85);
-      box-shadow: 0 0 14px rgba(255,0,0,.8);
+      box-shadow: 0 0 14px rgba(255,0,0,.80);
     }
 
-    /* Collapsible control panel */
     .panel{
       margin-top:10px;
       background:var(--card);
       border-radius:var(--radius);
       box-shadow:var(--shadow);
-      overflow:hidden;
       border:1px solid rgba(0,0,0,.06);
+      overflow:hidden;
     }
-    .panelOpen{
-      display:block;
-      padding:12px;
-    }
-    .panelClosed{
-      display:none;
-      padding:12px;
-    }
+    .panelOpen{ padding:12px; display:block; }
+    .panelClosed{ padding:12px; display:none; }
 
     .panel.is-collapsed .panelOpen{ display:none; }
-    .panel.is-collapsed .panelClosed{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .panel.is-collapsed .panelClosed{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
 
     .row{
       display:flex;
@@ -130,68 +133,55 @@
       display:flex;
       flex-direction:column;
       gap:6px;
-      min-width:140px;
-      flex:1 1 160px;
+      min-width:150px;
+      flex:1 1 170px;
     }
     label{
       font-size:12px;
       color:var(--muted);
+      font-weight:800;
     }
     select, input[type="text"], input[type="number"]{
       width:100%;
       padding:10px 10px;
       border-radius:12px;
-      border:1px solid rgba(0,0,0,.10);
+      border:1px solid rgba(0,0,0,.12);
       background:#fff;
       font-size:14px;
       outline:none;
     }
     input[readonly]{
-      background:#f7f7f8;
-      color:#2b2b2b;
+      background:#f6f6f7;
     }
 
     .btn{
       border:none;
       border-radius:12px;
       padding:10px 12px;
-      font-weight:700;
-      background:#1f2937;
+      font-weight:900;
+      background:#111827;
       color:#fff;
       cursor:pointer;
       user-select:none;
-      box-shadow:0 10px 20px rgba(0,0,0,.10);
     }
     .btn.secondary{
-      background:#ffffff;
+      background:#fff;
       color:#111;
       border:1px solid rgba(0,0,0,.12);
-      box-shadow:none;
-      font-weight:700;
     }
-    .btn.warn{
-      background:#7b2e3b;
-    }
-    .btn.small{
-      padding:8px 10px;
-      font-size:13px;
-      border-radius:10px;
-    }
-    .toggleGroup{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      align-items:center;
-    }
+    .btn.warn{ background:#7b2e3b; }
+    .btn.small{ padding:8px 10px; font-size:13px; border-radius:10px; }
+
     .pill{
       border:1px solid rgba(0,0,0,.12);
       background:#fff;
       border-radius:999px;
       padding:8px 10px;
-      font-weight:800;
+      font-weight:900;
       cursor:pointer;
       user-select:none;
       font-size:13px;
+      white-space:nowrap;
     }
     .pill.active{
       background:#111;
@@ -200,25 +190,31 @@
     }
 
     .miniBar{
+      margin-top:12px;
       display:flex;
-      gap:8px;
+      gap:10px;
       align-items:center;
       flex-wrap:wrap;
-      margin-top:12px;
     }
+    .toggleGroup{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .spacer{ flex:1 1 auto; }
 
     main{
-      padding:12px 12px 90px;
+      padding:12px 12px 92px;
       max-width:1100px;
       margin:0 auto;
     }
 
-    /* Tabs */
     .tabs{
       display:flex;
       gap:8px;
       flex-wrap:wrap;
-      margin:12px 0;
+      margin:12px 0 10px;
     }
     .tab{
       padding:10px 12px;
@@ -227,7 +223,7 @@
       background:#fff;
       cursor:pointer;
       user-select:none;
-      font-weight:900;
+      font-weight:1000;
       font-size:13px;
     }
     .tab.active{
@@ -238,81 +234,130 @@
 
     .pageTitle{
       display:flex;
-      align-items:center;
+      align-items:flex-end;
       justify-content:space-between;
       gap:10px;
-      margin:10px 2px 12px;
+      margin:8px 2px 12px;
     }
     .pageTitle h2{
       margin:0;
       font-size:16px;
+      letter-spacing:.2px;
     }
     .hint{
       font-size:12px;
       color:var(--muted);
+      font-weight:700;
     }
 
-    /* Editor cards */
-    .sectionCard{
+    /* FULL PAGE = single scrolling sheet */
+    .sheet{
       background:var(--card);
       border-radius:var(--radius);
       box-shadow:var(--shadow);
       border:1px solid rgba(0,0,0,.06);
       overflow:hidden;
-      margin-bottom:12px;
     }
-    .sectionHeader{
+
+    .sheetHeader{
       padding:10px 12px;
       border-bottom:1px solid rgba(0,0,0,.06);
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:10px;
+      flex-wrap:wrap;
     }
-    .sectionHeader .name{
+    .sheetHeader .left{
       font-weight:1000;
       letter-spacing:.4px;
     }
-    .sectionHeader .tools{
+    .sheetHeader .right{
       display:flex;
       gap:8px;
-      align-items:center;
       flex-wrap:wrap;
+      align-items:center;
     }
 
-    .lines{
-      padding:12px;
+    .sectionTitleRow{
+      padding:12px 12px 6px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .sectionTitleRow .title{
+      font-weight:1100;
+      letter-spacing:.6px;
+      color:#111;
+    }
+
+    .bars{
+      padding:0 12px 14px;
       display:flex;
       flex-direction:column;
       gap:12px;
     }
 
-    .line{
-      border:1px solid rgba(0,0,0,.08);
+    /* BAR layout per your vision */
+    .bar{
+      border:1px solid rgba(0,0,0,.10);
       border-radius:14px;
+      background:linear-gradient(180deg, rgba(138,58,72,.10), rgba(255,255,255,1));
       padding:10px;
-      background:#fafafa;
     }
 
-    .noteRow{
+    .barTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:8px;
+      flex-wrap:wrap;
+    }
+    .barNum{
+      font-weight:1100;
+      font-size:12px;
+      color:#111;
+      background:#fff;
+      border:1px solid rgba(0,0,0,.10);
+      padding:6px 10px;
+      border-radius:999px;
+    }
+    .syllPill{
+      font-weight:1100;
+      font-size:12px;
+      padding:6px 10px;
+      border-radius:999px;
+      color:#fff;
+      background:#111;
+      border:1px solid rgba(0,0,0,.10);
+    }
+    .syllPill.green{ background:var(--safeGreen); }
+    .syllPill.yellow{ background:var(--warnYellow); }
+    .syllPill.red{ background:var(--dangerRed); }
+
+    /* 8 chord/note boxes ABOVE lyric */
+    .notesRow{
       display:grid;
-      grid-template-columns: repeat(8, 1fr);
+      grid-template-columns: repeat(8, minmax(0, 1fr));
       gap:6px;
       margin-bottom:8px;
     }
     .noteCell{
       border-radius:10px;
-      border:1px solid rgba(0,0,0,.10);
+      border:1px solid rgba(0,0,0,.12);
       background:#fff;
       padding:8px 6px;
       font-family:var(--mono);
       font-size:12px;
       text-align:center;
       outline:none;
+      min-height:34px;
     }
     .noteCell.hl{
-      background:var(--beatYellow);
-      border-color:rgba(0,0,0,.18);
+      background:var(--beatHL);
+      border-color:rgba(0,0,0,.20);
     }
 
     .lyricRow{
@@ -322,71 +367,27 @@
       margin-bottom:10px;
     }
     textarea.lyrics{
-      flex:1;
+      width:100%;
       resize:vertical;
-      min-height:54px;
-      max-height:180px;
+      min-height:48px;
+      max-height:200px;
       padding:10px;
       border-radius:12px;
-      border:1px solid rgba(0,0,0,.10);
+      border:1px solid rgba(0,0,0,.12);
       font-size:14px;
       outline:none;
       background:#fff;
     }
 
-    /* 4 beats box */
-    .beatRow{
-      display:grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap:8px;
-    }
-    .beatBox{
-      border-radius:14px;
-      padding:10px 10px 8px;
-      border:1px solid rgba(0,0,0,.10);
-      background:color-mix(in srgb, var(--accent) 25%, #fff 75%);
-    }
-    .beatBox.b24{
-      background:color-mix(in srgb, var(--beat24) 55%, #fff 45%);
-    }
-    .beatBox.hl{
-      outline:3px solid rgba(255, 213, 74, .85);
-      box-shadow:0 0 0 2px rgba(255, 213, 74, .25);
-    }
-    .beatTop{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      margin-bottom:8px;
-    }
-    .beatTop .bNum{
-      font-weight:1000;
-      font-size:12px;
-      opacity:.85;
-    }
-    .beatTop .chord{
-      font-family:var(--mono);
-      font-weight:900;
-      font-size:12px;
-      padding:4px 6px;
-      border-radius:10px;
-      background:rgba(255,255,255,.75);
-      border:1px solid rgba(0,0,0,.08);
-      min-width:56px;
-      text-align:center;
-    }
-
-    /* syllable row under each line */
+    /* 8 syllable boxes BELOW lyric line */
     .syllRow{
       display:grid;
-      grid-template-columns: repeat(8, 1fr);
+      grid-template-columns: repeat(8, minmax(0, 1fr));
       gap:6px;
-      margin-top:10px;
     }
     .syllCell{
       border-radius:10px;
-      border:1px solid rgba(0,0,0,.10);
+      border:1px solid rgba(0,0,0,.12);
       padding:7px 6px;
       font-size:12px;
       background:#fff;
@@ -399,19 +400,28 @@
       word-break:break-word;
     }
     .syllCell.hl{
-      background:var(--beatYellow);
-      border-color:rgba(0,0,0,.18);
+      background:var(--beatHL);
+      border-color:rgba(0,0,0,.20);
+    }
+
+    /* section pages: compact look */
+    .readonlyBadge{
+      font-size:12px;
+      font-weight:1000;
+      color:#111;
+      background:#fff;
+      border:1px solid rgba(0,0,0,.12);
+      border-radius:999px;
+      padding:6px 10px;
     }
 
     .footerBar{
       position:fixed;
-      left:0;
-      right:0;
-      bottom:0;
+      left:0; right:0; bottom:0;
       z-index:60;
       background:rgba(233,233,234,.92);
       backdrop-filter: blur(10px);
-      border-top:1px solid rgba(0,0,0,.08);
+      border-top:1px solid rgba(0,0,0,.10);
       padding:10px 12px;
     }
     .footerInner{
@@ -426,141 +436,137 @@
     .status{
       font-size:12px;
       color:var(--muted);
-    }
-    .spacer{ flex:1 1 auto; }
-
-    .danger{
-      color:#b91c1c;
-      font-weight:900;
+      font-weight:700;
     }
 
     @media (max-width:560px){
       .field{ min-width: 46%; }
-      .noteRow, .syllRow{ gap:5px; }
       .noteCell{ padding:7px 4px; font-size:11px; }
-      .beatBox{ padding:9px 9px 7px; }
+      .bar{ padding:9px; }
     }
   </style>
 </head>
 
 <body>
-  <header>
-    <div class="topRow">
-      <div class="brand">
-        <h1>Song Rider Pro</h1>
-        <div class="sub">Plan chords • notes • syllables • lyrics</div>
-      </div>
-
-      <div class="headshotWrap" id="headshotWrap" title="Eyes blink to the beat">
-        <img src="headshot.png" alt="Headshot" />
-        <div class="eye left"></div>
-        <div class="eye right"></div>
-      </div>
+<header>
+  <div class="topRow">
+    <div class="brand">
+      <h1>Song Rider Pro</h1>
+      <div class="sub">Chords/notes • syllables • lyrics • sections</div>
     </div>
 
-    <div class="panel" id="panel">
-      <!-- OPEN -->
-      <div class="panelOpen">
-        <div class="row">
-          <div class="field">
-            <label>Project</label>
-            <select id="projectSelect"></select>
-          </div>
-
-          <div class="field">
-            <label>Auto-split syllables</label>
-            <div class="toggleGroup">
-              <button class="pill" id="splitOff">OFF (manual “/”)</button>
-              <button class="pill" id="splitOn">ON (auto)</button>
-            </div>
-          </div>
-
-          <div class="field">
-            <label>BPM</label>
-            <input id="bpmInput" type="number" min="40" max="220" step="1" value="95" />
-          </div>
-
-          <div class="field">
-            <label>Key (auto)</label>
-            <input id="keyOutput" type="text" readonly value="—" />
-          </div>
-
-          <div class="field">
-            <label>Capo (0 = none)</label>
-            <input id="capoInput" type="number" min="0" max="12" step="1" value="0" />
-          </div>
-        </div>
-
-        <div class="miniBar">
-          <div class="toggleGroup">
-            <span style="font-size:12px;color:var(--muted);font-weight:900;">Instrument:</span>
-            <button class="pill" id="instAcoustic">Guitar 1 (Acoustic)</button>
-            <button class="pill" id="instElectric">Guitar 2 (Electric)</button>
-            <button class="pill" id="instPiano">Piano</button>
-          </div>
-
-          <div class="spacer"></div>
-
-          <button class="btn secondary small" id="collapseBtn">Hide</button>
-        </div>
-      </div>
-
-      <!-- CLOSED (shows only drums + record + show) -->
-      <div class="panelClosed">
-        <div class="toggleGroup">
-          <span style="font-size:12px;color:var(--muted);font-weight:900;">Drums:</span>
-          <button class="pill" id="drumRock2">Rock</button>
-          <button class="pill" id="drumHardRock2">Hard Rock</button>
-          <button class="pill" id="drumPop2">Pop</button>
-          <button class="pill" id="drumRap2">Rap</button>
-          <button class="btn small" id="playStopBtn2">Play</button>
-        </div>
-
-        <div class="toggleGroup">
-          <button class="btn warn small" id="recordBtn2">Record</button>
-          <button class="btn secondary small" id="showBtn">Show</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Always-visible drums/record row (when OPEN too) -->
-    <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <div class="toggleGroup">
-        <span style="font-size:12px;color:var(--muted);font-weight:900;">Drums:</span>
-        <button class="pill" id="drumRock">Rock</button>
-        <button class="pill" id="drumHardRock">Hard Rock</button>
-        <button class="pill" id="drumPop">Pop</button>
-        <button class="pill" id="drumRap">Rap</button>
-        <button class="btn small" id="playStopBtn">Play</button>
-      </div>
-
-      <div class="toggleGroup">
-        <button class="btn warn small" id="recordBtn">Record</button>
-        <button class="btn secondary small" id="stopRecordBtn" disabled>Stop</button>
-        <a class="btn secondary small" id="downloadLink" style="display:none;text-decoration:none;" download>Download</a>
-      </div>
-    </div>
-  </header>
-
-  <main>
-    <div class="tabs" id="tabs"></div>
-
-    <div class="pageTitle">
-      <h2 id="pageHeading">Full</h2>
-      <div class="hint" id="pageHint">Full editor auto-populates section pages.</div>
-    </div>
-
-    <div id="editorRoot"></div>
-  </main>
-
-  <div class="footerBar">
-    <div class="footerInner">
-      <div class="status" id="status">Ready.</div>
-      <div class="spacer"></div>
-      <div class="status">Tip: Manual syllables use <span class="danger">/</span> (e.g., “ste/reo/ty/pi/cal”).</div>
+    <div class="headshotWrap" id="headshotWrap" title="Eyes blink to the beat">
+      <!-- cache-bust so GitHub Pages shows updated image -->
+      <img src="./headshot.png?v=1" alt="Headshot" onerror="this.style.display='none';" />
+      <div class="eye left"></div>
+      <div class="eye right"></div>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <div class="panel" id="panel">
+    <!-- OPEN -->
+    <div class="panelOpen">
+      <div class="row">
+        <div class="field">
+          <label>Project</label>
+          <select id="projectSelect"></select>
+        </div>
+
+        <div class="field">
+          <label>Auto-split syllables</label>
+          <div class="toggleGroup">
+            <button class="pill" id="splitOff">OFF (manual “/”)</button>
+            <button class="pill" id="splitOn">ON (auto)</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>BPM</label>
+          <input id="bpmInput" type="number" min="40" max="220" step="1" value="95" />
+        </div>
+
+        <div class="field">
+          <label>Key (auto)</label>
+          <input id="keyOutput" type="text" readonly value="—" />
+        </div>
+
+        <div class="field">
+          <label>Capo (0 = none)</label>
+          <input id="capoInput" type="number" min="0" max="12" step="1" value="0" />
+        </div>
+      </div>
+
+      <div class="miniBar">
+        <div class="toggleGroup">
+          <span style="font-size:12px;color:var(--muted);font-weight:1000;">Instrument:</span>
+          <button class="pill" id="instAcoustic">Guitar 1 (Acoustic)</button>
+          <button class="pill" id="instElectric">Guitar 2 (Electric)</button>
+          <button class="pill" id="instPiano">Piano</button>
+        </div>
+
+        <div class="spacer"></div>
+
+        <button class="btn secondary small" id="collapseBtn">Hide</button>
+      </div>
+    </div>
+
+    <!-- CLOSED -->
+    <div class="panelClosed">
+      <div class="toggleGroup">
+        <span style="font-size:12px;color:var(--muted);font-weight:1000;">Drums:</span>
+        <button class="pill" id="drumRock2">Rock</button>
+        <button class="pill" id="drumHardRock2">Hard Rock</button>
+        <button class="pill" id="drumPop2">Pop</button>
+        <button class="pill" id="drumRap2">Rap</button>
+        <button class="btn small" id="playStopBtn2">Play</button>
+      </div>
+
+      <div class="toggleGroup">
+        <button class="btn warn small" id="recordBtn2">Record</button>
+        <button class="btn secondary small" id="showBtn">Show</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Always visible drums/record -->
+  <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <div class="toggleGroup">
+      <span style="font-size:12px;color:var(--muted);font-weight:1000;">Drums:</span>
+      <button class="pill" id="drumRock">Rock</button>
+      <button class="pill" id="drumHardRock">Hard Rock</button>
+      <button class="pill" id="drumPop">Pop</button>
+      <button class="pill" id="drumRap">Rap</button>
+      <button class="btn small" id="playStopBtn">Play</button>
+    </div>
+
+    <div class="toggleGroup">
+      <button class="btn warn small" id="recordBtn">Record</button>
+      <button class="btn secondary small" id="stopRecordBtn" disabled>Stop</button>
+      <a class="btn secondary small" id="downloadLink" style="display:none;text-decoration:none;" download>Download</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="tabs" id="tabs"></div>
+
+  <div class="pageTitle">
+    <h2 id="pageHeading">Full</h2>
+    <div class="hint" id="pageHint">Full editor is the master. Section pages mirror it.</div>
+  </div>
+
+  <div id="editorRoot"></div>
+</main>
+
+<div class="footerBar">
+  <div class="footerInner">
+    <div class="status" id="status">Ready.</div>
+    <div class="status">
+      Manual syllables: use <b>/</b> (example: <span style="font-family:var(--mono)">ste/reo/ty/pi/cal</span>)
+    </div>
+  </div>
+</div>
+
+<script src="./app.js"></script>
 </body>
-            </html>
+</html>
