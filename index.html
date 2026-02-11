@@ -7,7 +7,6 @@
   <title>Song Rider Pro</title>
 
   <link rel="manifest" href="./manifest.webmanifest" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
 
   <style>
     :root{
@@ -19,13 +18,11 @@
       --shadow: 0 10px 24px rgba(0,0,0,.10);
       --radius:16px;
 
-      /* your color vision */
-      --barBurgundy:#8a3a48;   /* lyric bar box tint */
-      --beat24:#93c5fd;        /* beats 2 & 4 baby blue */
-      --beatHL:#ffd54a;        /* yellow highlight */
-      --safeGreen:#16a34a;
-      --warnYellow:#f59e0b;
+      --beatHL:#ffd54a;
+
       --dangerRed:#dc2626;
+      --warnYellow:#f59e0b;
+      --safeGreen:#16a34a;
 
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
@@ -63,7 +60,7 @@
       margin-top:2px;
       font-size:12px;
       color:var(--muted);
-      font-weight:700;
+      font-weight:800;
     }
 
     .headshotWrap{
@@ -93,7 +90,6 @@
       transition:opacity 80ms linear, box-shadow 80ms linear;
       pointer-events:none;
     }
-    /* tweak these if your eyes aren't lined up */
     .eye.left{ left:16px; top:19px; }
     .eye.right{ left:29px; top:19px; }
 
@@ -111,76 +107,90 @@
       border:1px solid rgba(0,0,0,.06);
       overflow:hidden;
     }
-    .panelOpen{ padding:12px; display:block; }
-    .panelClosed{ padding:12px; display:none; }
 
-    .panel.is-collapsed .panelOpen{ display:none; }
-    .panel.is-collapsed .panelClosed{
+    .panelTop{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(0,0,0,.06);
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:10px;
       flex-wrap:wrap;
     }
+    .panelTop .left{
+      font-weight:1000;
+      font-size:12px;
+      color:#111;
+      letter-spacing:.3px;
+    }
 
-    .row{
+    /* ONE-LINE controls */
+    .controlsLine{
+      padding:10px 12px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    .tinyBtn{
+      border:1px solid rgba(0,0,0,.12);
+      background:#fff;
+      border-radius:12px;
+      padding:8px 10px;
+      font-weight:1000;
+      font-size:13px;
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
+    }
+    .tinyBtn.active{
+      background:#111;
+      color:#fff;
+      border-color:#111;
+    }
+
+    .tinyField{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:82px;
+    }
+    .tinyField label{
+      font-size:11px;
+      color:var(--muted);
+      font-weight:900;
+    }
+    .tinyField input{
+      width:100%;
+      padding:8px 8px;
+      border-radius:12px;
+      border:1px solid rgba(0,0,0,.12);
+      background:#fff;
+      font-size:13px;
+      outline:none;
+      height:36px;
+    }
+    .tinyField input[readonly]{ background:#f6f6f7; }
+
+    .rowBlock{
+      padding:10px 12px 12px;
       display:flex;
       gap:10px;
       flex-wrap:wrap;
-      align-items:flex-end;
+      align-items:center;
+      border-top:1px solid rgba(0,0,0,.06);
     }
-    .field{
-      display:flex;
-      flex-direction:column;
-      gap:6px;
-      min-width:150px;
-      flex:1 1 170px;
-    }
-    label{
-      font-size:12px;
-      color:var(--muted);
-      font-weight:800;
-    }
-    select, input[type="text"], input[type="number"]{
-      width:100%;
-      padding:10px 10px;
-      border-radius:12px;
-      border:1px solid rgba(0,0,0,.12);
-      background:#fff;
-      font-size:14px;
-      outline:none;
-    }
-    input[readonly]{
-      background:#f6f6f7;
-    }
-
-    .btn{
-      border:none;
-      border-radius:12px;
-      padding:10px 12px;
-      font-weight:900;
-      background:#111827;
-      color:#fff;
-      cursor:pointer;
-      user-select:none;
-    }
-    .btn.secondary{
-      background:#fff;
-      color:#111;
-      border:1px solid rgba(0,0,0,.12);
-    }
-    .btn.warn{ background:#7b2e3b; }
-    .btn.small{ padding:8px 10px; font-size:13px; border-radius:10px; }
 
     .pill{
       border:1px solid rgba(0,0,0,.12);
       background:#fff;
       border-radius:999px;
       padding:8px 10px;
-      font-weight:900;
+      font-weight:1000;
+      font-size:13px;
       cursor:pointer;
       user-select:none;
-      font-size:13px;
       white-space:nowrap;
     }
     .pill.active{
@@ -189,26 +199,23 @@
       border-color:#111;
     }
 
-    .miniBar{
-      margin-top:12px;
-      display:flex;
-      gap:10px;
-      align-items:center;
-      flex-wrap:wrap;
+    .btn{
+      border:none;
+      border-radius:12px;
+      padding:10px 12px;
+      font-weight:1000;
+      background:#111827;
+      color:#fff;
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
     }
-    .toggleGroup{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      align-items:center;
+    .btn.secondary{
+      background:#fff;
+      color:#111;
+      border:1px solid rgba(0,0,0,.12);
     }
-    .spacer{ flex:1 1 auto; }
-
-    main{
-      padding:12px 12px 92px;
-      max-width:1100px;
-      margin:0 auto;
-    }
+    .btn.warn{ background:#7b2e3b; }
 
     .tabs{
       display:flex;
@@ -223,7 +230,7 @@
       background:#fff;
       cursor:pointer;
       user-select:none;
-      font-weight:1000;
+      font-weight:1100;
       font-size:13px;
     }
     .tab.active{
@@ -232,25 +239,12 @@
       border-color:#111;
     }
 
-    .pageTitle{
-      display:flex;
-      align-items:flex-end;
-      justify-content:space-between;
-      gap:10px;
-      margin:8px 2px 12px;
-    }
-    .pageTitle h2{
-      margin:0;
-      font-size:16px;
-      letter-spacing:.2px;
-    }
-    .hint{
-      font-size:12px;
-      color:var(--muted);
-      font-weight:700;
+    main{
+      padding:12px 12px 124px;
+      max-width:1100px;
+      margin:0 auto;
     }
 
-    /* FULL PAGE = single scrolling sheet */
     .sheet{
       background:var(--card);
       border-radius:var(--radius);
@@ -268,61 +262,54 @@
       gap:10px;
       flex-wrap:wrap;
     }
-    .sheetHeader .left{
-      font-weight:1000;
-      letter-spacing:.4px;
-    }
-    .sheetHeader .right{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      align-items:center;
-    }
-
-    .sectionTitleRow{
-      padding:12px 12px 6px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-    }
-    .sectionTitleRow .title{
+    .sheetHeader h2{
+      margin:0;
+      font-size:14px;
       font-weight:1100;
-      letter-spacing:.6px;
-      color:#111;
+      letter-spacing:.3px;
+    }
+    .hint{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:800;
     }
 
-    .bars{
+    .sectionHeader{
+      padding:12px 12px 6px;
+      font-weight:1100;
+      letter-spacing:.8px;
+      color:#b00020; /* bold red section headers */
+    }
+
+    .cards{
       padding:0 12px 14px;
       display:flex;
       flex-direction:column;
       gap:12px;
     }
 
-    /* BAR layout per your vision */
-    .bar{
+    /* Card layout for section pages */
+    .card{
       border:1px solid rgba(0,0,0,.10);
       border-radius:14px;
-      background:linear-gradient(180deg, rgba(138,58,72,.10), rgba(255,255,255,1));
+      background:#fff;
       padding:10px;
     }
 
-    .barTop{
+    .cardTop{
       display:flex;
       align-items:center;
-      justify-content:space-between;
       gap:10px;
-      margin-bottom:8px;
       flex-wrap:wrap;
+      margin-bottom:8px;
     }
-    .barNum{
+    .cardNum{
       font-weight:1100;
       font-size:12px;
-      color:#111;
       background:#fff;
-      border:1px solid rgba(0,0,0,.10);
-      padding:6px 10px;
+      border:1px solid rgba(0,0,0,.12);
       border-radius:999px;
+      padding:6px 10px;
     }
     .syllPill{
       font-weight:1100;
@@ -330,14 +317,12 @@
       padding:6px 10px;
       border-radius:999px;
       color:#fff;
-      background:#111;
-      border:1px solid rgba(0,0,0,.10);
+      border:1px solid rgba(0,0,0,.12);
     }
     .syllPill.green{ background:var(--safeGreen); }
     .syllPill.yellow{ background:var(--warnYellow); }
     .syllPill.red{ background:var(--dangerRed); }
 
-    /* 8 chord/note boxes ABOVE lyric */
     .notesRow{
       display:grid;
       grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -353,7 +338,7 @@
       font-size:12px;
       text-align:center;
       outline:none;
-      min-height:34px;
+      height:34px;
     }
     .noteCell.hl{
       background:var(--beatHL);
@@ -369,8 +354,8 @@
     textarea.lyrics{
       width:100%;
       resize:vertical;
-      min-height:48px;
-      max-height:200px;
+      min-height:46px;
+      max-height:180px;
       padding:10px;
       border-radius:12px;
       border:1px solid rgba(0,0,0,.12);
@@ -379,47 +364,80 @@
       background:#fff;
     }
 
-    /* 8 syllable boxes BELOW lyric line */
-    .syllRow{
+    /* 4 timing boxes */
+    .timingRow{
       display:grid;
-      grid-template-columns: repeat(8, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap:6px;
     }
-    .syllCell{
+    .timingCell{
       border-radius:10px;
       border:1px solid rgba(0,0,0,.12);
       padding:7px 6px;
       font-size:12px;
       background:#fff;
       text-align:center;
-      min-height:30px;
+      min-height:32px;
       display:flex;
       align-items:center;
       justify-content:center;
       line-height:1.1;
       word-break:break-word;
     }
-    .syllCell.hl{
+    .timingCell.hl{
       background:var(--beatHL);
       border-color:rgba(0,0,0,.20);
     }
 
-    /* section pages: compact look */
-    .readonlyBadge{
-      font-size:12px;
-      font-weight:1000;
-      color:#111;
+    /* Rhyme box (floating) */
+    .rhymeDock{
+      position:fixed;
+      left:0; right:0; bottom:58px;
+      z-index:80;
+      display:none;
+      padding:0 12px;
+    }
+    .rhymeBox{
+      max-width:1100px;
+      margin:0 auto;
       background:#fff;
+      border:1px solid rgba(0,0,0,.10);
+      border-radius:16px;
+      box-shadow:0 12px 28px rgba(0,0,0,.18);
+      overflow:hidden;
+    }
+    .rhymeTop{
+      padding:10px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      border-bottom:1px solid rgba(0,0,0,.06);
+      font-weight:1100;
+    }
+    .rhymeWords{
+      padding:10px 12px 12px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .rWord{
       border:1px solid rgba(0,0,0,.12);
+      background:#fff;
       border-radius:999px;
-      padding:6px 10px;
+      padding:7px 10px;
+      font-weight:1000;
+      cursor:pointer;
+      user-select:none;
+      font-size:13px;
     }
 
+    /* Bottom status bar */
     .footerBar{
       position:fixed;
       left:0; right:0; bottom:0;
-      z-index:60;
-      background:rgba(233,233,234,.92);
+      z-index:90;
+      background:rgba(233,233,234,.94);
       backdrop-filter: blur(10px);
       border-top:1px solid rgba(0,0,0,.10);
       padding:10px 12px;
@@ -436,13 +454,13 @@
     .status{
       font-size:12px;
       color:var(--muted);
-      font-weight:700;
+      font-weight:800;
     }
 
     @media (max-width:560px){
-      .field{ min-width: 46%; }
-      .noteCell{ padding:7px 4px; font-size:11px; }
-      .bar{ padding:9px; }
+      .controlsLine{ gap:8px; }
+      .tinyField{ min-width:76px; }
+      .noteCell{ font-size:11px; padding:7px 4px; }
     }
   </style>
 </head>
@@ -452,118 +470,110 @@
   <div class="topRow">
     <div class="brand">
       <h1>Song Rider Pro</h1>
-      <div class="sub">Chords/notes • syllables • lyrics • sections</div>
+      <div class="sub">Chords/notes • timing • lyrics • sections</div>
     </div>
 
-    <div class="headshotWrap" id="headshotWrap" title="Eyes blink to the beat">
-      <!-- cache-bust so GitHub Pages shows updated image -->
-      <img src="./headshot.png?v=1" alt="Headshot" onerror="this.style.display='none';" />
+    <div class="headshotWrap" id="headshotWrap">
+      <!-- Try both paths; keep image visible even if load fails -->
+      <img id="headshotImg" src="./headshot.png?v=2" alt="Headshot" />
       <div class="eye left"></div>
       <div class="eye right"></div>
     </div>
   </div>
 
-  <div class="panel" id="panel">
-    <!-- OPEN -->
-    <div class="panelOpen">
-      <div class="row">
-        <div class="field">
-          <label>Project</label>
-          <select id="projectSelect"></select>
-        </div>
+  <div class="panel">
+    <div class="panelTop">
+      <div class="left">PROJECTS • CONTROLS • DRUMS • RECORDINGS</div>
+      <button class="btn secondary" id="togglePanelBtn">Hide</button>
+    </div>
 
-        <div class="field">
-          <label>Auto-split syllables</label>
-          <div class="toggleGroup">
-            <button class="pill" id="splitOff">OFF (manual “/”)</button>
-            <button class="pill" id="splitOn">ON (auto)</button>
-          </div>
-        </div>
+    <div id="panelBody">
+      <!-- ONE LINE controls -->
+      <div class="controlsLine">
+        <button class="tinyBtn" id="autoSplitBtn" title="Auto-split timing on/off">AutoSplit: OFF</button>
 
-        <div class="field">
+        <div class="tinyField">
           <label>BPM</label>
           <input id="bpmInput" type="number" min="40" max="220" step="1" value="95" />
         </div>
 
-        <div class="field">
-          <label>Key (auto)</label>
+        <div class="tinyField">
+          <label>Capo</label>
+          <input id="capoInput" type="number" min="0" max="12" step="1" value="0" />
+        </div>
+
+        <div class="tinyField">
+          <label>Key</label>
           <input id="keyOutput" type="text" readonly value="—" />
         </div>
 
-        <div class="field">
-          <label>Capo (0 = none)</label>
-          <input id="capoInput" type="number" min="0" max="12" step="1" value="0" />
-        </div>
-      </div>
+        <div style="flex:1 1 auto;"></div>
 
-      <div class="miniBar">
-        <div class="toggleGroup">
+        <div class="rowBlock" style="padding:0;border:none;">
           <span style="font-size:12px;color:var(--muted);font-weight:1000;">Instrument:</span>
-          <button class="pill" id="instAcoustic">Guitar 1 (Acoustic)</button>
-          <button class="pill" id="instElectric">Guitar 2 (Electric)</button>
+          <button class="pill" id="instAcoustic">Acoustic</button>
+          <button class="pill" id="instElectric">Electric</button>
           <button class="pill" id="instPiano">Piano</button>
         </div>
-
-        <div class="spacer"></div>
-
-        <button class="btn secondary small" id="collapseBtn">Hide</button>
       </div>
-    </div>
 
-    <!-- CLOSED -->
-    <div class="panelClosed">
-      <div class="toggleGroup">
+      <!-- Drums + Record button (no Play button) -->
+      <div class="rowBlock">
         <span style="font-size:12px;color:var(--muted);font-weight:1000;">Drums:</span>
-        <button class="pill" id="drumRock2">Rock</button>
-        <button class="pill" id="drumHardRock2">Hard Rock</button>
-        <button class="pill" id="drumPop2">Pop</button>
-        <button class="pill" id="drumRap2">Rap</button>
-        <button class="btn small" id="playStopBtn2">Play</button>
+        <button class="pill" id="drumRock">Rock</button>
+        <button class="pill" id="drumHardRock">Hard Rock</button>
+        <button class="pill" id="drumPop">Pop</button>
+        <button class="pill" id="drumRap">Rap</button>
+
+        <div style="flex:1 1 auto;"></div>
+
+        <button class="btn warn" id="recordBtn">Record</button>
+        <button class="btn secondary" id="stopRecordBtn" disabled>Stop</button>
       </div>
 
-      <div class="toggleGroup">
-        <button class="btn warn small" id="recordBtn2">Record</button>
-        <button class="btn secondary small" id="showBtn">Show</button>
+      <!-- Projects section -->
+      <div class="rowBlock">
+        <span style="font-size:12px;color:var(--muted);font-weight:1000;">Project:</span>
+        <select id="projectSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;">
+        </select>
+        <button class="btn secondary" id="renameProjectBtn">Rename</button>
+        <button class="btn secondary" id="clearProjectBtn">Clear Project</button>
+      </div>
+
+      <!-- Recordings section -->
+      <div class="rowBlock" style="align-items:flex-start;">
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:150px;">
+          <div style="font-size:12px;color:var(--muted);font-weight:1000;">Recordings</div>
+          <div style="font-size:12px;color:var(--muted);font-weight:800;">(tap a row)</div>
+        </div>
+
+        <div id="recordingsList" style="flex:1 1 520px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
     </div>
   </div>
 
-  <!-- Always visible drums/record -->
-  <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-    <div class="toggleGroup">
-      <span style="font-size:12px;color:var(--muted);font-weight:1000;">Drums:</span>
-      <button class="pill" id="drumRock">Rock</button>
-      <button class="pill" id="drumHardRock">Hard Rock</button>
-      <button class="pill" id="drumPop">Pop</button>
-      <button class="pill" id="drumRap">Rap</button>
-      <button class="btn small" id="playStopBtn">Play</button>
-    </div>
-
-    <div class="toggleGroup">
-      <button class="btn warn small" id="recordBtn">Record</button>
-      <button class="btn secondary small" id="stopRecordBtn" disabled>Stop</button>
-      <a class="btn secondary small" id="downloadLink" style="display:none;text-decoration:none;" download>Download</a>
-    </div>
-  </div>
+  <div class="tabs" id="tabs"></div>
 </header>
 
 <main>
-  <div class="tabs" id="tabs"></div>
-
-  <div class="pageTitle">
-    <h2 id="pageHeading">Full</h2>
-    <div class="hint" id="pageHint">Full editor is the master. Section pages mirror it.</div>
-  </div>
-
-  <div id="editorRoot"></div>
+  <div class="sheet" id="editorRoot"></div>
 </main>
+
+<!-- Rhyme box -->
+<div class="rhymeDock" id="rhymeDock">
+  <div class="rhymeBox">
+    <div class="rhymeTop">
+      <div id="rhymeTitle">Rhymes</div>
+      <button class="btn secondary" id="hideRhymeBtn">Hide</button>
+    </div>
+    <div class="rhymeWords" id="rhymeWords"></div>
+  </div>
+</div>
 
 <div class="footerBar">
   <div class="footerInner">
     <div class="status" id="status">Ready.</div>
-    <div class="status">
-      Manual syllables: use <b>/</b> (example: <span style="font-family:var(--mono)">ste/reo/ty/pi/cal</span>)
-    </div>
+    <div class="status">Manual timing: use <b>/</b> in lyrics (example: <span style="font-family:var(--mono)">ste/reo/ty/pi/cal</span>)</div>
   </div>
 </div>
 
