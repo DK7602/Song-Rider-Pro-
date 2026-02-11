@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#e9e9ea" />
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=9" />
+  <link rel="manifest" href="./manifest.webmanifest?v=10" />
 
   <style>
     :root{
@@ -18,7 +18,7 @@
 
       --beatHL:#ffd54a;
 
-      --dangerRed:#dc2626;
+      --dangerRed:#dc2626; /* use same red for record */
       --warnYellow:#f59e0b;
       --safeGreen:#16a34a;
 
@@ -42,31 +42,40 @@
     .headshotFloat{
       position:fixed;
       top:10px; right:10px;
-      width:52px; height:52px;
+      width:56px; height:56px;
       z-index:999;
       pointer-events:none;
     }
     .headshotFloat img{
       width:100%; height:100%;
-      object-fit:cover;
+      object-fit:contain;       /* ✅ prevents top/bottom crop */
       border-radius:999px;
-      opacity:.96;
+      opacity:.98;
       filter: drop-shadow(0 10px 18px rgba(0,0,0,.20));
+      background:transparent;
+    }
+
+    /* tweak these if needed */
+    :root{
+      --eyeX1: 19px;
+      --eyeX2: 36px;
+      --eyeY: 23px;
     }
     .eye{
       position:absolute;
-      width:9px; height:9px;
+      width:10px; height:10px;
       border-radius:999px;
       background:rgba(255,0,0,.05);
       opacity:0;
-      transition:opacity 70ms linear, box-shadow 70ms linear;
+      transition:opacity 60ms linear, box-shadow 60ms linear;
+      top: var(--eyeY);
     }
-    .eye.left{ left:18px; top:20px; }
-    .eye.right{ left:32px; top:20px; }
+    .eye.left{ left: var(--eyeX1); }
+    .eye.right{ left: var(--eyeX2); }
     .headshotFloat.blink .eye{
       opacity:1;
-      background:rgba(255,0,0,.85);
-      box-shadow: 0 0 14px rgba(255,0,0,.80);
+      background:rgba(255,0,0,.90);
+      box-shadow: 0 0 14px rgba(255,0,0,.85);
     }
 
     #jsBoot{
@@ -108,9 +117,11 @@
     .row{
       padding:10px 12px;
       display:flex;
-      gap:10px;
+      gap:8px;
       align-items:center;
-      flex-wrap:wrap;
+      flex-wrap:nowrap; /* ✅ keep on one line */
+      overflow-x:auto;  /* if super tiny device, allow horizontal scroll */
+      -webkit-overflow-scrolling: touch;
     }
 
     .tinyBtn{
@@ -124,17 +135,12 @@
       user-select:none;
       white-space:nowrap;
       height:36px;
+      flex:0 0 auto;
     }
     .tinyBtn.active{ background:#111; color:#fff; border-color:#111; }
 
-    .tinyField{
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-      min-width:62px;
-    }
     .tinyField input{
-      width:100%;
+      width:74px;                 /* ✅ tightened */
       padding:8px 8px;
       border-radius:12px;
       border:1px solid rgba(0,0,0,.12);
@@ -142,6 +148,13 @@
       font-size:13px;
       outline:none;
       height:36px;
+      flex:0 0 auto;
+      text-align:center;
+    }
+    .tinyField.key input{
+      width:140px;                /* ✅ key fits on same line */
+      text-align:left;
+      padding-left:10px;
     }
     .tinyField input[readonly]{ background:#f6f6f7; }
 
@@ -155,6 +168,7 @@
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
+      flex:0 0 auto;
     }
     .pill.active{ background:#111; color:#fff; border-color:#111; }
 
@@ -168,6 +182,7 @@
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
+      flex:0 0 auto;
     }
     .btn.secondary{
       background:#fff;
@@ -175,7 +190,7 @@
       border:1px solid rgba(0,0,0,.12);
     }
     .btn.rec{
-      background:#7b2e3b;
+      background:var(--dangerRed); /* ✅ matches syllable red */
     }
 
     .tabs{
@@ -319,11 +334,11 @@
       border-color:rgba(0,0,0,.20);
     }
 
-    /* Full page big paste box */
+    /* Full page paste + preview */
     .fullBoxWrap{ padding:12px; }
     textarea.fullBox{
       width:100%;
-      min-height:52vh;
+      min-height:34vh;
       padding:12px;
       border-radius:14px;
       border:1px solid rgba(0,0,0,.12);
@@ -340,12 +355,37 @@
       color:var(--muted);
       font-weight:900;
     }
+    .previewTitle{
+      margin-top:14px;
+      font-weight:1100;
+      color:#111;
+    }
 
-    /* Floating rhyme window */
+    /* Floating R button */
+    .rBtn{
+      position:fixed;
+      right:14px;
+      bottom:74px;
+      z-index:250;
+      width:52px;height:52px;
+      border-radius:999px;
+      border:1px solid rgba(0,0,0,.12);
+      background:#111;
+      color:#fff;
+      font-weight:1200;
+      font-size:18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow:0 14px 30px rgba(0,0,0,.25);
+      cursor:pointer;
+      user-select:none;
+    }
+
     .rhymeDock{
       position:fixed;
       left:0; right:0; bottom:62px;
-      z-index:200;
+      z-index:260;
       display:none;
       padding:0 12px;
     }
@@ -428,7 +468,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=9" alt="Headshot" />
+    <img id="headshotImg" src="./headshot.png?v=10" alt="Headshot" />
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -439,7 +479,7 @@
       <h1>Song Rider Pro</h1>
       <div class="sub">Chords/notes • timing • lyrics • sections</div>
     </div>
-    <div style="width:52px;height:52px;"></div>
+    <div style="width:56px;height:56px;"></div>
   </div>
 
   <div id="jsBoot">JS not loaded yet…</div>
@@ -455,26 +495,13 @@
       <div class="row">
         <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
 
-        <div class="tinyField">
-          <input id="bpmInput" type="number" min="40" max="220" step="1" value="95" placeholder="BPM" />
-        </div>
+        <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95" /></div>
+        <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0" /></div>
+        <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—" /></div>
 
-        <div class="tinyField">
-          <input id="capoInput" type="number" min="0" max="12" step="1" value="0" placeholder="Capo" />
-        </div>
-
-        <div class="tinyField" style="min-width:140px;">
-          <input id="keyOutput" type="text" readonly value="—" />
-        </div>
-
-        <div style="flex:1 1 auto;"></div>
-
-        <!-- Instrument buttons only -->
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
-          <button class="pill" id="instAcoustic">Acoustic</button>
-          <button class="pill" id="instElectric">Electric</button>
-          <button class="pill" id="instPiano">Piano</button>
-        </div>
+        <button class="pill" id="instAcoustic">Acoustic</button>
+        <button class="pill" id="instElectric">Electric</button>
+        <button class="pill" id="instPiano">Piano</button>
       </div>
 
       <!-- Drums + Record on same line -->
@@ -484,26 +511,26 @@
         <button class="pill" id="drumPop">Pop</button>
         <button class="pill" id="drumRap">Rap</button>
 
-        <div style="flex:1 1 auto;"></div>
-
         <button class="btn rec" id="recordBtn">Record</button>
       </div>
 
-      <!-- Project row (no "Project:" label) -->
+      <!-- Sort + project + edit/clear -->
       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
+        <select id="sortSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;">
+          <option value="az">A–Z</option>
+          <option value="recent">Recent</option>
+        </select>
+
         <select id="projectSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;min-width:220px;">
         </select>
+
         <button class="btn secondary" id="renameProjectBtn">Edit</button>
         <button class="btn secondary" id="clearProjectBtn">Clear</button>
-
-        <div style="flex:1 1 auto;"></div>
-
-        <button class="btn secondary" id="rhymeToggleBtn">Rhymes</button>
       </div>
 
       <!-- Recordings list -->
-      <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);">
-        <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;"></div>
+      <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06); flex-wrap:wrap;">
+        <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
       </div>
     </div>
   </div>
@@ -520,7 +547,10 @@
   </div>
 </main>
 
-<!-- Rhymes floating window -->
+<!-- Floating R button -->
+<div class="rBtn" id="rBtn">R</div>
+
+<!-- Rhymes window -->
 <div class="rhymeDock" id="rhymeDock">
   <div class="rhymeBox">
     <div class="rhymeTop">
@@ -538,6 +568,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=9"></script>
+<script src="./app.js?v=10"></script>
 </body>
 </html>
