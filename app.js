@@ -146,7 +146,7 @@ async function dbDelete(store, key){
    Default project + model
 ------------------------------*/
 function emptyLine(){
-  return { notes: Array(8).fill("Not"), lyrics: "", timing: ["","","",""] };
+  return { notes: Array(8).fill(""), lyrics: "", timing: ["","","",""] };
 }
 function defaultProject(){
   const sections = {};
