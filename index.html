@@ -5,8 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#e9e9ea" />
   <title>Song Rider Pro</title>
-
-  <link rel="manifest" href="./manifest.webmanifest?v=7" />
+  <link rel="manifest" href="./manifest.webmanifest?v=8" />
 
   <style>
     :root{
@@ -17,86 +16,60 @@
       --line:#d7d7dd;
       --shadow: 0 10px 24px rgba(0,0,0,.10);
       --radius:16px;
-
       --beatHL:#ffd54a;
-
       --dangerRed:#dc2626;
       --warnYellow:#f59e0b;
       --safeGreen:#16a34a;
-
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
     }
-
     *{ box-sizing:border-box; }
-    body{
-      margin:0;
-      font-family:var(--sans);
-      background:var(--bg);
-      color:var(--ink);
-    }
+    body{ margin:0; font-family:var(--sans); background:var(--bg); color:var(--ink); }
 
     header{
-      position:sticky;
-      top:0;
-      z-index:50;
+      position:sticky; top:0; z-index:50;
       background:linear-gradient(#efeff1, #e9e9ea);
       border-bottom:1px solid rgba(0,0,0,.08);
       padding:10px 12px 10px;
     }
 
-    .topRow{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-    }
-    .brand h1{
-      margin:0;
-      font-size:20px;
-      letter-spacing:.2px;
-    }
-    .brand .sub{
-      margin-top:2px;
-      font-size:12px;
-      color:var(--muted);
-      font-weight:800;
-    }
+    .topRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .brand h1{ margin:0; font-size:20px; letter-spacing:.2px; }
+    .brand .sub{ margin-top:2px; font-size:12px; color:var(--muted); font-weight:800; }
 
     .headshotWrap{
-      position:relative;
-      width:48px;
-      height:48px;
-      border-radius:999px;
-      overflow:hidden;
+      position:relative; width:48px; height:48px;
+      border-radius:999px; overflow:hidden;
       border:2px solid rgba(0,0,0,.10);
       background:#fff;
       box-shadow:0 10px 20px rgba(0,0,0,.12);
       flex:0 0 auto;
     }
-    .headshotWrap img{
-      width:100%;
-      height:100%;
-      object-fit:cover;
-      display:block;
-    }
+    .headshotWrap img{ width:100%; height:100%; object-fit:cover; display:block; }
     .eye{
-      position:absolute;
-      width:8px;
-      height:8px;
-      border-radius:999px;
-      background:rgba(255,0,0,.05);
-      opacity:0;
+      position:absolute; width:8px; height:8px; border-radius:999px;
+      background:rgba(255,0,0,.05); opacity:0;
       transition:opacity 80ms linear, box-shadow 80ms linear;
       pointer-events:none;
     }
     .eye.left{ left:16px; top:19px; }
     .eye.right{ left:29px; top:19px; }
     .headshotWrap.blink .eye{
-      opacity:1;
-      background:rgba(255,0,0,.85);
+      opacity:1; background:rgba(255,0,0,.85);
       box-shadow: 0 0 14px rgba(255,0,0,.80);
     }
+
+    #jsBoot{
+      margin-top:10px;
+      font-size:12px; font-weight:1000;
+      color:#111; background:#fff;
+      border:1px solid rgba(0,0,0,.10);
+      border-radius:14px;
+      padding:10px 12px;
+      box-shadow:var(--shadow);
+    }
+    #jsBoot.ok{ border-color: rgba(22,163,74,.5); }
+    #jsBoot.err{ border-color: rgba(220,38,38,.55); color:#7f1d1d; }
 
     .panel{
       margin-top:10px;
@@ -110,24 +83,25 @@
     .panelTop{
       padding:10px 12px;
       border-bottom:1px solid rgba(0,0,0,.06);
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      flex-wrap:wrap;
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
     }
     .panelTop .left{
-      font-weight:1000;
-      font-size:12px;
-      color:#111;
-      letter-spacing:.3px;
+      font-weight:1100; font-size:12px; color:#111; letter-spacing:.3px;
     }
+
+    /* ---- COLLAPSIBLE TOP TRAY: max ~25% of viewport, scroll inside ---- */
+    #panelBody{
+      max-height: 26vh;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #panelBody.hidden{ display:none; }
 
     .controlsLine{
       padding:10px 12px;
       display:flex;
       gap:10px;
-      align-items:center;
+      align-items:flex-end;
       flex-wrap:wrap;
     }
 
@@ -136,28 +110,23 @@
       background:#fff;
       border-radius:12px;
       padding:8px 10px;
-      font-weight:1000;
+      font-weight:1100;
       font-size:13px;
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
+      height:36px;
     }
-    .tinyBtn.active{
-      background:#111;
-      color:#fff;
-      border-color:#111;
-    }
+    .tinyBtn.active{ background:#111; color:#fff; border-color:#111; }
 
     .tinyField{
       display:flex;
       flex-direction:column;
       gap:4px;
-      min-width:74px;
+      min-width:70px;
     }
     .tinyField label{
-      font-size:11px;
-      color:var(--muted);
-      font-weight:900;
+      font-size:11px; color:var(--muted); font-weight:900;
     }
     .tinyField input{
       width:100%;
@@ -173,8 +142,7 @@
 
     .rowBlock{
       padding:10px 12px 12px;
-      display:flex;
-      gap:10px;
+      display:flex; gap:10px;
       flex-wrap:wrap;
       align-items:center;
       border-top:1px solid rgba(0,0,0,.06);
@@ -185,23 +153,19 @@
       background:#fff;
       border-radius:999px;
       padding:8px 10px;
-      font-weight:1000;
+      font-weight:1100;
       font-size:13px;
       cursor:pointer;
       user-select:none;
       white-space:nowrap;
     }
-    .pill.active{
-      background:#111;
-      color:#fff;
-      border-color:#111;
-    }
+    .pill.active{ background:#111; color:#fff; border-color:#111; }
 
     .btn{
       border:none;
       border-radius:12px;
       padding:10px 12px;
-      font-weight:1000;
+      font-weight:1100;
       background:#111827;
       color:#fff;
       cursor:pointer;
@@ -216,9 +180,7 @@
     .btn.warn{ background:#7b2e3b; }
 
     .tabs{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
+      display:flex; gap:8px; flex-wrap:wrap;
       margin:12px 0 10px;
     }
     .tab{
@@ -231,17 +193,9 @@
       font-weight:1100;
       font-size:13px;
     }
-    .tab.active{
-      background:#111;
-      color:#fff;
-      border-color:#111;
-    }
+    .tab.active{ background:#111; color:#fff; border-color:#111; }
 
-    main{
-      padding:12px 12px 124px;
-      max-width:1100px;
-      margin:0 auto;
-    }
+    main{ padding:12px 12px 124px; max-width:1100px; margin:0 auto; }
 
     .sheet{
       background:var(--card);
@@ -255,23 +209,11 @@
     .sheetHeader{
       padding:10px 12px;
       border-bottom:1px solid rgba(0,0,0,.06);
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
       flex-wrap:wrap;
     }
-    .sheetHeader h2{
-      margin:0;
-      font-size:14px;
-      font-weight:1100;
-      letter-spacing:.3px;
-    }
-    .hint{
-      font-size:12px;
-      color:var(--muted);
-      font-weight:800;
-    }
+    .sheetHeader h2{ margin:0; font-size:14px; font-weight:1100; letter-spacing:.3px; }
+    .hint{ font-size:12px; color:var(--muted); font-weight:800; }
 
     .sectionHeader{
       padding:12px 12px 6px;
@@ -295,9 +237,7 @@
     }
 
     .cardTop{
-      display:flex;
-      align-items:center;
-      gap:10px;
+      display:flex; align-items:center; gap:10px;
       flex-wrap:wrap;
       margin-bottom:8px;
     }
@@ -308,6 +248,8 @@
       border:1px solid rgba(0,0,0,.12);
       border-radius:999px;
       padding:6px 10px;
+      min-width:42px;
+      text-align:center;
     }
     .syllPill{
       font-weight:1100;
@@ -343,12 +285,7 @@
       border-color:rgba(0,0,0,.20);
     }
 
-    .lyricRow{
-      display:flex;
-      gap:8px;
-      align-items:stretch;
-      margin-bottom:10px;
-    }
+    .lyricRow{ display:flex; gap:8px; align-items:stretch; margin-bottom:10px; }
     textarea.lyrics{
       width:100%;
       resize:vertical;
@@ -386,51 +323,8 @@
       border-color:rgba(0,0,0,.20);
     }
 
-    .rhymeDock{
-      position:fixed;
-      left:0; right:0; bottom:58px;
-      z-index:80;
-      display:none;
-      padding:0 12px;
-    }
-    .rhymeBox{
-      max-width:1100px;
-      margin:0 auto;
-      background:#fff;
-      border:1px solid rgba(0,0,0,.10);
-      border-radius:16px;
-      box-shadow:0 12px 28px rgba(0,0,0,.18);
-      overflow:hidden;
-    }
-    .rhymeTop{
-      padding:10px 12px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      border-bottom:1px solid rgba(0,0,0,.06);
-      font-weight:1100;
-    }
-    .rhymeWords{
-      padding:10px 12px 12px;
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .rWord{
-      border:1px solid rgba(0,0,0,.12);
-      background:#fff;
-      border-radius:999px;
-      padding:7px 10px;
-      font-weight:1000;
-      cursor:pointer;
-      user-select:none;
-      font-size:13px;
-    }
-
     .footerBar{
-      position:fixed;
-      left:0; right:0; bottom:0;
+      position:fixed; left:0; right:0; bottom:0;
       z-index:90;
       background:rgba(233,233,234,.94);
       backdrop-filter: blur(10px);
@@ -452,37 +346,20 @@
       font-weight:800;
     }
 
-    /* DEBUG BAR (shows if JS loaded) */
-    #jsBoot{
-      margin-top:10px;
-      font-size:12px;
-      font-weight:1000;
-      color:#111;
-      background:#fff;
-      border:1px solid rgba(0,0,0,.10);
-      border-radius:14px;
-      padding:10px 12px;
-      box-shadow:var(--shadow);
-    }
-    #jsBoot.ok{ border-color: rgba(22,163,74,.5); }
-    #jsBoot.err{ border-color: rgba(220,38,38,.55); color:#7f1d1d; }
-
     @media (max-width:560px){
       .controlsLine{ gap:8px; }
-      .tinyField{ min-width:70px; }
+      .tinyField{ min-width:66px; }
       .noteCell{ font-size:11px; padding:7px 4px; }
     }
   </style>
 
-  <!-- If app.js crashes, we show it here -->
   <script>
     (function(){
-      window.__SRP_BOOT = { loaded:false };
       window.addEventListener("error", function(e){
         var el = document.getElementById("jsBoot");
         if (!el) return;
         el.className = "err";
-        el.textContent = "JS ERROR: " + (e && e.message ? e.message : "unknown") + " (app.js did not finish)";
+        el.textContent = "JS ERROR: " + (e && e.message ? e.message : "unknown");
       });
       window.addEventListener("unhandledrejection", function(e){
         var el = document.getElementById("jsBoot");
@@ -503,7 +380,7 @@
     </div>
 
     <div class="headshotWrap" id="headshotWrap">
-      <img id="headshotImg" src="./headshot.png?v=7" alt="Headshot" />
+      <img id="headshotImg" src="./headshot.png?v=8" alt="Headshot" />
       <div class="eye left"></div>
       <div class="eye right"></div>
     </div>
@@ -518,8 +395,9 @@
     </div>
 
     <div id="panelBody">
+      <!-- One line: autosplit + bpm + capo + key -->
       <div class="controlsLine">
-        <button class="tinyBtn" id="autoSplitBtn">AutoSplit: OFF</button>
+        <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
 
         <div class="tinyField">
           <label>BPM</label>
@@ -531,23 +409,25 @@
           <input id="capoInput" type="number" min="0" max="12" step="1" value="0" />
         </div>
 
-        <div class="tinyField">
+        <div class="tinyField" style="min-width:140px;">
           <label>Key</label>
           <input id="keyOutput" type="text" readonly value="—" />
         </div>
 
         <div style="flex:1 1 auto;"></div>
 
-        <div class="rowBlock" style="padding:0;border:none;">
-          <span style="font-size:12px;color:var(--muted);font-weight:1000;">Instrument:</span>
+        <!-- Instruments one line -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">
+          <span style="font-size:12px;color:var(--muted);font-weight:1100;">Instrument:</span>
           <button class="pill" id="instAcoustic">Acoustic</button>
           <button class="pill" id="instElectric">Electric</button>
           <button class="pill" id="instPiano">Piano</button>
         </div>
       </div>
 
+      <!-- Drums: tap style = play/stop -->
       <div class="rowBlock">
-        <span style="font-size:12px;color:var(--muted);font-weight:1000;">Drums:</span>
+        <span style="font-size:12px;color:var(--muted);font-weight:1100;">Drums:</span>
         <button class="pill" id="drumRock">Rock</button>
         <button class="pill" id="drumHardRock">Hard Rock</button>
         <button class="pill" id="drumPop">Pop</button>
@@ -560,16 +440,16 @@
       </div>
 
       <div class="rowBlock">
-        <span style="font-size:12px;color:var(--muted);font-weight:1000;">Project:</span>
+        <span style="font-size:12px;color:var(--muted);font-weight:1100;">Project:</span>
         <select id="projectSelect" style="padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;">
         </select>
-        <button class="btn secondary" id="renameProjectBtn">Rename</button>
-        <button class="btn secondary" id="clearProjectBtn">Clear Project</button>
+        <button class="btn secondary" id="renameProjectBtn">Edit</button>
+        <button class="btn secondary" id="clearProjectBtn">Clear</button>
       </div>
 
       <div class="rowBlock" style="align-items:flex-start;">
         <div style="display:flex;flex-direction:column;gap:6px;min-width:150px;">
-          <div style="font-size:12px;color:var(--muted);font-weight:1000;">Recordings</div>
+          <div style="font-size:12px;color:var(--muted);font-weight:1100;">Recordings</div>
           <div style="font-size:12px;color:var(--muted);font-weight:800;">(tap a row)</div>
         </div>
         <div id="recordingsList" style="flex:1 1 520px;display:flex;flex-direction:column;gap:8px;"></div>
@@ -589,16 +469,6 @@
   </div>
 </main>
 
-<div class="rhymeDock" id="rhymeDock">
-  <div class="rhymeBox">
-    <div class="rhymeTop">
-      <div id="rhymeTitle">Rhymes</div>
-      <button class="btn secondary" id="hideRhymeBtn">Hide</button>
-    </div>
-    <div class="rhymeWords" id="rhymeWords"></div>
-  </div>
-</div>
-
 <div class="footerBar">
   <div class="footerInner">
     <div class="status" id="status">Ready.</div>
@@ -606,7 +476,6 @@
   </div>
 </div>
 
-<!-- cache-bust app.js -->
-<script src="./app.js?v=7"></script>
+<script src="./app.js?v=8"></script>
 </body>
 </html>
