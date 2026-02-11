@@ -1,0 +1,21 @@
+{
+  "name": "Song Rider Pro",
+  "short_name": "SongRider",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#e9e9ea",
+  "theme_color": "#e9e9ea",
+  "icons": [
+    {
+      "src": "headshot.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "headshot.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
