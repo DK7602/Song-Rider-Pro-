@@ -348,7 +348,7 @@ function renderFullView(){
 
       const notesRow = document.createElement("div");
       notesRow.className="notesRow";
-      (line.notes||Array(8).fill("Not")).forEach((n)=>{
+      (line.notes||Array(8).fill("")).forEach((n)=>{
         const inp = document.createElement("input");
         inp.className="noteCell";
         inp.value = notes[i] ?? "";
