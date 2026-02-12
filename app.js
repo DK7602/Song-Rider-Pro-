@@ -1,112 +1,96 @@
-/* Song Rider Pro - app.js (FULL REPLACE) */
+/* Song Rider Pro - app.js (FULL REPLACE v17) */
 (() => {
   "use strict";
 
   /***********************
-   * Small helpers
+   * Utils
    ***********************/
   const $ = (id) => document.getElementById(id);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const now = () => Date.now();
 
+  // crypto.randomUUID fallback (older Android WebViews)
+  function uuid(){
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+
   /***********************
    * DOM
    ***********************/
   const el = {
-    // panel
     togglePanelBtn: $("togglePanelBtn"),
     panelBody: $("panelBody"),
     miniBar: $("miniBar"),
 
-    // controls
     autoSplitBtn: $("autoSplitBtn"),
     bpmInput: $("bpmInput"),
     capoInput: $("capoInput"),
     keyOutput: $("keyOutput"),
 
-    // instrument pills
     instAcoustic: $("instAcoustic"),
     instElectric: $("instElectric"),
     instPiano: $("instPiano"),
 
-    // drum pills
     drumRock: $("drumRock"),
     drumHardRock: $("drumHardRock"),
     drumPop: $("drumPop"),
     drumRap: $("drumRap"),
 
-    // mini bar drum pills
     mRock: $("mRock"),
     mHardRock: $("mHardRock"),
     mPop: $("mPop"),
     mRap: $("mRap"),
 
-    // scroll + record
     autoPlayBtn: $("autoPlayBtn"), // scroll only
     mScrollBtn: $("mScrollBtn"),   // scroll only
+
     recordBtn: $("recordBtn"),
     mRecordBtn: $("mRecordBtn"),
 
-    // projects
     sortSelect: $("sortSelect"),
     projectSelect: $("projectSelect"),
+    newProjectBtn: $("newProjectBtn"),
     renameProjectBtn: $("renameProjectBtn"),
     deleteProjectBtn: $("deleteProjectBtn"),
 
-    // recordings
     recordingsList: $("recordingsList"),
 
-    // editor
     tabs: $("tabs"),
     sheetTitle: $("sheetTitle"),
     sheetHint: $("sheetHint"),
     sheetBody: $("sheetBody"),
 
-    // rhyme
     rBtn: $("rBtn"),
     rhymeDock: $("rhymeDock"),
-    hideRhymeBtn: $("hideRhymeBtn")
+    hideRhymeBtn: $("hideRhymeBtn"),
+    rhymeWords: $("rhymeWords")
   };
 
   /***********************
-   * Data model
+   * Sections
    ***********************/
-  const SECTIONS = ["VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","CHORUS 3","BRIDGE","OUTRO","Full"];
-
-  const defaultProject = () => ({
-    id: crypto.randomUUID(),
-    name: "New Project",
-    createdAt: now(),
-    updatedAt: now(),
-    sections: Object.fromEntries(SECTIONS.map(s => [s, []]))
-  });
-
-  const state = {
-    project: null,
-    currentSection: "Full",
-    bpm: 95,
-    capo: 0,
-    autoSplit: true,
-
-    instrument: "piano",   // "acoustic" | "electric" | "piano"
-    drumStyle: "rap",      // "rock" | "hardrock" | "pop" | "rap"
-
-    // AutoScroll ONLY
-    autoScrollOn: false,
-    autoScrollTimer: null,
-
-    // Audio
-    ctx: null,
-    drumTimer: null,
-    drumOn: false,
-    currentAudio: null, // for recordings playback stop
-  };
+  const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","CHORUS 3","BRIDGE","OUTRO"];
 
   /***********************
-   * Storage (localStorage)
+   * Project storage (localStorage)
    ***********************/
-  const LS_KEY = "songrider_v16_projects";
-  const LS_CUR = "songrider_v16_currentProjectId";
+  const LS_KEY = "songrider_v17_projects";
+  const LS_CUR = "songrider_v17_currentProjectId";
+
+  function defaultProject(name="New Song"){
+    return {
+      id: uuid(),
+      name,
+      createdAt: now(),
+      updatedAt: now(),
+      sections: Object.fromEntries(SECTIONS.filter(s=>s!=="Full").map(s => [s, []]))
+    };
+  }
 
   function loadAllProjects(){
     try{
@@ -117,37 +101,41 @@
       return [];
     }
   }
+
   function saveAllProjects(projects){
     localStorage.setItem(LS_KEY, JSON.stringify(projects));
   }
+
   function upsertProject(p){
     const all = loadAllProjects();
     const i = all.findIndex(x => x.id === p.id);
-    if(i >= 0) all[i] = p; else all.unshift(p);
+    if(i >= 0) all[i] = p;
+    else all.unshift(p);
     saveAllProjects(all);
     localStorage.setItem(LS_CUR, p.id);
   }
-  function deleteProject(id){
+
+  function deleteProjectById(id){
     const all = loadAllProjects().filter(p => p.id !== id);
     saveAllProjects(all);
     localStorage.removeItem(LS_CUR);
   }
+
   function getCurrentProject(){
     const all = loadAllProjects();
     if(all.length === 0){
-      const p = defaultProject();
+      const p = defaultProject("New Song");
       upsertProject(p);
       return p;
     }
     const curId = localStorage.getItem(LS_CUR);
-    const found = curId ? all.find(p => p.id === curId) : null;
-    return found || all[0];
+    return (curId && all.find(p => p.id === curId)) || all[0];
   }
 
   /***********************
    * IndexedDB (Recordings)
    ***********************/
-  const DB_NAME = "songrider_db_v16";
+  const DB_NAME = "songrider_db_v17";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -196,7 +184,39 @@
   }
 
   /***********************
-   * Audio core (simple)
+   * State
+   ***********************/
+  const state = {
+    project: null,
+    currentSection: "Full",
+    bpm: 95,
+    capo: 0,
+    autoSplit: true,
+
+    // audio toggles
+    instrument: "piano",
+    instrumentOn: false,
+
+    drumStyle: "rap",
+    drumsOn: false,
+
+    // autoscroll only
+    autoScrollOn: false,
+    autoScrollTimer: null,
+
+    // audio
+    ctx: null,
+    drumTimer: null,
+    instNodes: null,
+
+    // recordings playback
+    currentAudio: null
+  };
+
+  /***********************
+   * Audio (very lightweight “demo” engine)
+   * - Drum loop: kick/snare/hat based on style
+   * - Instrument: simple chord pad / pluck pattern per instrument
    ***********************/
   function ensureCtx(){
     if(!state.ctx){
@@ -208,78 +228,166 @@
     return state.ctx;
   }
 
-  function playClick(freq=440, ms=80){
+  function beep(freq=440, ms=70, gain=0.10){
     const ctx = ensureCtx();
     const t0 = ctx.currentTime;
-
-    const osc = ctx.createOscillator();
+    const o = ctx.createOscillator();
     const g = ctx.createGain();
-
-    osc.type = "sine";
-    osc.frequency.value = freq;
+    o.type = "sine";
+    o.frequency.value = freq;
 
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
 
-    osc.connect(g);
-    g.connect(ctx.destination);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + ms/1000 + 0.02);
+  }
 
-    osc.start(t0);
-    osc.stop(t0 + ms/1000 + 0.02);
+  function noise(ms=40, gain=0.08){
+    const ctx = ensureCtx();
+    const bufferSize = Math.max(256, Math.floor(ctx.sampleRate * (ms/1000)));
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for(let i=0;i<data.length;i++) data[i] = (Math.random()*2-1);
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+
+    const g = ctx.createGain();
+    const t0 = ctx.currentTime;
+    g.gain.setValueAtTime(gain, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
+
+    src.connect(g); g.connect(ctx.destination);
+    src.start();
+  }
+
+  function drumHit(kind){
+    // super-simple: kick = low sine, snare/hat = noise + tiny tone
+    if(kind === "kick") beep(70, 90, 0.16);
+    if(kind === "snare"){ noise(60, 0.10); beep(180, 40, 0.04); }
+    if(kind === "hat"){ noise(25, 0.05); }
+  }
+
+  function stopDrums(){
+    if(state.drumTimer){
+      clearInterval(state.drumTimer);
+      state.drumTimer = null;
+    }
+    state.drumsOn = false;
+  }
+
+  function startDrums(){
+    stopDrums();
+    state.drumsOn = true;
+
+    const bpm = clamp(state.bpm || 95, 40, 220);
+    const stepMs = Math.round((60000 / bpm) / 2); // 8th notes
+    let step = 0;
+
+    state.drumTimer = setInterval(() => {
+      if(!state.drumsOn) return;
+
+      // 16-step pattern (8th = step, so 16 steps = 2 bars of 4/4 at 8ths)
+      const s = step % 16;
+
+      // styles
+      if(state.drumStyle === "rap"){
+        // kick on 1, “and” of 2, 3; snare on 2 & 4; hats steady
+        if(s === 0 || s === 6 || s === 8) drumHit("kick");
+        if(s === 4 || s === 12) drumHit("snare");
+        drumHit("hat");
+      } else if(state.drumStyle === "rock"){
+        if(s === 0 || s === 8) drumHit("kick");
+        if(s === 4 || s === 12) drumHit("snare");
+        drumHit("hat");
+      } else if(state.drumStyle === "hardrock"){
+        if(s === 0 || s === 2 || s === 8 || s === 10) drumHit("kick");
+        if(s === 4 || s === 12) drumHit("snare");
+        drumHit("hat");
+      } else { // pop
+        if(s === 0 || s === 7 || s === 8) drumHit("kick");
+        if(s === 4 || s === 12) drumHit("snare");
+        // lighter hats
+        if(s % 2 === 0) drumHit("hat");
+      }
+
+      step++;
+    }, stepMs);
+  }
+
+  function stopInstrument(){
+    const ctx = ensureCtx();
+    if(state.instNodes){
+      try{
+        state.instNodes.oscs.forEach(o => o.stop());
+      }catch{}
+      try{
+        state.instNodes.gain.disconnect();
+      }catch{}
+      state.instNodes = null;
+    }
+    state.instrumentOn = false;
+  }
+
+  function startInstrument(){
+    stopInstrument();
+    state.instrumentOn = true;
+
+    const ctx = ensureCtx();
+
+    // simple “C major” pad so you can hear ON/OFF clearly
+    const freqs = [261.63, 329.63, 392.00]; // C E G
+    const oscs = freqs.map(f => {
+      const o = ctx.createOscillator();
+      o.frequency.value = f;
+      o.type = (state.instrument === "electric") ? "sawtooth" : (state.instrument === "acoustic" ? "triangle" : "sine");
+      return o;
+    });
+
+    const g = ctx.createGain();
+    const t0 = ctx.currentTime;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.05);
+
+    oscs.forEach(o => o.connect(g));
+    g.connect(ctx.destination);
+    oscs.forEach(o => o.start());
+
+    state.instNodes = { oscs, gain: g };
   }
 
   /***********************
-   * UI state helpers
+   * UI helpers
    ***********************/
-  function setActivePill(groupIds, activeId){
-    groupIds.forEach(id => {
+  function setActive(ids, activeId){
+    ids.forEach(id => {
       const b = $(id);
       if(!b) return;
       b.classList.toggle("active", id === activeId);
     });
   }
 
-  function setInstrument(which){
-    state.instrument = which;
-    setActivePill(["instAcoustic","instElectric","instPiano"], ({
-      acoustic:"instAcoustic",
-      electric:"instElectric",
-      piano:"instPiano"
-    })[which]);
-
-    // ✅ instrument buttons should DO something immediately
-    // quick ear-test ping so you know it worked
-    const f = which === "acoustic" ? 330 : which === "electric" ? 440 : 523.25;
-    playClick(f, 80);
+  function renderInstrumentUI(){
+    // green only when instrumentOn AND it matches
+    const map = { acoustic:"instAcoustic", electric:"instElectric", piano:"instPiano" };
+    const active = state.instrumentOn ? map[state.instrument] : null;
+    setActive(Object.values(map), active);
   }
 
-  function setDrumStyle(which){
-    state.drumStyle = which;
+  function renderDrumUI(){
+    const map = { rock:"drumRock", hardrock:"drumHardRock", pop:"drumPop", rap:"drumRap" };
+    const mapMini = { rock:"mRock", hardrock:"mHardRock", pop:"mPop", rap:"mRap" };
 
-    const map = {
-      rock: "drumRock",
-      hardrock: "drumHardRock",
-      pop: "drumPop",
-      rap: "drumRap"
-    };
-    setActivePill(Object.values(map), map[which]);
+    const active = state.drumsOn ? map[state.drumStyle] : null;
+    setActive(Object.values(map), active);
 
-    const mapMini = {
-      rock: "mRock",
-      hardrock: "mHardRock",
-      pop: "mPop",
-      rap: "mRap"
-    };
-    setActivePill(Object.values(mapMini), mapMini[which]);
-
-    // ✅ audible confirmation so you KNOW the press worked
-    playClick(196, 60);
+    const activeMini = state.drumsOn ? mapMini[state.drumStyle] : null;
+    setActive(Object.values(mapMini), activeMini);
   }
 
-  /***********************
-   * AutoScroll ONLY (no audio)
-   ***********************/
   function setAutoScroll(on){
     state.autoScrollOn = !!on;
     el.autoPlayBtn?.classList.toggle("on", state.autoScrollOn);
@@ -296,20 +404,24 @@
     }
   }
 
+  function setPanelHidden(hidden){
+    el.panelBody.classList.toggle("hidden", hidden);
+    el.togglePanelBtn.textContent = hidden ? "Show" : "Hide";
+    el.miniBar.classList.toggle("show", hidden);
+  }
+
   /***********************
-   * Tabs + editor rendering
+   * Tabs + editor
    ***********************/
   function ensureSectionArray(sec){
+    if(sec === "Full") return [];
     if(!state.project.sections[sec]) state.project.sections[sec] = [];
     return state.project.sections[sec];
   }
 
   function renderTabs(){
     el.tabs.innerHTML = "";
-    const show = SECTIONS.slice(0, -1); // exclude "Full" from list, we add it first
-    const order = ["Full", ...show];
-
-    order.forEach(sec => {
+    SECTIONS.forEach(sec => {
       const b = document.createElement("button");
       b.className = "tab";
       b.textContent = sec;
@@ -323,54 +435,66 @@
     });
   }
 
+  function buildFullPreviewText(){
+    const out = [];
+    SECTIONS.filter(s => s !== "Full").forEach(sec => {
+      const arr = state.project.sections[sec] || [];
+      const hasAny = arr.some(x => String(x.lyrics || "").trim());
+      if(!hasAny) return;
+      out.push(sec.toUpperCase());
+      out.push("");
+      arr.forEach(line => {
+        const t = String(line.lyrics || "").trim();
+        if(t) out.push(t);
+      });
+      out.push("");
+    });
+    return out.join("\n").trim() || "(No lyrics yet — start typing in a section)";
+  }
+
+  function countSyllablesInline(text){
+    const s = String(text||"").toLowerCase().replace(/[^a-z\s']/g," ").trim();
+    if(!s) return 0;
+    const words = s.split(/\s+/).filter(Boolean);
+    let total = 0;
+    for(const w0 of words){
+      let w = w0.replace(/'s$/,"").replace(/'$/,"");
+      if(!w) continue;
+      w = w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/,"");
+      w = w.replace(/^y/,"");
+      const m = w.match(/[aeiouy]{1,2}/g);
+      total += m ? m.length : 1;
+    }
+    return total;
+  }
+
   function renderSheet(){
     el.sheetTitle.textContent = state.currentSection;
 
-    // FULL view: big box preview + tools
     if(state.currentSection === "Full"){
       el.sheetHint.textContent = "Full Sheet Preview (auto from your cards):";
+      el.sheetBody.innerHTML = "";
+
       const wrap = document.createElement("div");
       wrap.className = "fullBoxWrap";
-
-      const btnRow = document.createElement("div");
-      btnRow.className = "row";
-      btnRow.style.padding = "0 0 10px 0";
-
-      const showPaste = document.createElement("button");
-      showPaste.className = "btn secondary";
-      showPaste.textContent = "Show Paste Area";
-
-      const apply = document.createElement("button");
-      apply.className = "btn secondary";
-      apply.textContent = "Apply to Sections";
-
-      btnRow.appendChild(showPaste);
-      btnRow.appendChild(apply);
 
       const ta = document.createElement("textarea");
       ta.className = "fullBox";
       ta.readOnly = true;
       ta.value = buildFullPreviewText();
 
-      wrap.appendChild(btnRow);
-      wrap.appendChild(document.createTextNode("Full Sheet Preview (auto from your cards):"));
-      wrap.appendChild(document.createElement("div")).style.height = "6px";
       wrap.appendChild(ta);
-
-      el.sheetBody.innerHTML = "";
       el.sheetBody.appendChild(wrap);
       return;
     }
 
-    // Section view: cards
     el.sheetHint.textContent = "";
     const cardsWrap = document.createElement("div");
     cardsWrap.className = "cards";
 
     const arr = ensureSectionArray(state.currentSection);
     if(arr.length === 0){
-      // seed one empty line
-      arr.push({ lyrics:"", notes:Array(8).fill("Not"), timing:["","","",""] });
+      arr.push({ lyrics:"", notes:Array(8).fill("Not") });
     }
 
     arr.forEach((line, idx) => {
@@ -393,24 +517,18 @@
 
       const notesRow = document.createElement("div");
       notesRow.className = "notesRow";
-
       const notes = Array.isArray(line.notes) ? line.notes : Array(8).fill("Not");
+
       for(let i=0;i<8;i++){
         const inp = document.createElement("input");
         inp.className = "noteCell";
         inp.value = notes[i] ?? "Not";
         inp.addEventListener("input", () => {
-          const v = String(inp.value || "").trim();
-          notes[i] = v ? v : "Not";
+          notes[i] = String(inp.value || "").trim() || "Not";
           line.notes = notes;
           state.project.updatedAt = now();
           upsertProject(state.project);
           updateKeyFromAllNotes();
-        });
-        inp.addEventListener("blur", () => {
-          // normalize "not"
-          const v = String(inp.value || "").trim();
-          inp.value = v ? v : "Not";
         });
         notesRow.appendChild(inp);
       }
@@ -424,9 +542,6 @@
         state.project.updatedAt = now();
         upsertProject(state.project);
         syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
-        if(state.autoSplit){
-          // optional: keep simple (no auto-splitting surprises)
-        }
       });
 
       card.appendChild(top);
@@ -438,33 +553,15 @@
 
     el.sheetBody.innerHTML = "";
     el.sheetBody.appendChild(cardsWrap);
-
-    updateKeyFromAllNotes();
-  }
-
-  function buildFullPreviewText(){
-    const lines = [];
-    SECTIONS.filter(s => s !== "Full").forEach(sec => {
-      const arr = state.project.sections[sec] || [];
-      const hasAny = arr.some(x => String(x.lyrics || "").trim());
-      if(!hasAny) return;
-      lines.push(sec.toUpperCase());
-      lines.push("");
-      arr.forEach(line => {
-        const t = String(line.lyrics || "").trim();
-        if(t) lines.push(t);
-      });
-      lines.push("");
-    });
-    return lines.join("\n").trim();
   }
 
   /***********************
-   * Key detection (simple)
+   * Key detection + capo transpose (display only)
    ***********************/
   const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
   };
+  const PC_TO_NAME = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   const MAJOR_PROFILE = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
   const MINOR_PROFILE = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
 
@@ -478,14 +575,8 @@
     const key = root + (acc === "B" ? "B" : acc === "#" ? "#" : "");
     return NOTE_TO_PC[key] ?? null;
   }
-  function dot(a,b){
-    let s=0;
-    for(let i=0;i<12;i++) s += (a[i]||0) * (b[i]||0);
-    return s;
-  }
-  function norm(v){
-    return Math.sqrt(v.reduce((a,x)=>a+(x*x),0)) || 1;
-  }
+  function dot(a,b){ let s=0; for(let i=0;i<12;i++) s += (a[i]||0) * (b[i]||0); return s; }
+  function norm(v){ return Math.sqrt(v.reduce((a,x)=>a+(x*x),0)) || 1; }
   function rotate(arr, t){
     const out = Array(12).fill(0);
     for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
@@ -493,7 +584,7 @@
   }
   function keyFromHistogram(hist){
     const hn = norm(hist);
-    let best = { score:-1e9, name:"—" };
+    let best = { score:-1e9, pc:0, mode:"maj" };
 
     for(let t=0;t<12;t++){
       const maj = rotate(MAJOR_PROFILE, t);
@@ -501,36 +592,31 @@
       const sMaj = dot(hist, maj)/hn/norm(maj);
       const sMin = dot(hist, min)/hn/norm(min);
 
-      if(sMaj > best.score){
-        best = { score:sMaj, name: pcToName(t) + " maj" };
-      }
-      if(sMin > best.score){
-        best = { score:sMin, name: pcToName(t) + " min" };
-      }
+      if(sMaj > best.score) best = { score:sMaj, pc:t, mode:"maj" };
+      if(sMin > best.score) best = { score:sMin, pc:t, mode:"min" };
     }
-    return best.name;
-  }
-  function pcToName(pc){
-    const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-    return names[pc%12];
+    return best;
   }
 
   function updateKeyFromAllNotes(){
     const hist = Array(12).fill(0);
     SECTIONS.filter(s => s !== "Full").forEach(sec => {
       (state.project.sections[sec] || []).forEach(line => {
-        const notes = Array.isArray(line.notes) ? line.notes : [];
-        notes.forEach(n => {
+        (Array.isArray(line.notes) ? line.notes : []).forEach(n => {
           const pc = noteToPC(n);
           if(pc !== null) hist[pc] += 1;
         });
       });
     });
-    el.keyOutput.value = keyFromHistogram(hist);
+
+    const k = keyFromHistogram(hist);
+    // ✅ capo transpose display
+    const transposedPC = (k.pc + (state.capo % 12) + 12) % 12;
+    el.keyOutput.value = `${PC_TO_NAME[transposedPC]} ${k.mode}`;
   }
 
   /***********************
-   * Recordings UI (layout fixed)
+   * Recordings UI (same as before)
    ***********************/
   function fmtDate(ms){
     try{ return new Date(ms).toLocaleString(); }catch{ return String(ms); }
@@ -572,7 +658,6 @@
       title.style.fontWeight="1100";
       title.textContent = (rec.title && rec.title.trim() ? rec.title.trim() + " — " : "") + fmtDate(rec.createdAt || now());
 
-      // rename
       const edit = document.createElement("button");
       edit.className="btn secondary";
       edit.textContent="✏️";
@@ -585,7 +670,6 @@
         renderRecordings();
       });
 
-      // play
       const play = document.createElement("button");
       play.className="btn secondary";
       play.textContent="▶";
@@ -594,7 +678,6 @@
         if(!rec.blob) return;
         const url = URL.createObjectURL(rec.blob);
 
-        // stop any previous playback
         if(state.currentAudio){
           try{ state.currentAudio.pause(); }catch{}
           state.currentAudio = null;
@@ -609,22 +692,17 @@
         };
       });
 
-      // stop
       const stop = document.createElement("button");
       stop.className="btn secondary";
       stop.textContent="■";
       stop.title="Stop";
       stop.addEventListener("click", () => {
         if(state.currentAudio){
-          try{
-            state.currentAudio.pause();
-            state.currentAudio.currentTime = 0;
-          }catch{}
+          try{ state.currentAudio.pause(); state.currentAudio.currentTime = 0; }catch{}
           state.currentAudio = null;
         }
       });
 
-      // download
       const download = document.createElement("button");
       download.className="btn secondary";
       download.textContent="↓";
@@ -641,7 +719,6 @@
         setTimeout(() => URL.revokeObjectURL(url), 800);
       });
 
-      // delete
       const del = document.createElement("button");
       del.className="btn secondary";
       del.textContent="🗑️";
@@ -652,7 +729,6 @@
         renderRecordings();
       });
 
-      // ✅ order: title then buttons then trash at end
       row.appendChild(title);
       row.appendChild(edit);
       row.appendChild(play);
@@ -664,9 +740,6 @@
     });
   }
 
-  /***********************
-   * Recording (simple)
-   ***********************/
   async function startRecording(){
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
     const chunks = [];
@@ -676,15 +749,14 @@
     rec.onstop = async () => {
       stream.getTracks().forEach(t => t.stop());
       const blob = new Blob(chunks, { type: "audio/webm" });
-      const id = crypto.randomUUID();
-      const item = { id, createdAt: now(), title: "", blob };
+      const item = { id: uuid(), createdAt: now(), title: "", blob };
       await dbPut(item);
       await renderRecordings();
     };
 
     rec.start();
-    playClick(880, 60);
-    setTimeout(() => rec.stop(), 8000); // 8 sec default
+    beep(880, 60, 0.12);
+    setTimeout(() => rec.stop(), 8000);
   }
 
   /***********************
@@ -693,7 +765,6 @@
   function renderProjectsDropdown(){
     const all = loadAllProjects();
 
-    // sort
     const sort = el.sortSelect.value;
     let list = [...all];
     if(sort === "az"){
@@ -717,37 +788,31 @@
     const p = all.find(x => x.id === id);
     if(!p) return;
     state.project = p;
-    upsertProject(state.project);
+    localStorage.setItem(LS_CUR, p.id);
     renderAll();
   }
 
   /***********************
-   * Syllable count (simple)
+   * Rhymes (simple stub so box always opens)
    ***********************/
-  function countSyllablesInline(text){
-    const s = String(text||"").toLowerCase().replace(/[^a-z\s']/g," ").trim();
-    if(!s) return 0;
-    const words = s.split(/\s+/).filter(Boolean);
-    let total = 0;
-    for(const w0 of words){
-      let w = w0.replace(/'s$/,"").replace(/'$/,"");
-      if(!w) continue;
-      // simple heuristic
-      w = w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/,"");
-      w = w.replace(/^y/,"");
-      const m = w.match(/[aeiouy]{1,2}/g);
-      total += m ? m.length : 1;
-    }
-    return total;
+  const DEMO_RHYMES = ["flow", "go", "show", "pro", "mode", "road", "cold", "bold", "gold", "hold"];
+
+  function renderRhymes(){
+    el.rhymeWords.innerHTML = "";
+    DEMO_RHYMES.forEach(w => {
+      const b = document.createElement("div");
+      b.className = "rWord";
+      b.textContent = w;
+      b.addEventListener("click", () => {
+        navigator.clipboard?.writeText(w).catch(()=>{});
+        beep(660, 40, 0.08);
+      });
+      el.rhymeWords.appendChild(b);
+    });
   }
 
-  /***********************
-   * Panel hide/show
-   ***********************/
-  function setPanelHidden(hidden){
-    el.panelBody.classList.toggle("hidden", hidden);
-    el.togglePanelBtn.textContent = hidden ? "Show" : "Hide";
-    el.miniBar.classList.toggle("show", hidden);
+  function toggleRhymeDock(show){
+    el.rhymeDock.style.display = show ? "block" : "none";
   }
 
   /***********************
@@ -758,10 +823,13 @@
     renderTabs();
     renderSheet();
     renderRecordings();
+    renderInstrumentUI();
+    renderDrumUI();
+    updateKeyFromAllNotes();
   }
 
   /***********************
-   * Wire buttons (THE IMPORTANT FIX)
+   * Button wiring
    ***********************/
   function wire(){
     // panel
@@ -770,7 +838,7 @@
       setPanelHidden(hidden);
     });
 
-    // autosplit
+    // autosplit UI only
     el.autoSplitBtn.addEventListener("click", () => {
       state.autoSplit = !state.autoSplit;
       el.autoSplitBtn.classList.toggle("active", state.autoSplit);
@@ -781,43 +849,77 @@
     el.bpmInput.addEventListener("input", () => {
       state.bpm = clamp(parseInt(el.bpmInput.value || "95",10) || 95, 40, 220);
       el.bpmInput.value = String(state.bpm);
+      if(state.drumsOn) startDrums(); // re-time drums live
     });
     el.capoInput.addEventListener("input", () => {
       state.capo = clamp(parseInt(el.capoInput.value || "0",10) || 0, 0, 12);
       el.capoInput.value = String(state.capo);
+      updateKeyFromAllNotes();
     });
 
-    // ✅ instrument listeners (FIXED)
-    el.instAcoustic.addEventListener("click", () => setInstrument("acoustic"));
-    el.instElectric.addEventListener("click", () => setInstrument("electric"));
-    el.instPiano.addEventListener("click", () => setInstrument("piano"));
+    // ✅ Instruments: tap = ON, tap same again = OFF
+    function handleInstrument(which){
+      ensureCtx(); // unlock audio
+      if(state.instrument === which && state.instrumentOn){
+        stopInstrument();
+      }else{
+        state.instrument = which;
+        startInstrument();
+      }
+      renderInstrumentUI();
+    }
 
-    // ✅ drum listeners (FIXED)
-    el.drumRock.addEventListener("click", () => setDrumStyle("rock"));
-    el.drumHardRock.addEventListener("click", () => setDrumStyle("hardrock"));
-    el.drumPop.addEventListener("click", () => setDrumStyle("pop"));
-    el.drumRap.addEventListener("click", () => setDrumStyle("rap"));
+    el.instAcoustic.addEventListener("click", () => handleInstrument("acoustic"));
+    el.instElectric.addEventListener("click", () => handleInstrument("electric"));
+    el.instPiano.addEventListener("click", () => handleInstrument("piano"));
 
-    el.mRock.addEventListener("click", () => setDrumStyle("rock"));
-    el.mHardRock.addEventListener("click", () => setDrumStyle("hardrock"));
-    el.mPop.addEventListener("click", () => setDrumStyle("pop"));
-    el.mRap.addEventListener("click", () => setDrumStyle("rap"));
+    // ✅ Drums: tap = ON, tap same again = OFF, switch style while playing
+    function handleDrums(which){
+      ensureCtx(); // unlock audio
+      if(state.drumStyle === which && state.drumsOn){
+        stopDrums();
+      }else{
+        state.drumStyle = which;
+        startDrums();
+      }
+      renderDrumUI();
+    }
 
-    // ✅ AutoScroll ONLY (FIXED)
+    el.drumRock.addEventListener("click", () => handleDrums("rock"));
+    el.drumHardRock.addEventListener("click", () => handleDrums("hardrock"));
+    el.drumPop.addEventListener("click", () => handleDrums("pop"));
+    el.drumRap.addEventListener("click", () => handleDrums("rap"));
+
+    el.mRock.addEventListener("click", () => handleDrums("rock"));
+    el.mHardRock.addEventListener("click", () => handleDrums("hardrock"));
+    el.mPop.addEventListener("click", () => handleDrums("pop"));
+    el.mRap.addEventListener("click", () => handleDrums("rap"));
+
+    // ✅ AutoScroll ONLY
     el.autoPlayBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
     el.mScrollBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
 
-    // recording buttons
+    // recording
     el.recordBtn.addEventListener("click", startRecording);
     el.mRecordBtn.addEventListener("click", startRecording);
 
-    // project dropdown
+    // projects
     el.sortSelect.addEventListener("change", renderProjectsDropdown);
     el.projectSelect.addEventListener("change", () => loadProjectById(el.projectSelect.value));
 
-    // rename/delete project
+    el.newProjectBtn.addEventListener("click", () => {
+      const name = prompt("New project name:", "New Song");
+      if(name === null) return;
+      const p = defaultProject(name.trim() || "New Song");
+      upsertProject(p);
+      state.project = p;
+      state.currentSection = "Full";
+      renderAll();
+    });
+
     el.renameProjectBtn.addEventListener("click", () => {
-      const name = prompt("Project name:", state.project?.name || "");
+      if(!state.project) return;
+      const name = prompt("Project name:", state.project.name || "");
       if(name === null) return;
       state.project.name = name.trim() || "Untitled";
       state.project.updatedAt = now();
@@ -828,19 +930,18 @@
     el.deleteProjectBtn.addEventListener("click", () => {
       if(!state.project) return;
       if(!confirm(`Delete project "${state.project.name}"?`)) return;
-      deleteProject(state.project.id);
+      deleteProjectById(state.project.id);
       state.project = getCurrentProject();
+      state.currentSection = "Full";
       renderAll();
     });
 
-    // rhyme dock
+    // rhymes
     el.rBtn.addEventListener("click", () => {
       const showing = el.rhymeDock.style.display === "block";
-      el.rhymeDock.style.display = showing ? "none" : "block";
+      toggleRhymeDock(!showing);
     });
-    el.hideRhymeBtn.addEventListener("click", () => {
-      el.rhymeDock.style.display = "none";
-    });
+    el.hideRhymeBtn.addEventListener("click", () => toggleRhymeDock(false));
   }
 
   /***********************
@@ -849,15 +950,17 @@
   function init(){
     state.project = getCurrentProject();
 
-    // initial UI
     el.autoSplitBtn.textContent = "AutoSplit: ON";
     el.autoSplitBtn.classList.add("active");
 
-    // defaults
-    setInstrument("piano");
-    setDrumStyle("rap");
     setPanelHidden(false);
     setAutoScroll(false);
+
+    // start with everything OFF visually
+    state.instrumentOn = false;
+    state.drumsOn = false;
+    renderRhymes();
+    toggleRhymeDock(false);
 
     wire();
     renderAll();
