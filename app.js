@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v34) */
+/* app.js (FULL REPLACE MAIN v35) */
 (() => {
   "use strict";
 
@@ -645,29 +645,37 @@
     startBeatClock();
 
     const bpm = clamp(state.bpm || 95, 40, 220);
-    const stepMs = Math.round((60000 / bpm) / 2);
+
+    // ✅ DRUM GRID IS 16th NOTES (16 steps per bar)
+    const stepMs = Math.round((60000 / bpm) / 4);
+
     let step = 0;
 
     state.drumTimer = setInterval(() => {
       if(!state.drumsOn) return;
-      const s = step % 16;
+      const s = step % 16; // 0..15 = one bar in 16ths
 
       if(state.drumStyle === "rap"){
-        if(s === 0 || s === 6 || s === 8) drumHit("kick");
+        // ✅ Requested rap pattern:
+        // Hat: every 16th
+        // Kick: 1 and 3  -> steps 0, 8
+        // Snare: 2 and 4 -> steps 4, 12
+        if(s === 0 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
         drumHit("hat");
       } else if(state.drumStyle === "rock"){
         if(s === 0 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
-        drumHit("hat");
+        if(s % 2 === 0) drumHit("hat"); // 8ths
       } else if(state.drumStyle === "hardrock"){
         if(s === 0 || s === 2 || s === 8 || s === 10) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
-        drumHit("hat");
+        if(s % 2 === 0) drumHit("hat"); // 8ths
       } else {
+        // pop
         if(s === 0 || s === 7 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
-        if(s % 2 === 0) drumHit("hat");
+        if(s % 2 === 0) drumHit("hat"); // 8ths
       }
 
       step++;
@@ -1543,9 +1551,6 @@ ${bodyHtml}
     state.recMicSource = micSource;
 
     // ✅ Route mic into recording destination ONLY (no monitoring to avoid feedback)
-    // If you want to monitor yourself, uncomment the next 2 lines:
-    // const micMon = ctx.createGain(); micMon.gain.value = 0.9; micSource.connect(micMon); micMon.connect(state.masterGain);
-
     micSource.connect(state.recDest);
 
     const options = {};
@@ -1559,7 +1564,6 @@ ${bodyHtml}
 
     rec.onstop = async () => {
       try{
-        // Disconnect mic from the recording bus
         if(state.recMicSource){
           try{ state.recMicSource.disconnect(); }catch{}
         }
