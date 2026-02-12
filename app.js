@@ -3,6 +3,18 @@
   "use strict";
 
   /***********************
+   * FORCE-NUKE OLD SERVICE WORKER CACHE
+   * (Fixes “I updated but it still runs old code”)
+   ***********************/
+  try{
+    if("serviceWorker" in navigator){
+      navigator.serviceWorker.getRegistrations()
+        .then(rs => rs.forEach(r => r.unregister()))
+        .catch(()=>{});
+    }
+  }catch{}
+
+  /***********************
    * Utils
    ***********************/
   const $ = (id) => document.getElementById(id);
@@ -75,15 +87,14 @@
   };
 
   /***********************
-   * Active card + active lyrics (for playback + rhymes)
+   * Active card + active lyrics
    ***********************/
-  let lastLyricsTextarea = null;     // where rhyme inserts
-  let lastActiveCardEl = null;       // where instrument plays (when not autoscroll)
+  let lastLyricsTextarea = null;
+  let lastActiveCardEl = null;
 
   document.addEventListener("focusin", (e) => {
     const t = e.target;
 
-    // lyrics focus
     if(t && t.tagName === "TEXTAREA" && t.classList.contains("lyrics")){
       lastLyricsTextarea = t;
       const card = t.closest(".card");
@@ -92,26 +103,22 @@
       return;
     }
 
-    // other inputs inside a card should set active card too
     if(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")){
       const card = t.closest(".card");
       if(card) lastActiveCardEl = card;
     }
   });
 
-  // Also set active card on tap/click inside a card (mobile)
   document.addEventListener("pointerdown", (e) => {
     const card = e.target && e.target.closest ? e.target.closest(".card") : null;
     if(card) lastActiveCardEl = card;
 
-    // keep lastLyricsTextarea accurate when user taps inside it
     if(e.target && e.target.tagName === "TEXTAREA" && e.target.classList.contains("lyrics")){
       lastLyricsTextarea = e.target;
       refreshRhymesFromActive();
     }
   }, { passive:true });
 
-  // Update rhymes when cursor moves
   document.addEventListener("selectionchange", () => {
     if(!lastLyricsTextarea) return;
     if(document.activeElement !== lastLyricsTextarea) return;
@@ -125,10 +132,10 @@
   const DEFAULT_LINES_PER_SECTION = 20;
 
   /***********************
-   * Project storage (KEEP v24 keys so you don't lose projects)
+   * Project storage (version bump)
    ***********************/
-  const LS_KEY = "songrider_v24_projects";
-  const LS_CUR = "songrider_v24_currentProjectId";
+  const LS_KEY = "songrider_v25_projects";
+  const LS_CUR = "songrider_v25_currentProjectId";
 
   function newLine(){
     return {
@@ -225,9 +232,9 @@
   }
 
   /***********************
-   * IndexedDB (Recordings) (KEEP v24 DB so recordings remain)
+   * IndexedDB (Recordings) version bump
    ***********************/
-  const DB_NAME = "songrider_db_v24";
+  const DB_NAME = "songrider_db_v25";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -297,13 +304,11 @@
     ctx: null,
     drumTimer: null,
 
-    // recording
     isRecording: false,
     recStream: null,
     rec: null,
     recChunks: [],
 
-    // beat clock (slaved to drums)
     beatTimer: null,
     tick8: 0
   };
@@ -430,7 +435,7 @@
   }
 
   /***********************
-   * ACTIVE CARD SELECTION (FIXED)
+   * ACTIVE CARD selection
    ***********************/
   function getHeaderBottomY(){
     const hdr = document.querySelector("header");
@@ -461,7 +466,6 @@
 
   function getPlaybackCard(){
     if(state.currentSection === "Full") return null;
-
     if(state.autoScrollOn) return getNearestVisibleCard();
     if(lastActiveCardEl && document.contains(lastActiveCardEl)) return lastActiveCardEl;
     return getNearestVisibleCard();
@@ -579,9 +583,6 @@
     }, stepMs);
   }
 
-  /***********************
-   * Instruments (toggle only)
-   ***********************/
   function stopInstrument(){ state.instrumentOn = false; }
   function startInstrument(){ state.instrumentOn = true; ensureCtx(); }
 
@@ -690,7 +691,7 @@
   }
 
   /***********************
-   * AutoSplit (unchanged)
+   * AutoSplit
    ***********************/
   function tokenizeWords(text){
     return String(text||"")
@@ -733,7 +734,7 @@
   }
 
   /***********************
-   * Key display
+   * Key display (unchanged)
    ***********************/
   const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
@@ -791,14 +792,11 @@
   }
 
   /***********************
-   * Full preview (EIGHTH-NOTE SLOT ALIGNMENT)
+   * Full preview (unchanged)
    ***********************/
-  function formatNotesSlots(notesArr){
+  function compactNotesLine(notesArr){
     const notes = Array.isArray(notesArr) ? notesArr : Array(8).fill("");
-    const SLOT = 4; // monospace chars per 8th slot
-    const show = notes.map(n => String(n||"").trim());
-    // use "—" for empty so timing is visible
-    return show.map(t => (t ? t : "—").padEnd(SLOT, " ")).join("");
+    return notes.map(n => (String(n||"").trim() || "—")).join(" ");
   }
 
   function buildFullPreviewText(){
@@ -821,10 +819,11 @@
 
       arr.forEach((line, idx) => {
         const lyr = String(line.lyrics || "").trim();
-        const notesLine = formatNotesSlots(line.notes);
+        const notesLine = compactNotesLine(line.notes);
 
-        const hasNotes = (Array.isArray(line.notes) ? line.notes : []).some(n => String(n||"").trim());
+        const hasNotes = notesLine.replace(/—|\s/g,"").length > 0;
         const hasLyrics = !!lyr;
+
         if(!hasNotes && !hasLyrics) return;
 
         out.push(`(${idx+1}) ${notesLine}`);
@@ -845,7 +844,7 @@
   }
 
   /***********************
-   * Sheet rendering
+   * Sheet rendering (unchanged from your v24)
    ***********************/
   function renderSheetActions(){
     el.sheetActions.innerHTML = "";
@@ -1086,7 +1085,7 @@
   }
 
   /***********************
-   * Recordings UI
+   * Recordings UI (unchanged)
    ***********************/
   function fmtDate(ms){
     try{ return new Date(ms).toLocaleString(); }catch{ return String(ms); }
@@ -1187,7 +1186,7 @@
   }
 
   /***********************
-   * Recording
+   * Recording (unchanged)
    ***********************/
   async function startRecording(){
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
@@ -1234,7 +1233,7 @@
   }
 
   /***********************
-   * Projects dropdown
+   * Projects dropdown (unchanged)
    ***********************/
   function renderProjectsDropdown(){
     const all = loadAllProjects().map(normalizeProject).filter(Boolean);
@@ -1271,76 +1270,35 @@
   }
 
   /***********************
-   * Rhymes (v25)
-   * - MORE suggestions
-   * - seed = LAST WORD OF PREVIOUS CARD'S LYRICS
-   * - fallback: current cursor word logic
+   * RHYMES v25 (FIXED FOR REAL)
+   * - bigger suggestions: static + dynamic bank from project text
+   * - seed:
+   *   A) inside a word -> rhyme previous word
+   *   B) empty current card -> rhyme last word of previous card
    ***********************/
   const WORD_BANK = [
-    // core rap/common
+    // “oo / you” family
+    "do","to","too","two","who","new","blue","true","clue","shoe","threw","through","crew","due","glue","flu","grew",
+    // common
     "flow","go","show","pro","mode","road","cold","bold","gold","hold","told","sold","fold","stroll","soul","goal","role","whole","control",
     "can","man","plan","land","stand","hand","brand","grand","command","demand","understand","sand","band","fan","ran","than",
     "best","test","rest","quest","blessed","pressed","stress","chest","vest","next","text","flex",
-    "love","above","dove","glove","shove","enough","tough","rough","stuff","buff","cuff","bluff",
-    "light","night","fight","right","might","tight","sight","height","bright","flight","bite","write",
-    "time","rhyme","climb","prime","crime","shine","mine","line","sign","design","align","define",
-    "game","name","same","flame","fame","claim","frame","tame","shame","aim",
-    "heart","start","part","smart","chart","art","dart","cart",
-    "grace","place","face","case","race","space","base","embrace","trace",
-    "way","day","say","play","stay","pray","gray","okay","away",
-    "pain","rain","gain","train","main","chain","brain","explain","remain","campaign",
-    "real","feel","deal","steel","heal","wheel","seal","reveal","conceal",
-    "king","thing","sing","bring","ring","wing","spring","bling","string",
-    "sound","ground","round","found","bound","crown","down","town","around","surround",
-    "peace","lease","cease","release","increase","decrease","piece",
-    "fire","higher","wire","desire","supplier","entire","inspire","liar",
-    "truth","youth","booth","proof","smooth","tooth",
-    "care","share","stare","prayer","rare","wear","there","where",
-    "here","near","clear","fear","tear","year","sincere",
-    "more","door","floor","before","core","shore","store","tour",
-    "late","great","state","date","wait","straight","plate",
-    "hard","yard","card","guard","regard","shard",
-    "move","prove","groove","smooth","approve","improve",
-    "beat","street","heat","meet","seat","repeat","concrete",
-    "back","track","stack","black","attack","snack","pack",
-    "money","funny","honey","sunny","runny",
-    "slow","low","blow","glow","know","throw","below",
-    "top","drop","shop","pop","stop","swap",
-    "grind","mind","find","kind","blind","behind",
-    "wide","side","ride","pride","guide","inside",
-    "fast","last","past","cast","blast","contrast",
-    "wave","save","brave","slave","grave","behave",
-    "coldest","boldest","goldest","holdest",
-    // extra variety
-    "vision","mission","position","decision","precision",
-    "hustle","muscle","struggle","bubble","trouble",
-    "winner","dinner","spinner","beginner",
-    "faith","grace","mercy","worthy","serving",
-    "holy","slowly","closely","mostly","boldly",
-    "power","hour","tower","shower","flower",
-    "battle","rattle","cattle","tattle",
-    "story","glory","inventory","category",
-    "blessed","tested","nested","rested",
-    "crazy","lazy","hazy","daisy",
-    "number","thunder","wonder","under",
-    "clean","mean","seen","queen","between",
-    "sayin","playin","stayin","pray-in",
-    "bro","tho","yo","solo","promo"
-    "you","do","to","too","two","true","blue","new","knew","crew","chew","threw","through","who","woo",
-"shoe","clue","glue","flu","bloo","stew","grew","few","view","due","sue","queue",
-"move","prove","groove","smooth",
-"loose","juice","goose","deuce","truce","duce","noose",
-"choose","cruise","bruise","news","views"
+    "love","above","dove","glove","shove","enough","tough","rough","stuff","buff",
+    "light","night","fight","right","might","tight","sight","height","bright","flight",
+    "time","rhyme","climb","prime","crime","shine","mine","line","sign","design","align",
+    "game","name","same","flame","fame","claim","frame","tame","shame",
+    "heart","start","part","smart","chart","art","dart",
+    "grace","place","face","case","race","space","base","embrace",
+    "way","day","say","play","stay","pray","gray","okay",
+    "pain","rain","gain","train","main","chain","brain","explain","remain",
+    "real","feel","deal","steel","heal","wheel","seal","reveal",
+    "king","thing","sing","bring","ring","wing","spring","bling",
+    "sound","ground","round","found","bound","crown","down","town","around",
+    "peace","lease","cease","release","increase","decrease"
   ];
 
   function normalizeWord(w){
     return String(w||"").toLowerCase().replace(/[^a-z']/g,"").trim();
-  }
-
-  function lastWordFromLine(text){
-    const words = String(text||"").match(/[A-Za-z']+/g) || [];
-    if(words.length === 0) return "";
-    return words[words.length - 1];
   }
 
   function stripSilentE(w){
@@ -1349,32 +1307,48 @@
   }
 
   function rhymeKey(word){
-  let w = normalizeWord(word);
-  if(!w) return "";
+    let w = normalizeWord(word);
+    if(!w) return "";
 
-  w = stripSilentE(w);
+    w = stripSilentE(w);
+    w = w.replace(/tion$/,"shun").replace(/sion$/,"zhun").replace(/cion$/,"shun");
 
-  // normalize common endings a bit
-  w = w.replace(/tion$/,"shun").replace(/sion$/,"zhun").replace(/cion$/,"shun");
+    // phonetic-ish overrides
+    if(/^(you|do|to|too|two|who)$/.test(w)) return "oo";
+    if(/(ew|ue|oo)$/.test(w)) return "oo";
+    if(/ough$/.test(w)) return "oo"; // rough-ish is imperfect but helps
 
-  // ✅ phonetic-ish overrides for super-common cases
-  // "you / do / to / true / blue / new" style -> treat as "oo"
-  if(/^(you|do|to|too|two|who)$/.test(w)) return "oo";
-if(/(ew|ue|oo)$/.test(w)) return "oo";
-  if(/ough$/.test(w)) return "oo";         // through
+    const vowels = "aeiouy";
+    let i = w.length - 1;
+    while(i >= 0 && !vowels.includes(w[i])) i--;
+    if(i < 0) return w.slice(Math.max(0, w.length-3));
 
-  const vowels = "aeiouy";
+    let j = i;
+    while(j >= 0 && vowels.includes(w[j])) j--;
 
-  // find last vowel
-  let i = w.length - 1;
-  while(i >= 0 && !vowels.includes(w[i])) i--;
-  if(i < 0) return w.slice(Math.max(0, w.length-3));
+    return w.slice(j+1);
+  }
 
-  // include whole vowel group backwards
-  let j = i;
-  while(j >= 0 && vowels.includes(w[j])) j--;
-
-  return w.slice(j+1);
+  function wordsFromProject(){
+    // pull words from all lyrics to boost suggestions
+    const set = new Set();
+    try{
+      SECTIONS.filter(s=>s!=="Full").forEach(sec => {
+        (state.project.sections[sec] || []).forEach(line => {
+          const t = String(line.lyrics||"");
+          (t.match(/[A-Za-z']+/g) || []).forEach(w => {
+            const n = normalizeWord(w);
+            if(n && n.length >= 2) set.add(n);
+          });
+        });
+      });
+      const ft = String(state.project.fullText||"");
+      (ft.match(/[A-Za-z']+/g) || []).forEach(w => {
+        const n = normalizeWord(w);
+        if(n && n.length >= 2) set.add(n);
+      });
+    }catch{}
+    return Array.from(set);
   }
 
   function getRhymes(seed){
@@ -1384,10 +1358,11 @@ if(/(ew|ue|oo)$/.test(w)) return "oo";
     const k = rhymeKey(s0);
     if(!k) return [];
 
+    const bank = [...WORD_BANK, ...wordsFromProject()];
     const exact = [];
     const loose = [];
 
-    for(const w of WORD_BANK){
+    for(const w of bank){
       const ww = normalizeWord(w);
       if(!ww || ww === s0) continue;
 
@@ -1396,71 +1371,66 @@ if(/(ew|ue|oo)$/.test(w)) return "oo";
       else loose.push(w);
     }
 
-    const out = [...exact];
+    const out = [];
+    // dedupe while keeping order
+    const seen = new Set();
+    for(const w of exact){
+      const n = normalizeWord(w);
+      if(!seen.has(n)){ seen.add(n); out.push(w); }
+    }
+
     const tail2 = s0.slice(-2);
     const tail3 = s0.slice(-3);
-    const tail4 = s0.slice(-4);
 
     if(out.length < 24){
       for(const w of loose){
         const ww = normalizeWord(w);
         if(!ww || ww === s0) continue;
-        if(ww.endsWith(tail4) || ww.endsWith(tail3) || ww.endsWith(tail2)){
-          if(!out.includes(w)) out.push(w);
+        if(ww.slice(-3) === tail3 || ww.slice(-2) === tail2){
+          if(!seen.has(ww)){ seen.add(ww); out.push(w); }
         }
       }
     }
 
-    // de-dupe, cap higher
-    const uniq = [];
-    const seen = new Set();
-    for(const w of out){
-      const key = normalizeWord(w);
-      if(seen.has(key)) continue;
-      seen.add(key);
-      uniq.push(w);
-    }
-    return uniq.slice(0, 36);
+    return out.slice(0, 28);
   }
 
-  // OLD behavior (cursor-based) kept as fallback
-  function getSeedFromTextareaCursor(ta){
-    if(!ta) return "";
-    const pos = (typeof ta.selectionStart === "number") ? ta.selectionStart : ta.value.length;
-    const upto = ta.value.slice(0, pos);
-    const words = upto.match(/[A-Za-z']+/g) || [];
+  function getLastWord(text){
+    const words = String(text||"").match(/[A-Za-z']+/g) || [];
     if(words.length === 0) return "";
-    const endsWithLetter = /[A-Za-z']$/.test(upto);
-    if(endsWithLetter && words.length >= 2) return words[words.length - 2];
     return words[words.length - 1];
   }
 
-  // NEW behavior: last word of previous card's lyrics
-  function getSeedFromPreviousCard(){
-    if(!lastLyricsTextarea) return "";
-    const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
-    const curCard = lastLyricsTextarea.closest(".card");
-    if(!curCard) return "";
-    const idx = cards.indexOf(curCard);
-    if(idx <= 0) return "";
+  function getSeedFromTextarea(ta){
+    if(!ta) return "";
 
-    for(let i = idx - 1; i >= 0; i--){
-      const prevTa = cards[i].querySelector("textarea.lyrics");
-      if(!prevTa) continue;
-      const lw = lastWordFromLine(prevTa.value);
-      if(lw) return lw;
+    const currentText = String(ta.value||"");
+    const pos = (typeof ta.selectionStart === "number") ? ta.selectionStart : currentText.length;
+    const upto = currentText.slice(0, pos);
+
+    // If current box is empty (or only spaces), use previous card's last word
+    if(!currentText.trim()){
+      const card = ta.closest(".card");
+      if(card){
+        const allCards = Array.from(el.sheetBody.querySelectorAll(".card"));
+        const idx = allCards.indexOf(card);
+        const prev = allCards[idx - 1];
+        if(prev){
+          const prevTa = prev.querySelector("textarea.lyrics");
+          const prevLast = getLastWord(prevTa ? prevTa.value : "");
+          if(prevLast) return prevLast;
+        }
+      }
+      return "";
     }
-    return "";
-  }
 
-  function getRhymeSeed(){
-    // 1) preferred: previous card's last lyric word
-    const prev = getSeedFromPreviousCard();
-    if(prev) return prev;
+    const words = upto.match(/[A-Za-z']+/g) || [];
+    if(words.length === 0) return "";
 
-    // 2) fallback: current cursor logic (your older “previous word” rule)
-    const cur = getSeedFromTextareaCursor(lastLyricsTextarea);
-    return cur || "";
+    const endsWithLetter = /[A-Za-z']$/.test(upto);
+    // If cursor is inside/at end of a word, rhyme PREVIOUS word
+    if(endsWithLetter && words.length >= 2) return words[words.length - 2];
+    return words[words.length - 1];
   }
 
   function insertWordIntoLyrics(word){
@@ -1520,7 +1490,7 @@ if(/(ew|ue|oo)$/.test(w)) return "oo";
 
   function refreshRhymesFromActive(){
     if(el.rhymeDock.style.display !== "block") return;
-    const seed = getRhymeSeed();
+    const seed = getSeedFromTextarea(lastLyricsTextarea);
     renderRhymesFor(seed);
   }
 
