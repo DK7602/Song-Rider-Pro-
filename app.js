@@ -1505,8 +1505,14 @@ async function fetchDatamuseNearRhymes(word, max = 24){
     ta.dispatchEvent(new Event("input", { bubbles:true }));
   }
 
-  function renderRhymesFor(seed){
-    const list = getRhymes(seed);
+  async function renderRhymes(seed){
+    let list = await fetchDatamuseRhymes(seed, 24);
+
+if(!list || list.length === 0){
+  list = await fetchDatamuseNearRhymes(seed, 24);
+}
+
+if(!list) list = [];
 
     el.rhymeWords.innerHTML = "";
     el.rhymeTitle.textContent = seed ? `Rhymes: ${seed}` : "Rhymes";
