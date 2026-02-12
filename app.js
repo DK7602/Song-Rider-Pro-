@@ -1326,6 +1326,11 @@
     "clean","mean","seen","queen","between",
     "sayin","playin","stayin","pray-in",
     "bro","tho","yo","solo","promo"
+    "you","do","to","too","two","true","blue","new","knew","crew","chew","threw","through","who","woo",
+"shoe","clue","glue","flu","bloo","stew","grew","few","view","due","sue","queue",
+"move","prove","groove","smooth",
+"loose","juice","goose","deuce","truce","duce","noose",
+"choose","cruise","bruise","news","views"
   ];
 
   function normalizeWord(w){
@@ -1344,19 +1349,32 @@
   }
 
   function rhymeKey(word){
-    let w = normalizeWord(word);
-    if(!w) return "";
-    w = stripSilentE(w);
-    w = w.replace(/tion$/,"shun").replace(/sion$/,"zhun").replace(/cion$/,"shun");
+  let w = normalizeWord(word);
+  if(!w) return "";
 
-    const vowels = "aeiouy";
-    let i = w.length - 1;
-    while(i >= 0 && !vowels.includes(w[i])) i--;
-    if(i < 0) return w.slice(Math.max(0, w.length-3));
+  w = stripSilentE(w);
 
-    let j = i;
-    while(j >= 0 && vowels.includes(w[j])) j--;
-    return w.slice(j+1);
+  // normalize common endings a bit
+  w = w.replace(/tion$/,"shun").replace(/sion$/,"zhun").replace(/cion$/,"shun");
+
+  // ✅ phonetic-ish overrides for super-common cases
+  // "you / do / to / true / blue / new" style -> treat as "oo"
+  if(/^(you|do|to|too|two|who)$/.test(w)) return "oo";
+if(/(ew|ue|oo)$/.test(w)) return "oo";
+  if(/ough$/.test(w)) return "oo";         // through
+
+  const vowels = "aeiouy";
+
+  // find last vowel
+  let i = w.length - 1;
+  while(i >= 0 && !vowels.includes(w[i])) i--;
+  if(i < 0) return w.slice(Math.max(0, w.length-3));
+
+  // include whole vowel group backwards
+  let j = i;
+  while(j >= 0 && vowels.includes(w[j])) j--;
+
+  return w.slice(j+1);
   }
 
   function getRhymes(seed){
