@@ -1270,147 +1270,15 @@
   }
 
   /***********************
-   * RHYMES v25 (FIXED FOR REAL)
-   * - bigger suggestions: static + dynamic bank from project text
-   * - seed:
-   *   A) inside a word -> rhyme previous word
-   *   B) empty current card -> rhyme last word of previous card
+   * RHYMES (CLEAN)
    ***********************/
-  const WORD_BANK = [
-    // “oo / you” family
-    "do","to","too","two","who","new","blue","true","clue","shoe","threw","through","crew","due","glue","flu","grew",
-    // common
-    "flow","go","show","pro","mode","road","cold","bold","gold","hold","told","sold","fold","stroll","soul","goal","role","whole","control",
-    "can","man","plan","land","stand","hand","brand","grand","command","demand","understand","sand","band","fan","ran","than",
-    "best","test","rest","quest","blessed","pressed","stress","chest","vest","next","text","flex",
-    "love","above","dove","glove","shove","enough","tough","rough","stuff","buff",
-    "light","night","fight","right","might","tight","sight","height","bright","flight",
-    "time","rhyme","climb","prime","crime","shine","mine","line","sign","design","align",
-    "game","name","same","flame","fame","claim","frame","tame","shame",
-    "heart","start","part","smart","chart","art","dart",
-    "grace","place","face","case","race","space","base","embrace",
-    "way","day","say","play","stay","pray","gray","okay",
-    "pain","rain","gain","train","main","chain","brain","explain","remain",
-    "real","feel","deal","steel","heal","wheel","seal","reveal",
-    "king","thing","sing","bring","ring","wing","spring","bling",
-    "sound","ground","round","found","bound","crown","down","town","around",
-    "peace","lease","cease","release","increase","decrease"
-  ];
-
   function normalizeWord(w){
     return String(w||"").toLowerCase().replace(/[^a-z']/g,"").trim();
   }
 
-  function stripSilentE(w){
-    if(w.length > 3 && w.endsWith("e") && !w.endsWith("le")) return w.slice(0, -1);
-    return w;
-  }
-
-  function rhymeKey(word){
-    let w = normalizeWord(word);
-    if(!w) return "";
-
-    w = stripSilentE(w);
-    w = w.replace(/tion$/,"shun").replace(/sion$/,"zhun").replace(/cion$/,"shun");
-
-    // phonetic-ish overrides
-    if(/^(you|do|to|too|two|who)$/.test(w)) return "oo";
-    if(/(ew|ue|oo)$/.test(w)) return "oo";
-    if(/ough$/.test(w)) return "oo"; // rough-ish is imperfect but helps
-
-    const vowelsAny = "aeiouy";
-const vowelsGroup = "aeiou"; // <-- don't let leading 'y' eat the whole word
-
-let i = w.length - 1;
-while(i >= 0 && !vowelsAny.includes(w[i])) i--;
-if(i < 0) return w.slice(Math.max(0, w.length-3));
-
-let j = i;
-while(j >= 0 && vowelsGroup.includes(w[j])) j--;
-
-return w.slice(j+1);
-  }
-// ============================
-// DATAMUSE RHYME FETCH (Beat Sheet style)
-// ============================
-
-async function fetchDatamuseRhymes(word, max = 24){
-  const w = normalizeWord(word);
-  if(!w) return [];
-
-  const url = `https://api.datamuse.com/words?rel_rhy=${encodeURIComponent(w)}&max=${max}`;
-
-  try{
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) return [];
-    const data = await res.json();
-
-    return data
-      .map(x => x.word)
-      .filter(Boolean)
-      .slice(0, max);
-  }catch(e){
-    return [];
-  }
-}
-
-async function fetchDatamuseNearRhymes(word, max = 24){
-  const w = normalizeWord(word);
-  if(!w) return [];
-
-  const url = `https://api.datamuse.com/words?rel_nry=${encodeURIComponent(w)}&max=${max}`;
-
-  try{
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) return [];
-    const data = await res.json();
-
-    return data
-      .map(x => x.word)
-      .filter(Boolean)
-      .slice(0, max);
-  }catch(e){
-    return [];
-  }
-}
-  function wordsFromProject(){
-    for(const w of bank){
-      const ww = normalizeWord(w);
-      if(!ww || ww === s0) continue;
-
-      const wk = rhymeKey(ww);
-      if(wk === k) exact.push(w);
-      else loose.push(w);
-    }
-
-    const out = [];
-    // dedupe while keeping order
-    const seen = new Set();
-    for(const w of exact){
-      const n = normalizeWord(w);
-      if(!seen.has(n)){ seen.add(n); out.push(w); }
-    }
-
-    const tail2 = s0.slice(-2);
-    const tail3 = s0.slice(-3);
-
-    if(out.length < 24){
-      for(const w of loose){
-        const ww = normalizeWord(w);
-        if(!ww || ww === s0) continue;
-        if(ww.slice(-3) === tail3 || ww.slice(-2) === tail2){
-          if(!seen.has(ww)){ seen.add(ww); out.push(w); }
-        }
-      }
-    }
-
-    return out.slice(0, 28);
-  }
-
   function getLastWord(text){
     const words = String(text||"").match(/[A-Za-z']+/g) || [];
-    if(words.length === 0) return "";
-    return words[words.length - 1];
+    return words.length ? words[words.length - 1] : "";
   }
 
   function getSeedFromTextarea(ta){
@@ -1420,7 +1288,7 @@ async function fetchDatamuseNearRhymes(word, max = 24){
     const pos = (typeof ta.selectionStart === "number") ? ta.selectionStart : currentText.length;
     const upto = currentText.slice(0, pos);
 
-    // If current box is empty (or only spaces), use previous card's last word
+    // If current box is empty, rhyme last word of previous card
     if(!currentText.trim()){
       const card = ta.closest(".card");
       if(card){
@@ -1443,6 +1311,34 @@ async function fetchDatamuseNearRhymes(word, max = 24){
     // If cursor is inside/at end of a word, rhyme PREVIOUS word
     if(endsWithLetter && words.length >= 2) return words[words.length - 2];
     return words[words.length - 1];
+  }
+
+  async function fetchDatamuseRhymes(word, max = 24){
+    const w = normalizeWord(word);
+    if(!w) return [];
+    const url = `https://api.datamuse.com/words?rel_rhy=${encodeURIComponent(w)}&max=${max}`;
+    try{
+      const res = await fetch(url, { cache: "no-store" });
+      if(!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map(x => x.word).filter(Boolean).slice(0, max);
+    }catch{
+      return [];
+    }
+  }
+
+  async function fetchDatamuseNearRhymes(word, max = 24){
+    const w = normalizeWord(word);
+    if(!w) return [];
+    const url = `https://api.datamuse.com/words?rel_nry=${encodeURIComponent(w)}&max=${max}`;
+    try{
+      const res = await fetch(url, { cache: "no-store" });
+      if(!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map(x => x.word).filter(Boolean).slice(0, max);
+    }catch{
+      return [];
+    }
   }
 
   function insertWordIntoLyrics(word){
@@ -1474,119 +1370,54 @@ async function fetchDatamuseNearRhymes(word, max = 24){
   }
 
   async function renderRhymes(seed){
-  // 1) decide what word we’re rhyming
-  let word = (seed || "").trim();
+    const word = normalizeWord(seed);
 
-  // Beat-Sheet-style fallback: if seed is empty, use the last word typed
-  if(!word){
-    const ta = (typeof lastTextarea !== "undefined" && lastTextarea) ? lastTextarea : null;
-    const txt = ta && typeof ta.value === "string" ? ta.value : "";
-    const m = txt.match(/([A-Za-z']+)\W*$/); // last word
-    if(m) word = m[1];
-  }
+    el.rhymeWords.innerHTML = "";
+    el.rhymeTitle.textContent = word ? `Rhymes: ${word}` : "Rhymes";
 
-  // 2) reset UI immediately
-  el.rhymeWords.innerHTML = "";
-  el.rhymeTitle.textContent = word ? `Rhymes: ${word}` : "Rhymes";
-
-  const status = document.createElement("div");
-  status.style.color = "#666";
-  status.style.fontWeight = "900";
-  status.textContent = word ? "Loading…" : "Tap a word (or type a line) to see rhymes.";
-  el.rhymeWords.appendChild(status);
-
-  if(!word) return;
-/***********************
- * RHYMES v25 (CLEAN + BeatSheet style via Datamuse)
- ***********************/
-
-// --- helpers you already have ---
-/* uses normalizeWord(), insertWordIntoLyrics(), getLastWord(), getSeedFromTextarea() */
-
-// Datamuse
-async function fetchDatamuseRhymes(word, max = 24){
-  const w = normalizeWord(word);
-  if(!w) return [];
-  const url = `https://api.datamuse.com/words?rel_rhy=${encodeURIComponent(w)}&max=${max}`;
-  try{
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) return [];
-    const data = await res.json();
-    return (data || []).map(x => x.word).filter(Boolean).slice(0, max);
-  }catch{
-    return [];
-  }
-}
-
-async function fetchDatamuseNearRhymes(word, max = 24){
-  const w = normalizeWord(word);
-  if(!w) return [];
-  const url = `https://api.datamuse.com/words?rel_nry=${encodeURIComponent(w)}&max=${max}`;
-  try{
-    const res = await fetch(url, { cache: "no-store" });
-    if(!res.ok) return [];
-    const data = await res.json();
-    return (data || []).map(x => x.word).filter(Boolean).slice(0, max);
-  }catch{
-    return [];
-  }
-}
-
-// BeatSheet-style: decide seed from selection/previous card logic you wrote
-async function renderRhymes(seed){
-  const word = normalizeWord(seed);
-  el.rhymeWords.innerHTML = "";
-  el.rhymeTitle.textContent = word ? `Rhymes: ${word}` : "Rhymes";
-
-  const status = document.createElement("div");
-  status.style.color = "#666";
-  status.style.fontWeight = "900";
-
-  if(!word){
-    status.textContent = "Tap a lyrics box and type a line.";
+    const status = document.createElement("div");
+    status.style.color = "#666";
+    status.style.fontWeight = "900";
+    status.textContent = word ? "Loading…" : "Tap a lyrics box and type a line.";
     el.rhymeWords.appendChild(status);
-    return;
-  }
 
-  status.textContent = "Loading…";
-  el.rhymeWords.appendChild(status);
+    if(!word) return;
 
-  let list = await fetchDatamuseRhymes(word, 24);
-  if(!list || list.length === 0){
-    list = await fetchDatamuseNearRhymes(word, 24);
-  }
-  list = (list || []).filter(Boolean);
+    let list = await fetchDatamuseRhymes(word, 24);
+    if(!list || list.length === 0){
+      list = await fetchDatamuseNearRhymes(word, 24);
+    }
+    list = (list || []).filter(Boolean);
 
-  el.rhymeWords.innerHTML = "";
+    el.rhymeWords.innerHTML = "";
 
-  if(list.length === 0){
-    status.textContent = "No good rhymes found (try another word).";
-    el.rhymeWords.appendChild(status);
-    return;
-  }
+    if(list.length === 0){
+      status.textContent = "No good rhymes found (try another word).";
+      el.rhymeWords.appendChild(status);
+      return;
+    }
 
-  list.forEach(w => {
-    const b = document.createElement("div");
-    b.className = "rWord";          // IMPORTANT: your CSS uses .rWord (capital W)
-    b.textContent = w;
-    b.addEventListener("click", () => {
-      insertWordIntoLyrics(w);
-      pluck(660, 80, 0.05, "sine");
+    list.forEach(w => {
+      const b = document.createElement("div");
+      b.className = "rWord"; // matches your CSS
+      b.textContent = w;
+      b.addEventListener("click", () => insertWordIntoLyrics(w));
+      el.rhymeWords.appendChild(b);
     });
-    el.rhymeWords.appendChild(b);
-  });
-}
+  }
 
-function refreshRhymesFromActive(){
-  if(el.rhymeDock.style.display !== "block") return;
-  const seed = getSeedFromTextarea(lastLyricsTextarea);
-  renderRhymes(seed);
-}
+  function refreshRhymesFromActive(){
+    if(el.rhymeDock.style.display !== "block") return;
+    const seed = getSeedFromTextarea(lastLyricsTextarea);
+    renderRhymes(seed);
+  }
 
-function toggleRhymeDock(show){
-  el.rhymeDock.style.display = show ? "block" : "none";
-  if(show) refreshRhymesFromActive();
-}
+  function toggleRhymeDock(show){
+    el.rhymeDock.style.display = show ? "block" : "none";
+    if(show) refreshRhymesFromActive();
+  }
+
+
 
   /***********************
    * Render all
