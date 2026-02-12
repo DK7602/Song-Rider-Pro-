@@ -1040,11 +1040,12 @@ function scheduleDrums(t0, bars){
 function scheduleLineNotes(line, t0){
   const bpm = state.bpm;
   const step = (60/bpm)/2;
-  const notes = (line.notes||[]).map(x=>String(x||"Not"));
+  const notes = (line.notes||[]).map(x=>String(x||"").trim());
 
   for(let i=0;i<8;i++){
     const n = notes[i];
-    if(!n || n.toLowerCase()==="not") continue;
+    if(!n) continue;
+if(n.toLowerCase()==="not") continue; // keeps old projects compatible
 
     let j=i+1;
     while(j<8 && (!notes[j] || notes[j].toLowerCase()==="not")) j++;
