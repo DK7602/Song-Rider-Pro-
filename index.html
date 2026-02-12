@@ -1,4 +1,4 @@
-<!-- index.html (FULL REPLACE v21) -->
+<!-- index.html (FULL REPLACE v23) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,7 +6,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=22"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=23"/>
+
   <style>
     :root{
       --bg:#e9e9ea;
@@ -309,6 +310,7 @@
       color:#fff;
       border:1px solid rgba(0,0,0,.12);
       background:var(--dangerRed);
+      max-width:100%;
     }
 
     /* ✅ TOP NOTES ROW (8 boxes, blue) */
@@ -348,26 +350,32 @@
       margin-bottom:10px;
     }
 
-    /* ✅ Bottom beat/syllable row (4 boxes, green on 2 & 4) */
+    /* ✅ Bottom beat/syllable row (NOW textarea so it WRAPS) */
     .beatsRow{
       display:grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap:10px;
     }
-    .beatCell{
+    textarea.beatCell{
+      width:100%;
       border-radius:14px;
       border:1px solid rgba(0,0,0,.14);
       background:#fff;
-      padding:10px 10px;
+      padding:10px 8px;
       font-family:var(--mono);
       font-size:14px;
       font-weight:900;
       text-align:center;
       outline:none;
-      height:52px;
+      min-height:52px;
+      line-height:1.15;
+      resize:none;
+      overflow:hidden;
+      white-space:pre-wrap;
+      word-break:break-word;
     }
-    .beatsRow .beatCell:nth-child(2),
-    .beatsRow .beatCell:nth-child(4){
+    .beatsRow textarea.beatCell:nth-child(2),
+    .beatsRow textarea.beatCell:nth-child(4){
       background:var(--backbeatGreen);
     }
 
@@ -395,7 +403,9 @@
       font-size:14px;
       outline:none;
       line-height:1.35;
-      white-space:pre;
+      white-space:pre-wrap;
+      word-break:break-word;
+      overflow-wrap:anywhere;
     }
     textarea.fullPreview{
       width:100%;
@@ -408,7 +418,9 @@
       font-size:14px;
       outline:none;
       line-height:1.35;
-      white-space:pre;
+      white-space:pre-wrap;       /* ✅ no left/right scroll */
+      word-break:break-word;      /* ✅ force wrap */
+      overflow-wrap:anywhere;     /* ✅ force wrap */
     }
 
     .rBtn{
@@ -477,7 +489,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=22" alt="Headshot"/>
+    <img id="headshotImg" src="./headshot.png?v=23" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -578,6 +590,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=22"></script>
+<script src="./app.js?v=23"></script>
 </body>
 </html>
