@@ -785,32 +785,44 @@
     return Math.max(1, countSyllablesInline(w));
   }
 
+
   function autosplitBeatsFromLyrics(lyrics){
-    const words = tokenizeWords(lyrics);
-    if(words.length === 0) return ["","","",""];
+  const words = tokenizeWords(lyrics);
+  if(words.length === 0) return ["","","",""];
 
-    const sylCounts = words.map(estimateSyllablesWord);
-    const totalSyl = sylCounts.reduce((a,b)=>a+b,0);
-    const target = Math.max(1, Math.ceil(totalSyl / 4));
+  const sylCounts = words.map(estimateSyllablesWord);
+  const totalSyl = sylCounts.reduce((a,b)=>a+b,0);
+  const target = Math.max(1, Math.ceil(totalSyl / 4));
 
-    const boxes = [[],[],[],[]];
-    let bi = 0;
-    let acc = 0;
+  const boxes = [[],[],[],[]];
+  let bi = 0;
+  let acc = 0;
 
-    for(let i=0;i<words.length;i++){
-      const w = words[i];
-      const s = sylCounts[i];
+  for(let i=0;i<words.length;i++){
+    const w = words[i];
+    const s = sylCounts[i];
 
-      if(bi < 3 && acc >= target){
-        bi++;
-        acc = 0;
-      }
+    const remainingWords = words.length - i;
+    const remainingBoxes = 4 - bi;
 
-      boxes[bi].push(w);
-      acc += s;
+    // If we have exactly one word per remaining box,
+    // advance so each box gets at least one word.
+    if(bi < 3 && remainingWords === remainingBoxes && boxes[bi].length > 0){
+      bi++;
+      acc = 0;
     }
 
-    return boxes.map(arr => arr.join(" ").trim());
+    // Normal syllable-based split (only if current box already has something)
+    if(bi < 3 && acc >= target && boxes[bi].length > 0){
+      bi++;
+      acc = 0;
+    }
+
+    boxes[bi].push(w);
+    acc += s;
+  }
+
+  return boxes.map(arr => arr.join(" ").trim());
   }
 
   /***********************
