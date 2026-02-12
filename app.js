@@ -1,4 +1,4 @@
-/* Song Rider Pro - app.js (FULL REPLACE v18) */
+/* Song Rider Pro - app.js (FULL REPLACE v19) */
 (() => {
   "use strict";
 
@@ -22,6 +22,8 @@
    * DOM
    ***********************/
   const el = {
+    headshotWrap: $("headshotWrap"),
+
     togglePanelBtn: $("togglePanelBtn"),
     panelBody: $("panelBody"),
     miniBar: $("miniBar"),
@@ -75,28 +77,35 @@
    * Sections
    ***********************/
   const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","CHORUS 3","BRIDGE","OUTRO"];
+  const DEFAULT_LINES_PER_SECTION = 20; // ✅ required
 
   /***********************
    * Project storage (localStorage)
    ***********************/
-  const LS_KEY = "songrider_v18_projects";
-  const LS_CUR = "songrider_v18_currentProjectId";
+  const LS_KEY = "songrider_v19_projects";
+  const LS_CUR = "songrider_v19_currentProjectId";
 
   function newLine(){
     return {
       id: uuid(),
       lyrics: "",
-      notes: Array(8).fill("Not")
+      beats: ["", "", "", ""]  // ✅ 4 beat boxes
     };
   }
 
   function defaultProject(name="New Song"){
+    const sections = {};
+    SECTIONS.filter(s=>s!=="Full").forEach(sec => {
+      sections[sec] = Array.from({length: DEFAULT_LINES_PER_SECTION}, () => newLine());
+    });
+
     return {
       id: uuid(),
       name,
       createdAt: now(),
       updatedAt: now(),
-      sections: Object.fromEntries(SECTIONS.filter(s=>s!=="Full").map(s => [s, []]))
+      fullText: "",          // ✅ editable Full page text
+      sections
     };
   }
 
@@ -130,8 +139,39 @@
     localStorage.removeItem(LS_CUR);
   }
 
+  function normalizeProject(p){
+    if(!p || typeof p !== "object") return null;
+
+    if(typeof p.fullText !== "string") p.fullText = "";
+
+    if(!p.sections || typeof p.sections !== "object"){
+      p.sections = {};
+    }
+
+    SECTIONS.filter(s=>s!=="Full").forEach(sec => {
+      if(!Array.isArray(p.sections[sec])) p.sections[sec] = [];
+      // normalize each line
+      p.sections[sec] = p.sections[sec].map(line => {
+        const L = (line && typeof line === "object") ? line : {};
+        if(typeof L.id !== "string") L.id = uuid();
+        if(typeof L.lyrics !== "string") L.lyrics = "";
+        // ✅ beats (4)
+        if(!Array.isArray(L.beats)) L.beats = ["","","",""];
+        L.beats = Array.from({length:4}, (_,i)=> String(L.beats[i] ?? "").trim());
+        return L;
+      });
+
+      // ✅ pad to 20 cards
+      while(p.sections[sec].length < DEFAULT_LINES_PER_SECTION){
+        p.sections[sec].push(newLine());
+      }
+    });
+
+    return p;
+  }
+
   function getCurrentProject(){
-    const all = loadAllProjects();
+    const all = loadAllProjects().map(normalizeProject).filter(Boolean);
     if(all.length === 0){
       const p = defaultProject("New Song");
       upsertProject(p);
@@ -144,7 +184,7 @@
   /***********************
    * IndexedDB (Recordings)
    ***********************/
-  const DB_NAME = "songrider_db_v18";
+  const DB_NAME = "songrider_db_v19";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -221,8 +261,41 @@
     isRecording: false,
     recStream: null,
     rec: null,
-    recChunks: []
+    recChunks: [],
+
+    // ✅ headshot beat blink
+    beatTimer: null,
+    beatStep: 0
   };
+
+  /***********************
+   * Headshot blink
+   ***********************/
+  function doBlink(){
+    if(!el.headshotWrap) return;
+    el.headshotWrap.classList.add("blink");
+    setTimeout(() => el.headshotWrap.classList.remove("blink"), 80);
+  }
+
+  function startBeatClock(){
+    stopBeatClock();
+    const bpm = clamp(state.bpm || 95, 40, 220);
+    const quarterMs = Math.round(60000 / bpm);
+
+    state.beatStep = 0;
+    state.beatTimer = setInterval(() => {
+      // blink every beat always (even with drums off)
+      doBlink();
+      state.beatStep++;
+    }, quarterMs);
+  }
+
+  function stopBeatClock(){
+    if(state.beatTimer){
+      clearInterval(state.beatTimer);
+      state.beatTimer = null;
+    }
+  }
 
   /***********************
    * Audio (demo engine)
@@ -274,8 +347,8 @@
   }
 
   function drumHit(kind){
-    if(kind === "kick") beep(70, 90, 0.16);
-    if(kind === "snare"){ noise(60, 0.10); beep(180, 40, 0.04); }
+    if(kind === "kick") { beep(70, 90, 0.16); doBlink(); }
+    if(kind === "snare"){ noise(60, 0.10); beep(180, 40, 0.04); doBlink(); }
     if(kind === "hat"){ noise(25, 0.05); }
   }
 
@@ -411,11 +484,15 @@
   }
 
   /***********************
-   * Sections + editor
+   * Tabs + editor
    ***********************/
   function ensureSectionArray(sec){
     if(sec === "Full") return [];
     if(!state.project.sections[sec]) state.project.sections[sec] = [];
+    // always keep at least 20
+    while(state.project.sections[sec].length < DEFAULT_LINES_PER_SECTION){
+      state.project.sections[sec].push(newLine());
+    }
     return state.project.sections[sec];
   }
 
@@ -451,34 +528,46 @@
     return total;
   }
 
+  function splitTo4Chunks(text){
+    const t = String(text||"").trim();
+    if(!t) return ["","","",""];
+    const parts = t.split(/\s+/).filter(Boolean);
+    if(parts.length <= 4){
+      return [
+        parts[0] || "",
+        parts[1] || "",
+        parts[2] || "",
+        parts[3] || ""
+      ];
+    }
+    // spread words roughly evenly across 4 beats
+    const out = ["","","",""];
+    const per = Math.ceil(parts.length / 4);
+    let k = 0;
+    for(let i=0;i<4;i++){
+      out[i] = parts.slice(k, k+per).join(" ");
+      k += per;
+    }
+    return out;
+  }
+
   /***********************
-   * Capo transpose helpers (display)
+   * Key display (simple: from beat boxes)
    ***********************/
   const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
   };
   const PC_TO_NAME = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 
-  function parseRootToken(token){
-    const s = String(token||"").trim();
+  function noteToPC(n){
+    const s = String(n||"").trim().toUpperCase();
     if(!s) return null;
-    // match root like C, C#, Db then keep rest (Am7, Gsus4, etc.)
-    const m = s.match(/^([A-Ga-g])([#bB])?(.*)$/);
+    const m = s.match(/^([A-G])([#B])?/);
     if(!m) return null;
-    const L = m[1].toUpperCase();
+    const root = m[1];
     const acc = (m[2] || "").toUpperCase();
-    const rest = m[3] || "";
-    const key = L + (acc === "B" ? "B" : acc === "#" ? "#" : "");
-    const pc = NOTE_TO_PC[key];
-    if(pc === undefined) return null;
-    return { pc, rest };
-  }
-
-  function transposeToken(token, semis){
-    const t = parseRootToken(token);
-    if(!t) return token;
-    const pc2 = (t.pc + (semis % 12) + 12) % 12;
-    return PC_TO_NAME[pc2] + t.rest;
+    const key = root + (acc === "B" ? "B" : acc === "#" ? "#" : "");
+    return NOTE_TO_PC[key] ?? null;
   }
 
   const MAJOR_PROFILE = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
@@ -490,40 +579,26 @@
     for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
     return out;
   }
-
-  function noteToPC(n){
-    const s = String(n||"").trim().toUpperCase();
-    if(!s || s === "NOT") return null;
-    const m = s.match(/^([A-G])([#B])?/);
-    if(!m) return null;
-    const root = m[1];
-    const acc = (m[2] || "").toUpperCase();
-    const key = root + (acc === "B" ? "B" : acc === "#" ? "#" : "");
-    return NOTE_TO_PC[key] ?? null;
-  }
-
   function keyFromHistogram(hist){
     const hn = norm(hist);
     let best = { score:-1e9, pc:0, mode:"maj" };
-
     for(let t=0;t<12;t++){
       const maj = rotate(MAJOR_PROFILE, t);
       const min = rotate(MINOR_PROFILE, t);
       const sMaj = dot(hist, maj)/hn/norm(maj);
       const sMin = dot(hist, min)/hn/norm(min);
-
       if(sMaj > best.score) best = { score:sMaj, pc:t, mode:"maj" };
       if(sMin > best.score) best = { score:sMin, pc:t, mode:"min" };
     }
     return best;
   }
 
-  function updateKeyFromAllNotes(){
+  function updateKeyFromAllBeats(){
     const hist = Array(12).fill(0);
     SECTIONS.filter(s => s !== "Full").forEach(sec => {
       (state.project.sections[sec] || []).forEach(line => {
-        (Array.isArray(line.notes) ? line.notes : []).forEach(n => {
-          const pc = noteToPC(n);
+        (Array.isArray(line.beats) ? line.beats : []).forEach(tok => {
+          const pc = noteToPC(tok);
           if(pc !== null) hist[pc] += 1;
         });
       });
@@ -535,17 +610,20 @@
   }
 
   /***********************
-   * Full preview (lyrics + notes)
+   * Full preview (from cards)
    ***********************/
   function buildFullPreviewText(){
     const out = [];
-    const semis = state.capo % 12;
-
     let any = false;
 
     SECTIONS.filter(s => s !== "Full").forEach(sec => {
       const arr = state.project.sections[sec] || [];
-      const hasAny = arr.some(x => String(x.lyrics || "").trim() || (Array.isArray(x.notes) && x.notes.some(n => String(n||"").trim() && String(n).trim() !== "Not")));
+      const hasAny = arr.some(line => {
+        const lyr = String(line.lyrics || "").trim();
+        const beats = Array.isArray(line.beats) ? line.beats : [];
+        const hasBeats = beats.some(b => String(b||"").trim());
+        return !!lyr || hasBeats;
+      });
       if(!hasAny) return;
 
       any = true;
@@ -553,22 +631,13 @@
       out.push("");
 
       arr.forEach((line, idx) => {
+        const beats = Array.isArray(line.beats) ? line.beats : ["","","",""];
+        const beatLine = beats.map(b => (String(b||"").trim() || "—")).join(" | ");
         const lyr = String(line.lyrics || "").trim();
-        const notes = Array.isArray(line.notes) ? line.notes : [];
-        const notesClean = notes.map(n => String(n ?? "").trim() || "Not");
 
-        // capo-transposed display for notes ONLY in the Full preview
-        const notesTx = notesClean.map(n => {
-          if(!n || n.toLowerCase() === "not") return "Not";
-          return transposeToken(n, semis);
-        });
-
-        const notesLine = notesTx.join(" | ");
-        const hasNotes = notesTx.some(n => n !== "Not");
-
-        if(hasNotes) out.push(`(${idx+1})  ${notesLine}`);
+        if(beatLine.replace(/—|\||\s/g,"").length > 0) out.push(`(${idx+1})  ${beatLine}`);
         if(lyr) out.push(`     ${lyr}`);
-        if(hasNotes || lyr) out.push("");
+        if(lyr || beatLine) out.push("");
       });
 
       out.push("");
@@ -579,8 +648,8 @@
 
   function updateFullIfVisible(){
     if(state.currentSection !== "Full") return;
-    const ta = el.sheetBody.querySelector("textarea.fullBox");
-    if(ta) ta.value = buildFullPreviewText();
+    const preview = el.sheetBody.querySelector("textarea.fullPreview");
+    if(preview) preview.value = buildFullPreviewText();
   }
 
   /***********************
@@ -611,18 +680,40 @@
     renderSheetActions();
 
     if(state.currentSection === "Full"){
-      el.sheetHint.textContent = "Full Sheet Preview (auto from your cards):";
+      el.sheetHint.textContent = "Full Page (editable) + Preview (auto):";
       el.sheetBody.innerHTML = "";
 
       const wrap = document.createElement("div");
       wrap.className = "fullBoxWrap";
 
+      const label1 = document.createElement("div");
+      label1.className = "fullLabel";
+      label1.textContent = "FULL PAGE (type anything here):";
+
       const ta = document.createElement("textarea");
       ta.className = "fullBox";
-      ta.readOnly = true;
-      ta.value = buildFullPreviewText();
+      ta.readOnly = false;
+      ta.placeholder = "Type your full lyrics / notes here…";
+      ta.value = state.project.fullText || "";
+      ta.addEventListener("input", () => {
+        state.project.fullText = ta.value;
+        upsertProject(state.project);
+      });
 
+      const label2 = document.createElement("div");
+      label2.className = "fullLabel";
+      label2.textContent = "FULL PREVIEW (auto from cards):";
+
+      const preview = document.createElement("textarea");
+      preview.className = "fullPreview";
+      preview.readOnly = true;
+      preview.value = buildFullPreviewText();
+
+      wrap.appendChild(label1);
       wrap.appendChild(ta);
+      wrap.appendChild(label2);
+      wrap.appendChild(preview);
+
       el.sheetBody.appendChild(wrap);
       return;
     }
@@ -632,14 +723,10 @@
     cardsWrap.className = "cards";
 
     const arr = ensureSectionArray(state.currentSection);
-    if(arr.length === 0){
-      arr.push(newLine());
-      upsertProject(state.project);
-    }
 
     arr.forEach((line, idx) => {
-      // normalize
-      if(!Array.isArray(line.notes)) line.notes = Array(8).fill("Not");
+      if(!Array.isArray(line.beats)) line.beats = ["","","",""];
+      line.beats = Array.from({length:4}, (_,i)=> String(line.beats[i] ?? "").trim());
 
       const card = document.createElement("div");
       card.className = "card";
@@ -652,17 +739,19 @@
       num.textContent = String(idx + 1);
       num.title = "Long-press to delete this line";
 
-      // Long-press to delete (mobile friendly, no clutter)
+      // Long-press delete
       let pressTimer = null;
       const startPress = () => {
         clearTimeout(pressTimer);
         pressTimer = setTimeout(() => {
           if(!confirm(`Delete line ${idx+1} from ${state.currentSection}?`)) return;
           arr.splice(idx, 1);
-          if(arr.length === 0) arr.push(newLine());
+          // keep at least 20 always
+          while(arr.length < DEFAULT_LINES_PER_SECTION) arr.push(newLine());
           upsertProject(state.project);
           renderSheet();
           updateFullIfVisible();
+          updateKeyFromAllBeats();
         }, 650);
       };
       const endPress = () => clearTimeout(pressTimer);
@@ -681,30 +770,40 @@
       top.appendChild(num);
       top.appendChild(syll);
 
-      const notesRow = document.createElement("div");
-      notesRow.className = "notesRow";
+      // ✅ 4 beat boxes
+      const beatsRow = document.createElement("div");
+      beatsRow.className = "beatsRow";
 
-      for(let i=0;i<8;i++){
+      for(let i=0;i<4;i++){
         const inp = document.createElement("input");
         inp.type = "text";
-        inp.className = "noteCell";
-        inp.value = (line.notes[i] ?? "Not");
+        inp.className = "beatCell";
+
+        // ✅ placeholder instead of "Not"
+        inp.placeholder = "Not";
+        inp.value = String(line.beats[i] || "");
+
         inp.autocomplete = "off";
         inp.autocapitalize = "characters";
         inp.spellcheck = false;
 
-        // ensures taps always focus the input
+        // focus reliably on mobile
         inp.addEventListener("pointerdown", (e)=>{ e.stopPropagation(); });
 
+        inp.addEventListener("focus", () => {
+          // ✅ one-tap overwrite behavior
+          // if empty, do nothing; if user wants to replace, they can just type
+          // (placeholder handles the "Not" without deleting)
+        });
+
         inp.addEventListener("input", () => {
-          const v = String(inp.value || "").trim();
-          line.notes[i] = v || "Not";
+          line.beats[i] = String(inp.value || "").trim();
           upsertProject(state.project);
-          updateKeyFromAllNotes();
+          updateKeyFromAllBeats();
           updateFullIfVisible();
         });
 
-        notesRow.appendChild(inp);
+        beatsRow.appendChild(inp);
       }
 
       const lyr = document.createElement("textarea");
@@ -718,25 +817,46 @@
         upsertProject(state.project);
         updateFullIfVisible();
 
-        // AutoSplit: pressing Enter creates a new line/card
+        // ✅ AutoSplit: fills 4 beat boxes from the lyrics (simple word spread)
+        if(state.autoSplit){
+          const chunks = splitTo4Chunks(line.lyrics);
+          line.beats = chunks;
+          // update UI beat inputs instantly
+          const beatInputs = beatsRow.querySelectorAll("input.beatCell");
+          beatInputs.forEach((bi, k) => {
+            bi.value = line.beats[k] || "";
+          });
+          upsertProject(state.project);
+          updateKeyFromAllBeats();
+          updateFullIfVisible();
+        }
+
+        // Enter makes a new card and keeps 20+
         if(state.autoSplit && lyr.value.includes("\n")){
           const parts = lyr.value.split("\n");
           const first = parts.shift();
           line.lyrics = first;
           const rest = parts.join("\n").trim();
+
           if(rest){
             const nl = newLine();
             nl.lyrics = rest;
+            nl.beats = splitTo4Chunks(rest);
             arr.splice(idx+1, 0, nl);
           }
+
+          // keep at least 20 always
+          while(arr.length < DEFAULT_LINES_PER_SECTION) arr.push(newLine());
+
           upsertProject(state.project);
           renderSheet();
           updateFullIfVisible();
+          updateKeyFromAllBeats();
         }
       });
 
       card.appendChild(top);
-      card.appendChild(notesRow);
+      card.appendChild(beatsRow);
       card.appendChild(lyr);
       cardsWrap.appendChild(card);
     });
@@ -869,10 +989,9 @@
   }
 
   /***********************
-   * Recording start/stop (FIXED)
+   * Recording start/stop (toggle)
    ***********************/
   async function startRecording(){
-    // iOS/Safari sometimes needs user gesture; we already have click
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
 
     state.recStream = stream;
@@ -902,9 +1021,7 @@
 
   async function stopRecording(){
     if(!state.rec) return;
-    try{
-      state.rec.stop();
-    }catch{}
+    try{ state.rec.stop(); }catch{}
     state.isRecording = false;
     setRecordUI();
     beep(220, 60, 0.10);
@@ -922,10 +1039,10 @@
   }
 
   /***********************
-   * Projects dropdown (FIXED)
+   * Projects dropdown
    ***********************/
   function renderProjectsDropdown(){
-    const all = loadAllProjects();
+    const all = loadAllProjects().map(normalizeProject).filter(Boolean);
 
     const sort = el.sortSelect.value;
     let list = [...all];
@@ -944,7 +1061,6 @@
       el.projectSelect.appendChild(opt);
     });
 
-    // If for any reason dropdown ends empty, recreate one project
     if(el.projectSelect.options.length === 0){
       const p = defaultProject("New Song");
       upsertProject(p);
@@ -954,7 +1070,7 @@
   }
 
   function loadProjectById(id){
-    const all = loadAllProjects();
+    const all = loadAllProjects().map(normalizeProject).filter(Boolean);
     const p = all.find(x => x.id === id);
     if(!p) return;
     state.project = p;
@@ -993,7 +1109,7 @@
     renderRecordings();
     renderInstrumentUI();
     renderDrumUI();
-    updateKeyFromAllNotes();
+    updateKeyFromAllBeats();
     setRecordUI();
   }
 
@@ -1018,13 +1134,18 @@
     el.bpmInput.addEventListener("input", () => {
       state.bpm = clamp(parseInt(el.bpmInput.value || "95",10) || 95, 40, 220);
       el.bpmInput.value = String(state.bpm);
+
+      // ✅ beat blink matches BPM
+      startBeatClock();
+
+      // drums re-time
       if(state.drumsOn) startDrums();
     });
 
     el.capoInput.addEventListener("input", () => {
       state.capo = clamp(parseInt(el.capoInput.value || "0",10) || 0, 0, 12);
       el.capoInput.value = String(state.capo);
-      updateKeyFromAllNotes();
+      updateKeyFromAllBeats();
       updateFullIfVisible();
     });
 
@@ -1068,7 +1189,7 @@
     el.autoPlayBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
     el.mScrollBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
 
-    // recording (FIXED toggle)
+    // recording
     el.recordBtn.addEventListener("click", toggleRecording);
     el.mRecordBtn.addEventListener("click", toggleRecording);
 
@@ -1133,6 +1254,9 @@
     setRecordUI();
     wire();
     renderAll();
+
+    // ✅ start BPM blink immediately
+    startBeatClock();
   }
 
   init();
