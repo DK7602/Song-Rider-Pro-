@@ -114,8 +114,9 @@
     }
 
     .pill{
-      border:1px solid rgba(0,0,0,.12);
-      background:#fff;
+      border:1px solid #111;
+  background:#111;        /* OFF = black */
+  border-radius:999px;
       border-radius:999px;
       padding:7px 9px;
       font-weight:1100;
@@ -126,7 +127,11 @@
       height:34px;
       flex:0 0 auto;
     }
-    .pill.active{ background:#111; color:#fff; border-color:#111; }
+    .pill.active{
+  background:#16a34a;   /* ON = green */
+  border-color:#16a34a;
+  color:#fff;
+    }
 
     .tinyBtn{
       border:1px solid rgba(0,0,0,.12);
