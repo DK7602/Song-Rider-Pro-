@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v29) */
+/* app.js (FULL REPLACE MAIN v30) */
 (() => {
   "use strict";
 
@@ -48,6 +48,9 @@
     instAcoustic: $("instAcoustic"),
     instElectric: $("instElectric"),
     instPiano: $("instPiano"),
+
+    // ✅ NEW
+    exportBtn: $("exportBtn"),
 
     drumRock: $("drumRock"),
     drumHardRock: $("drumHardRock"),
@@ -785,44 +788,43 @@
     return Math.max(1, countSyllablesInline(w));
   }
 
-
   function autosplitBeatsFromLyrics(lyrics){
-  const words = tokenizeWords(lyrics);
-  if(words.length === 0) return ["","","",""];
+    const words = tokenizeWords(lyrics);
+    if(words.length === 0) return ["","","",""];
 
-  const sylCounts = words.map(estimateSyllablesWord);
-  const totalSyl = sylCounts.reduce((a,b)=>a+b,0);
-  const target = Math.max(1, Math.ceil(totalSyl / 4));
+    const sylCounts = words.map(estimateSyllablesWord);
+    const totalSyl = sylCounts.reduce((a,b)=>a+b,0);
+    const target = Math.max(1, Math.ceil(totalSyl / 4));
 
-  const boxes = [[],[],[],[]];
-  let bi = 0;
-  let acc = 0;
+    const boxes = [[],[],[],[]];
+    let bi = 0;
+    let acc = 0;
 
-  for(let i=0;i<words.length;i++){
-    const w = words[i];
-    const s = sylCounts[i];
+    for(let i=0;i<words.length;i++){
+      const w = words[i];
+      const s = sylCounts[i];
 
-    const remainingWords = words.length - i;
-    const remainingBoxes = 4 - bi;
+      const remainingWords = words.length - i;
+      const remainingBoxes = 4 - bi;
 
-    // If we have exactly one word per remaining box,
-    // advance so each box gets at least one word.
-    if(bi < 3 && remainingWords === remainingBoxes && boxes[bi].length > 0){
-      bi++;
-      acc = 0;
+      // If we have exactly one word per remaining box,
+      // advance so each box gets at least one word.
+      if(bi < 3 && remainingWords === remainingBoxes && boxes[bi].length > 0){
+        bi++;
+        acc = 0;
+      }
+
+      // Normal syllable-based split (only if current box already has something)
+      if(bi < 3 && acc >= target && boxes[bi].length > 0){
+        bi++;
+        acc = 0;
+      }
+
+      boxes[bi].push(w);
+      acc += s;
     }
 
-    // Normal syllable-based split (only if current box already has something)
-    if(bi < 3 && acc >= target && boxes[bi].length > 0){
-      bi++;
-      acc = 0;
-    }
-
-    boxes[bi].push(w);
-    acc += s;
-  }
-
-  return boxes.map(arr => arr.join(" ").trim());
+    return boxes.map(arr => arr.join(" ").trim());
   }
 
   /***********************
@@ -923,6 +925,47 @@
     if(state.currentSection !== "Full") return;
     const preview = el.sheetBody.querySelector("textarea.fullPreview");
     if(preview) preview.value = buildFullPreviewText();
+  }
+
+  /***********************
+   * ✅ EXPORT FULL PREVIEW (NEW)
+   ***********************/
+  async function exportFullPreview(){
+    try{
+      const text = buildFullPreviewText();
+      if(!text || !String(text).trim()){
+        alert("Nothing to export yet.");
+        return;
+      }
+
+      const safeName = String(state.project?.name || "Song Rider Pro")
+        .replace(/[\\/:*?"<>|]+/g, "")
+        .trim() || "Song Rider Pro";
+
+      const fileName = `${safeName} - Full Preview.txt`;
+      const blob = new Blob([text], { type:"text/plain;charset=utf-8" });
+
+      // Try Share (best on mobile)
+      try{
+        const file = new File([blob], fileName, { type:"text/plain" });
+        if(navigator.share && navigator.canShare && navigator.canShare({ files:[file] })){
+          await navigator.share({ title: fileName, files: [file] });
+          return;
+        }
+      }catch{}
+
+      // Fallback: Download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 800);
+    }catch{
+      alert("Export failed on this device/browser.");
+    }
   }
 
   /***********************
@@ -1565,6 +1608,11 @@
       el.autoSplitBtn.classList.toggle("active", state.autoSplit);
       el.autoSplitBtn.textContent = "AutoSplit: " + (state.autoSplit ? "ON" : "OFF");
     });
+
+    // ✅ NEW: Export button
+    if(el.exportBtn){
+      el.exportBtn.addEventListener("click", exportFullPreview);
+    }
 
     // BPM
     function commitBpm(){
