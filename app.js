@@ -1,1377 +1,867 @@
-/* Song Rider Pro - app.js (FULL REPLACE v15) */
+/* Song Rider Pro - app.js (FULL REPLACE) */
 (() => {
-"use strict";
+  "use strict";
 
-/* -----------------------------
-   DOM
-------------------------------*/
-const $ = (id) => document.getElementById(id);
+  /***********************
+   * Small helpers
+   ***********************/
+  const $ = (id) => document.getElementById(id);
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const now = () => Date.now();
 
-const tabsEl = $("tabs");
-const sheetTitleEl = $("sheetTitle");
-const sheetBodyEl = $("sheetBody");
+  /***********************
+   * DOM
+   ***********************/
+  const el = {
+    // panel
+    togglePanelBtn: $("togglePanelBtn"),
+    panelBody: $("panelBody"),
+    miniBar: $("miniBar"),
 
-const togglePanelBtn = $("togglePanelBtn");
-const panelBody = $("panelBody");
-const miniBar = $("miniBar");
+    // controls
+    autoSplitBtn: $("autoSplitBtn"),
+    bpmInput: $("bpmInput"),
+    capoInput: $("capoInput"),
+    keyOutput: $("keyOutput"),
 
-const autoSplitBtn = $("autoSplitBtn");
-const bpmInput = $("bpmInput");
-const capoInput = $("capoInput");
-const keyOutput = $("keyOutput");
+    // instrument pills
+    instAcoustic: $("instAcoustic"),
+    instElectric: $("instElectric"),
+    instPiano: $("instPiano"),
 
-const instAcoustic = $("instAcoustic");
-const instElectric = $("instElectric");
-const instPiano = $("instPiano");
+    // drum pills
+    drumRock: $("drumRock"),
+    drumHardRock: $("drumHardRock"),
+    drumPop: $("drumPop"),
+    drumRap: $("drumRap"),
 
-const drumRock = $("drumRock");
-const drumHardRock = $("drumHardRock");
-const drumPop = $("drumPop");
-const drumRap = $("drumRap");
+    // mini bar drum pills
+    mRock: $("mRock"),
+    mHardRock: $("mHardRock"),
+    mPop: $("mPop"),
+    mRap: $("mRap"),
 
-const autoPlayBtn = $("autoPlayBtn");
-const recordBtn = $("recordBtn");
+    // scroll + record
+    autoPlayBtn: $("autoPlayBtn"), // scroll only
+    mScrollBtn: $("mScrollBtn"),   // scroll only
+    recordBtn: $("recordBtn"),
+    mRecordBtn: $("mRecordBtn"),
 
-const mRock = $("mRock");
-const mHardRock = $("mHardRock");
-const mPop = $("mPop");
-const mRap = $("mRap");
-const mScrollBtn = $("mScrollBtn");
-const mRecordBtn = $("mRecordBtn");
+    // projects
+    sortSelect: $("sortSelect"),
+    projectSelect: $("projectSelect"),
+    renameProjectBtn: $("renameProjectBtn"),
+    deleteProjectBtn: $("deleteProjectBtn"),
 
-const sortSelect = $("sortSelect");
-const projectSelect = $("projectSelect");
-const renameProjectBtn = $("renameProjectBtn");
-const deleteProjectBtn = $("deleteProjectBtn");
-const recordingsList = $("recordingsList");
+    // recordings
+    recordingsList: $("recordingsList"),
 
-const rBtn = $("rBtn");
-const rhymeDock = $("rhymeDock");
-const rhymeTitle = $("rhymeTitle");
-const rhymeWords = $("rhymeWords");
-const hideRhymeBtn = $("hideRhymeBtn");
+    // editor
+    tabs: $("tabs"),
+    sheetTitle: $("sheetTitle"),
+    sheetHint: $("sheetHint"),
+    sheetBody: $("sheetBody"),
 
-/* -----------------------------
-   State
-------------------------------*/
-const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
-
-let state = {
-  projectId: null,
-  projectName: "Dave song",
-  autoSplit: true,
-  bpm: 95,
-  capo: 0,
-  key: "—",
-  instrument: "Piano",
-  drumStyle: "Rap",
-  autoPlay: false,
-  currentSection: "Full",
-  pasteOpen: false
-};
-
-let lastFocusedTextarea = null;
-document.addEventListener("focusin", (e) => {
-  if(e.target && e.target.tagName === "TEXTAREA"){
-    lastFocusedTextarea = e.target;
-  }
-});
-
-/* -----------------------------
-   IndexedDB
-------------------------------*/
-const DB_NAME = "songriderpro_db_v15";
-const DB_VER = 1;
-const STORE_PROJECTS = "projects";
-const STORE_RECORDINGS = "recordings";
-
-function openDB(){
-  return new Promise((resolve,reject)=>{
-    const req = indexedDB.open(DB_NAME, DB_VER);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if(!db.objectStoreNames.contains(STORE_PROJECTS)){
-        const s = db.createObjectStore(STORE_PROJECTS, { keyPath:"id" });
-        s.createIndex("name","name",{ unique:false });
-        s.createIndex("updatedAt","updatedAt",{ unique:false });
-      }
-      if(!db.objectStoreNames.contains(STORE_RECORDINGS)){
-        const s = db.createObjectStore(STORE_RECORDINGS, { keyPath:"id" });
-        s.createIndex("projectId","projectId",{ unique:false });
-        s.createIndex("createdAt","createdAt",{ unique:false });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function dbPut(store, obj){
-  const db = await openDB();
-  return new Promise((resolve,reject)=>{
-    const tx = db.transaction(store,"readwrite");
-    tx.objectStore(store).put(obj);
-    tx.oncomplete = ()=>resolve(true);
-    tx.onerror = ()=>reject(tx.error);
-  });
-}
-async function dbGet(store, key){
-  const db = await openDB();
-  return new Promise((resolve,reject)=>{
-    const tx = db.transaction(store,"readonly");
-    const req = tx.objectStore(store).get(key);
-    req.onsuccess = ()=>resolve(req.result || null);
-    req.onerror = ()=>reject(req.error);
-  });
-}
-async function dbGetAll(store){
-  const db = await openDB();
-  return new Promise((resolve,reject)=>{
-    const tx = db.transaction(store,"readonly");
-    const req = tx.objectStore(store).getAll();
-    req.onsuccess = ()=>resolve(req.result || []);
-    req.onerror = ()=>reject(req.error);
-  });
-}
-async function dbDelete(store, key){
-  const db = await openDB();
-  return new Promise((resolve,reject)=>{
-    const tx = db.transaction(store,"readwrite");
-    tx.objectStore(store).delete(key);
-    tx.oncomplete = ()=>resolve(true);
-    tx.onerror = ()=>reject(tx.error);
-  });
-}
-
-/* -----------------------------
-   Default project + model
-------------------------------*/
-function emptyLine(){
-  return { notes: Array(8).fill(""), lyrics: "", timing: ["","","",""] };
-}
-function defaultProject(){
-  const sections = {};
-  SECTIONS.forEach(s=>{
-    sections[s] = Array.from({length: (s==="Full"? 0: 8)}, ()=>emptyLine());
-  });
-  return {
-    id: "proj_"+Date.now(),
-    name: "Dave song",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    sections,
-    fullPaste: "VERSE 1\n\nI love you sweet wife\n\nCHORUS 1\n\nYou are the love of my life\n"
+    // rhyme
+    rBtn: $("rBtn"),
+    rhymeDock: $("rhymeDock"),
+    hideRhymeBtn: $("hideRhymeBtn")
   };
-}
-let project = null;
 
-/* -----------------------------
-   UI helpers
-------------------------------*/
-function setActivePillGroup(btns, activeText){
-  btns.forEach(b=>{
-    if(!b) return;
-    b.classList.toggle("active", b.textContent.trim().toLowerCase() === activeText.toLowerCase());
+  /***********************
+   * Data model
+   ***********************/
+  const SECTIONS = ["VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","CHORUS 3","BRIDGE","OUTRO","Full"];
+
+  const defaultProject = () => ({
+    id: crypto.randomUUID(),
+    name: "New Project",
+    createdAt: now(),
+    updatedAt: now(),
+    sections: Object.fromEntries(SECTIONS.map(s => [s, []]))
   });
-}
-function setInstrumentUI(){
-  setActivePillGroup([instAcoustic,instElectric,instPiano], state.instrument);
-}
-function setDrumUI(){
-  setActivePillGroup([drumRock,drumHardRock,drumPop,drumRap], state.drumStyle);
-  setActivePillGroup([mRock,mHardRock,mPop,mRap], state.drumStyle);
-}
-function setScrollUI(){
-  autoPlayBtn.classList.toggle("on", state.autoPlay);
-  mScrollBtn.classList.toggle("on", state.autoPlay);
-  autoPlayBtn.textContent="⇅";
-  mScrollBtn.textContent="⇅";
-}
-function setAutoSplitUI(){
-  autoSplitBtn.classList.toggle("active", state.autoSplit);
-  autoSplitBtn.textContent = "AutoSplit: " + (state.autoSplit ? "ON" : "OFF");
-}
-function setKeyUI(){
-  keyOutput.value = state.key || "—";
-}
-function setPanelCollapsed(collapsed){
-  if(collapsed){
-    panelBody.classList.add("hidden");
-    tabsEl.classList.add("hidden");
-    miniBar.classList.add("show");
-    togglePanelBtn.textContent = "Show";
-  }else{
-    panelBody.classList.remove("hidden");
-    tabsEl.classList.remove("hidden");
-    miniBar.classList.remove("show");
-    togglePanelBtn.textContent = "Hide";
-  }
-}
 
-/* -----------------------------
-   Tabs + Render
-------------------------------*/
-function renderTabs(){
-  tabsEl.innerHTML = "";
-  SECTIONS.forEach(sec=>{
-    const b = document.createElement("button");
-    b.className = "tab" + (state.currentSection===sec ? " active":"");
-    b.textContent = sec;
-    b.addEventListener("click", ()=>{
-      state.currentSection = sec;
-      renderAll();
-    });
-    tabsEl.appendChild(b);
-  });
-}
+  const state = {
+    project: null,
+    currentSection: "Full",
+    bpm: 95,
+    capo: 0,
+    autoSplit: true,
 
-function syllableCount(word){
-  if(!word) return 0;
-  let w = String(word).toLowerCase().replace(/[^a-z']/g,"");
-  if(!w) return 0;
-  w = w.replace(/'s$/,"");
-  if(w.length<=3) return 1;
-  const vowels = w.match(/[aeiouy]+/g);
-  let n = vowels ? vowels.length : 1;
-  if(w.endsWith("e")) n = Math.max(1, n-1);
-  if(w.endsWith("le") && w.length>3) n += 1;
-  return Math.max(1,n);
-}
-function countSyllablesInLine(text){
-  const words = String(text||"").trim().split(/\s+/).filter(Boolean);
-  return words.reduce((a,w)=>a+syllableCount(w),0);
-}
-function autosplitTiming(text){
-  const words = String(text||"").trim().split(/\s+/).filter(Boolean);
-  if(words.length===0) return ["","","",""];
-  const syls = words.map(w=>syllableCount(w));
-  const total = syls.reduce((a,b)=>a+b,0);
-  const target = total/4;
-  const chunks = ["","","",""];
-  let ci=0, acc=0;
-  for(let i=0;i<words.length;i++){
-    if(ci<3 && acc + syls[i] > target && chunks[ci].trim().length>0){
-      ci++; acc=0;
+    instrument: "piano",   // "acoustic" | "electric" | "piano"
+    drumStyle: "rap",      // "rock" | "hardrock" | "pop" | "rap"
+
+    // AutoScroll ONLY
+    autoScrollOn: false,
+    autoScrollTimer: null,
+
+    // Audio
+    ctx: null,
+    drumTimer: null,
+    drumOn: false,
+    currentAudio: null, // for recordings playback stop
+  };
+
+  /***********************
+   * Storage (localStorage)
+   ***********************/
+  const LS_KEY = "songrider_v16_projects";
+  const LS_CUR = "songrider_v16_currentProjectId";
+
+  function loadAllProjects(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    }catch{
+      return [];
     }
-    chunks[ci] += (chunks[ci] ? " ":"") + words[i];
-    acc += syls[i];
   }
-  return chunks;
-}
-
-function renderTimingRow(timingRow, line){
-  timingRow.innerHTML = "";
-  const parts = line.timing || ["","","",""];
-  for(let i=0;i<4;i++){
-    const d = document.createElement("div");
-    d.className = "timingCell" + ((i===1 || i===3) ? " backbeat":"");
-    d.textContent = parts[i] || "";
-    timingRow.appendChild(d);
+  function saveAllProjects(projects){
+    localStorage.setItem(LS_KEY, JSON.stringify(projects));
   }
-}
+  function upsertProject(p){
+    const all = loadAllProjects();
+    const i = all.findIndex(x => x.id === p.id);
+    if(i >= 0) all[i] = p; else all.unshift(p);
+    saveAllProjects(all);
+    localStorage.setItem(LS_CUR, p.id);
+  }
+  function deleteProject(id){
+    const all = loadAllProjects().filter(p => p.id !== id);
+    saveAllProjects(all);
+    localStorage.removeItem(LS_CUR);
+  }
+  function getCurrentProject(){
+    const all = loadAllProjects();
+    if(all.length === 0){
+      const p = defaultProject();
+      upsertProject(p);
+      return p;
+    }
+    const curId = localStorage.getItem(LS_CUR);
+    const found = curId ? all.find(p => p.id === curId) : null;
+    return found || all[0];
+  }
 
-function renderFullView(){
-  sheetTitleEl.textContent = "Full";
-  sheetBodyEl.innerHTML = "";
+  /***********************
+   * IndexedDB (Recordings)
+   ***********************/
+  const DB_NAME = "songrider_db_v16";
+  const DB_VER = 1;
+  const STORE = "recordings";
 
-  const wrap = document.createElement("div");
-  wrap.className = "fullBoxWrap";
-
-  const row = document.createElement("div");
-  row.style.display="flex";
-  row.style.gap="8px";
-  row.style.flexWrap="wrap";
-  row.style.marginBottom="10px";
-
-  const togglePaste = document.createElement("button");
-  togglePaste.className="btn secondary";
-  togglePaste.textContent = state.pasteOpen ? "Hide Paste Area" : "Show Paste Area";
-  togglePaste.addEventListener("click", ()=>{
-    state.pasteOpen = !state.pasteOpen;
-    renderAll();
-    setTimeout(()=>{
-      if(state.pasteOpen){
-        const ta = document.querySelector("textarea.fullBox");
-        if(ta) ta.focus();
-      }
-    }, 60);
-  });
-
-  const applyBtn = document.createElement("button");
-  applyBtn.className="btn secondary";
-  applyBtn.textContent="Apply to Sections";
-  applyBtn.addEventListener("click", applyPasteToSections);
-
-  row.appendChild(togglePaste);
-  row.appendChild(applyBtn);
-  wrap.appendChild(row);
-
-  if(state.pasteOpen){
-    const ta = document.createElement("textarea");
-    ta.className="fullBox";
-    ta.value = project.fullPaste || "";
-    ta.addEventListener("input", ()=>{
-      project.fullPaste = ta.value;
-      project.updatedAt = Date.now();
-      saveProjectSoon();
+  function openDB(){
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VER);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if(!db.objectStoreNames.contains(STORE)){
+          db.createObjectStore(STORE, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
     });
-    wrap.appendChild(ta);
-
-    const help = document.createElement("div");
-    help.className="fullHelp";
-    help.textContent = 'Tip: Put section headers like "VERSE 1", "CHORUS 1", etc. Lines under each become lyric lines.';
-    wrap.appendChild(help);
   }
 
-  const previewTitle = document.createElement("div");
-  previewTitle.style.marginTop="14px";
-  previewTitle.style.fontWeight="1100";
-  previewTitle.textContent = "Full Sheet Preview (auto from your cards):";
-  wrap.appendChild(previewTitle);
+  async function dbPut(rec){
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(rec);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
 
-  SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
-    const hasAny = (project.sections[sec]||[]).some(l=>String(l.lyrics||"").trim().length>0);
-    if(!hasAny) return;
+  async function dbDelete(id){
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(id);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
 
-    const sh = document.createElement("div");
-    sh.className="sectionHeader";
-    sh.textContent = sec;
-    wrap.appendChild(sh);
+  async function dbGetAll(){
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
 
-    const cards = document.createElement("div");
-    cards.className="cards";
+  /***********************
+   * Audio core (simple)
+   ***********************/
+  function ensureCtx(){
+    if(!state.ctx){
+      state.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if(state.ctx.state === "suspended"){
+      state.ctx.resume().catch(()=>{});
+    }
+    return state.ctx;
+  }
 
-    (project.sections[sec]||[]).forEach((line)=>{
-      if(!String(line.lyrics||"").trim()) return;
+  function playClick(freq=440, ms=80){
+    const ctx = ensureCtx();
+    const t0 = ctx.currentTime;
 
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.value = freq;
+
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
+
+    osc.connect(g);
+    g.connect(ctx.destination);
+
+    osc.start(t0);
+    osc.stop(t0 + ms/1000 + 0.02);
+  }
+
+  /***********************
+   * UI state helpers
+   ***********************/
+  function setActivePill(groupIds, activeId){
+    groupIds.forEach(id => {
+      const b = $(id);
+      if(!b) return;
+      b.classList.toggle("active", id === activeId);
+    });
+  }
+
+  function setInstrument(which){
+    state.instrument = which;
+    setActivePill(["instAcoustic","instElectric","instPiano"], ({
+      acoustic:"instAcoustic",
+      electric:"instElectric",
+      piano:"instPiano"
+    })[which]);
+
+    // ✅ instrument buttons should DO something immediately
+    // quick ear-test ping so you know it worked
+    const f = which === "acoustic" ? 330 : which === "electric" ? 440 : 523.25;
+    playClick(f, 80);
+  }
+
+  function setDrumStyle(which){
+    state.drumStyle = which;
+
+    const map = {
+      rock: "drumRock",
+      hardrock: "drumHardRock",
+      pop: "drumPop",
+      rap: "drumRap"
+    };
+    setActivePill(Object.values(map), map[which]);
+
+    const mapMini = {
+      rock: "mRock",
+      hardrock: "mHardRock",
+      pop: "mPop",
+      rap: "mRap"
+    };
+    setActivePill(Object.values(mapMini), mapMini[which]);
+
+    // ✅ audible confirmation so you KNOW the press worked
+    playClick(196, 60);
+  }
+
+  /***********************
+   * AutoScroll ONLY (no audio)
+   ***********************/
+  function setAutoScroll(on){
+    state.autoScrollOn = !!on;
+    el.autoPlayBtn?.classList.toggle("on", state.autoScrollOn);
+    el.mScrollBtn?.classList.toggle("on", state.autoScrollOn);
+
+    if(state.autoScrollTimer){
+      clearInterval(state.autoScrollTimer);
+      state.autoScrollTimer = null;
+    }
+    if(state.autoScrollOn){
+      state.autoScrollTimer = setInterval(() => {
+        window.scrollBy({ top: 1, left: 0, behavior: "auto" });
+      }, 25);
+    }
+  }
+
+  /***********************
+   * Tabs + editor rendering
+   ***********************/
+  function ensureSectionArray(sec){
+    if(!state.project.sections[sec]) state.project.sections[sec] = [];
+    return state.project.sections[sec];
+  }
+
+  function renderTabs(){
+    el.tabs.innerHTML = "";
+    const show = SECTIONS.slice(0, -1); // exclude "Full" from list, we add it first
+    const order = ["Full", ...show];
+
+    order.forEach(sec => {
+      const b = document.createElement("button");
+      b.className = "tab";
+      b.textContent = sec;
+      b.classList.toggle("active", sec === state.currentSection);
+      b.addEventListener("click", () => {
+        state.currentSection = sec;
+        renderTabs();
+        renderSheet();
+      });
+      el.tabs.appendChild(b);
+    });
+  }
+
+  function renderSheet(){
+    el.sheetTitle.textContent = state.currentSection;
+
+    // FULL view: big box preview + tools
+    if(state.currentSection === "Full"){
+      el.sheetHint.textContent = "Full Sheet Preview (auto from your cards):";
+      const wrap = document.createElement("div");
+      wrap.className = "fullBoxWrap";
+
+      const btnRow = document.createElement("div");
+      btnRow.className = "row";
+      btnRow.style.padding = "0 0 10px 0";
+
+      const showPaste = document.createElement("button");
+      showPaste.className = "btn secondary";
+      showPaste.textContent = "Show Paste Area";
+
+      const apply = document.createElement("button");
+      apply.className = "btn secondary";
+      apply.textContent = "Apply to Sections";
+
+      btnRow.appendChild(showPaste);
+      btnRow.appendChild(apply);
+
+      const ta = document.createElement("textarea");
+      ta.className = "fullBox";
+      ta.readOnly = true;
+      ta.value = buildFullPreviewText();
+
+      wrap.appendChild(btnRow);
+      wrap.appendChild(document.createTextNode("Full Sheet Preview (auto from your cards):"));
+      wrap.appendChild(document.createElement("div")).style.height = "6px";
+      wrap.appendChild(ta);
+
+      el.sheetBody.innerHTML = "";
+      el.sheetBody.appendChild(wrap);
+      return;
+    }
+
+    // Section view: cards
+    el.sheetHint.textContent = "";
+    const cardsWrap = document.createElement("div");
+    cardsWrap.className = "cards";
+
+    const arr = ensureSectionArray(state.currentSection);
+    if(arr.length === 0){
+      // seed one empty line
+      arr.push({ lyrics:"", notes:Array(8).fill("Not"), timing:["","","",""] });
+    }
+
+    arr.forEach((line, idx) => {
       const card = document.createElement("div");
-      card.className="card";
+      card.className = "card";
+
+      const top = document.createElement("div");
+      top.className = "cardTop";
+
+      const num = document.createElement("div");
+      num.className = "cardNum";
+      num.textContent = String(idx + 1);
+
+      const syll = document.createElement("div");
+      syll.className = "syllPill";
+      syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
+
+      top.appendChild(num);
+      top.appendChild(syll);
 
       const notesRow = document.createElement("div");
-      notesRow.className="notesRow";
-      (line.notes||Array(8).fill("")).forEach((n)=>{
+      notesRow.className = "notesRow";
+
+      const notes = Array.isArray(line.notes) ? line.notes : Array(8).fill("Not");
+      for(let i=0;i<8;i++){
         const inp = document.createElement("input");
-        inp.className="noteCell";
-        inp.value = notes[i] ?? "";
-        inp.readOnly = true;
+        inp.className = "noteCell";
+        inp.value = notes[i] ?? "Not";
+        inp.addEventListener("input", () => {
+          const v = String(inp.value || "").trim();
+          notes[i] = v ? v : "Not";
+          line.notes = notes;
+          state.project.updatedAt = now();
+          upsertProject(state.project);
+          updateKeyFromAllNotes();
+        });
+        inp.addEventListener("blur", () => {
+          // normalize "not"
+          const v = String(inp.value || "").trim();
+          inp.value = v ? v : "Not";
+        });
         notesRow.appendChild(inp);
-      });
-      card.appendChild(notesRow);
+      }
 
       const lyr = document.createElement("textarea");
-      lyr.className="lyrics";
-      lyr.value = line.lyrics;
-      lyr.readOnly = true;
+      lyr.className = "lyrics";
+      lyr.placeholder = "Type lyrics (AutoSplit on)…";
+      lyr.value = line.lyrics || "";
+      lyr.addEventListener("input", () => {
+        line.lyrics = lyr.value;
+        state.project.updatedAt = now();
+        upsertProject(state.project);
+        syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
+        if(state.autoSplit){
+          // optional: keep simple (no auto-splitting surprises)
+        }
+      });
+
+      card.appendChild(top);
+      card.appendChild(notesRow);
       card.appendChild(lyr);
 
-      cards.appendChild(card);
+      cardsWrap.appendChild(card);
     });
 
-    wrap.appendChild(cards);
-  });
+    el.sheetBody.innerHTML = "";
+    el.sheetBody.appendChild(cardsWrap);
 
-  sheetBodyEl.appendChild(wrap);
-}
+    updateKeyFromAllNotes();
+  }
 
-function renderSection(sec){
-  sheetTitleEl.textContent = sec;
-  sheetBodyEl.innerHTML = "";
-
-  const cardsWrap = document.createElement("div");
-  cardsWrap.className="cards";
-
-  const lines = project.sections[sec] || [];
-  lines.forEach((line, idx)=>{
-    const card = document.createElement("div");
-    card.className = "card";
-    card.dataset.section = sec;
-    card.dataset.index = String(idx);
-
-    const top = document.createElement("div");
-    top.className="cardTop";
-
-    const num = document.createElement("div");
-    num.className="cardNum";
-    num.textContent = String(idx+1);
-
-    const syll = document.createElement("div");
-    syll.className="syllPill";
-    syll.textContent = "Syllables: " + countSyllablesInLine(line.lyrics);
-
-    top.appendChild(num);
-    top.appendChild(syll);
-    card.appendChild(top);
-
-    const notesRow = document.createElement("div");
-    notesRow.className="notesRow";
-    const notes = line.notes || Array(8).fill("");
-    for(let i=0;i<8;i++){
-      const inp = document.createElement("input");
-      inp.className="noteCell";
-      inp.value = notes[i] ?? "";
-      inp.addEventListener("input", ()=>{
-        line.notes[i] = inp.value.trim() || "";
-        project.updatedAt = Date.now();
-        updateKeyFromAllNotes();
-        saveProjectSoon();
+  function buildFullPreviewText(){
+    const lines = [];
+    SECTIONS.filter(s => s !== "Full").forEach(sec => {
+      const arr = state.project.sections[sec] || [];
+      const hasAny = arr.some(x => String(x.lyrics || "").trim());
+      if(!hasAny) return;
+      lines.push(sec.toUpperCase());
+      lines.push("");
+      arr.forEach(line => {
+        const t = String(line.lyrics || "").trim();
+        if(t) lines.push(t);
       });
-      notesRow.appendChild(inp);
-    }
-    card.appendChild(notesRow);
-
-    const ta = document.createElement("textarea");
-    ta.className="lyrics";
-    ta.placeholder = "Type lyrics (AutoSplit on)…";
-    ta.value = line.lyrics || "";
-    ta.addEventListener("input", ()=>{
-      line.lyrics = ta.value;
-      if(state.autoSplit){
-        line.timing = autosplitTiming(line.lyrics);
-      }
-      syll.textContent = "Syllables: " + countSyllablesInLine(line.lyrics);
-      renderTimingRow(timingRow, line);
-      project.updatedAt = Date.now();
-      saveProjectSoon();
+      lines.push("");
     });
-    card.appendChild(ta);
-
-    const timingRow = document.createElement("div");
-    timingRow.className="timingRow";
-    card.appendChild(timingRow);
-    renderTimingRow(timingRow, line);
-
-    cardsWrap.appendChild(card);
-  });
-
-  sheetBodyEl.appendChild(cardsWrap);
-}
-
-function renderAll(){
-  setAutoSplitUI();
-  bpmInput.value = String(state.bpm);
-  capoInput.value = String(state.capo);
-  setKeyUI();
-  setInstrumentUI();
-  setDrumUI();
-  setScrollUI();
-  renderTabs();
-
-  if(state.currentSection === "Full") renderFullView();
-  else renderSection(state.currentSection);
-
-  renderProjectsDropdown();
-  renderRecordings();
-}
-function renderAllSoon(){
-  clearTimeout(renderAllSoon._t);
-  renderAllSoon._t = setTimeout(renderAll, 50);
-}
-
-/* -----------------------------
-   Paste -> Sections
-------------------------------*/
-function applyPasteToSections(){
-  const text = String(project.fullPaste || "");
-  const lines = text.split(/\r?\n/);
-
-  let cur = null;
-  const newMap = {};
-  SECTIONS.forEach(s=>{ if(s!=="Full") newMap[s] = []; });
-
-  for(const raw of lines){
-    const t = raw.trim();
-    if(!t) continue;
-
-    const upper = t.toUpperCase();
-    const match = SECTIONS.find(s=>s!=="Full" && s===upper);
-    if(match){ cur = match; continue; }
-
-    if(cur){
-      const obj = emptyLine();
-      obj.lyrics = t;
-      obj.timing = state.autoSplit ? autosplitTiming(obj.lyrics) : ["","","",""];
-      newMap[cur].push(obj);
-    }
+    return lines.join("\n").trim();
   }
 
-  for(const sec of Object.keys(newMap)){
-    while(newMap[sec].length < 8) newMap[sec].push(emptyLine());
-    newMap[sec] = newMap[sec].slice(0, 32);
-  }
-
-  project.sections = {...project.sections, ...newMap};
-  project.updatedAt = Date.now();
-  saveProjectSoon();
-  renderAll();
-}
-
-/* -----------------------------
-   Projects
-------------------------------*/
-async function ensureProject(){
-  const all = await dbGetAll(STORE_PROJECTS);
-  if(all.length===0){
-    project = defaultProject();
-    state.projectId = project.id;
-    state.projectName = project.name;
-    await dbPut(STORE_PROJECTS, project);
-  }else{
-    all.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-    project = all[0];
-    state.projectId = project.id;
-    state.projectName = project.name;
-  }
-}
-async function renderProjectsDropdown(){
-  const all = await dbGetAll(STORE_PROJECTS);
-  const mode = sortSelect.value || "az";
-  let list = [...all];
-
-  if(mode==="az"){
-    list.sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""), undefined, { sensitivity:"base" }));
-  }else{
-    list.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-  }
-
-  projectSelect.innerHTML = "";
-  list.forEach(p=>{
-    const opt = document.createElement("option");
-    opt.value = p.id;
-    opt.textContent = p.name || "(untitled)";
-    if(p.id === state.projectId) opt.selected = true;
-    projectSelect.appendChild(opt);
-  });
-
-  if(!projectSelect.value && list[0]) projectSelect.value = list[0].id;
-}
-async function renameProject(){
-  const name = prompt("Project name:", project.name || "");
-  if(name===null) return;
-  const nm = name.trim() || "Untitled";
-  project.name = nm;
-  project.updatedAt = Date.now();
-  state.projectName = nm;
-  await dbPut(STORE_PROJECTS, project);
-  renderAllSoon();
-}
-async function deleteCurrentProject(){
-  if(!project) return;
-  const ok = confirm(`Delete project "${project.name}" and all its recordings?`);
-  if(!ok) return;
-
-  // delete recordings for this project
-  const recs = await dbGetAll(STORE_RECORDINGS);
-  const mine = recs.filter(r=>r.projectId === project.id);
-  for(const r of mine){
-    await dbDelete(STORE_RECORDINGS, r.id);
-  }
-  await dbDelete(STORE_PROJECTS, project.id);
-
-  // load another project or create one
-  const all = await dbGetAll(STORE_PROJECTS);
-  if(all.length===0){
-    project = defaultProject();
-    state.projectId = project.id;
-    state.projectName = project.name;
-    await dbPut(STORE_PROJECTS, project);
-  }else{
-    all.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-    project = all[0];
-    state.projectId = project.id;
-    state.projectName = project.name;
-  }
-  updateKeyFromAllNotes();
-  renderAll();
-}
-
-/* -----------------------------
-   Recordings UI
-------------------------------*/
-async function renderRecordings(){
-  const all = await dbGetAll(STORE_RECORDINGS);
-  const mine = all.filter(r=>r.projectId === state.projectId);
-  mine.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-
-  recordingsList.innerHTML = "";
-let currentAudio = null;
-  if(mine.length===0){
-    const d = document.createElement("div");
-    d.style.color="#666";
-    d.style.fontWeight="900";
-    d.textContent = "No recordings yet.";
-    recordingsList.appendChild(d);
-    return;
-  }
-
-  mine.forEach(rec=>{
-    const row = document.createElement("div");
-    row.style.display="flex";
-    row.style.gap="8px";
-    row.style.alignItems="center";
-    row.style.flexWrap="nowrap";
-row.style.overflow="hidden";
-row.style.whiteSpace="nowrap";
-    row.style.border="1px solid rgba(0,0,0,.10)";
-    row.style.borderRadius="14px";
-    row.style.padding="10px";
-
-    const title = document.createElement("div");
-    title.style.flex = "1 1 0";
-title.style.minWidth = "0";
-title.style.overflow = "hidden";
-title.style.textOverflow = "ellipsis";
-title.style.whiteSpace = "nowrap";
-    title.style.fontWeight="1100";
-    const d = new Date(rec.createdAt || Date.now());
-    const label = (rec.title && rec.title.trim()) ? rec.title.trim()+" • " : "";
-    title.textContent = label + d.toLocaleString();
-
-    // ✅ edit pencil BETWEEN title and play
-    const edit = document.createElement("button");
-    edit.className="btn secondary";
-    edit.textContent="✏️";
-    edit.title="Rename recording";
-    edit.addEventListener("click", async ()=>{
-      const name = prompt("Recording title:", rec.title || "");
-      if(name===null) return;
-      rec.title = (name.trim() || "");
-      await dbPut(STORE_RECORDINGS, rec);
-      renderRecordings();
-    });
-
-    const play = document.createElement("button");
-    play.className="btn secondary";
-    play.textContent="▶";
-    play.title="Play";
-    play.addEventListener("click", ()=>{
-      const blob = rec.blob;
-      if(!blob) return;
-      const url = URL.createObjectURL(blob);
-      if(currentAudio){
-  currentAudio.pause();
-  currentAudio.currentTime = 0;
-}
-
-currentAudio = new Audio(url);
-currentAudio.play();
-
-currentAudio.onended = ()=>{
-  URL.revokeObjectURL(url);
-  currentAudio = null;
-};
-    });
-const stop = document.createElement("button");
-stop.className="btn secondary";
-stop.textContent="⏹";
-stop.title="Stop";
-stop.addEventListener("click", ()=>{
-  if(currentAudio){
-    currentAudio.pause();
-    currentAudio.currentTime = 0;
-    currentAudio = null;
-  }
-});
-    const download = document.createElement("button");
-    download.className="btn secondary";
-    download.textContent="↓";
-    download.title="Download";
-    download.addEventListener("click", ()=>{
-      const blob = rec.blob;
-      if(!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = (rec.title && rec.title.trim() ? rec.title.trim() : "recording") + ".webm";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url), 1000);
-    });
-
-    const del = document.createElement("button");
-    del.className="btn secondary";
-    del.textContent="🗑";
-    del.title="Delete recording";
-    del.addEventListener("click", async ()=>{
-      if(!confirm("Delete this recording?")) return;
-      await dbDelete(STORE_RECORDINGS, rec.id);
-      renderRecordings();
-    });
-
-    row.appendChild(title);
-row.appendChild(edit);
-row.appendChild(play);
-row.appendChild(stop);
-row.appendChild(download);
-row.appendChild(del);
-    recordingsList.appendChild(row);
-  });
-}
-
-/* -----------------------------
-   Save debounce
-------------------------------*/
-function saveProjectSoon(){
-  clearTimeout(saveProjectSoon._t);
-  saveProjectSoon._t = setTimeout(async ()=>{
-    if(!project) return;
-    await dbPut(STORE_PROJECTS, project);
-    renderProjectsDropdown();
-  }, 250);
-}
-
-/* -----------------------------
-   Key detection
-------------------------------*/
-const SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-const KK_MAJOR = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
-const KK_MINOR = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
-
-function norm(v){ return Math.sqrt(v.reduce((a,x)=>a+x*x,0)) || 1; }
-function dot(a,b){ let s=0; for(let i=0;i<12;i++) s+= (a[i]||0)*(b[i]||0); return s; }
-function rotate(arr, t){
-  const out = Array(12).fill(0);
-  for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
-  return out;
-}
-function noteToPC(n){
-  const s = String(n||"").trim().toUpperCase();
-  if(!s || s==="NOT") return null;
-  const m = s.match(/^([A-G])(#|B)?/);
-  if(!m) return null;
-  let root = m[1];
-  let acc = m[2] || "";
-  if(acc==="B") acc="b";
-  const map = {
+  /***********************
+   * Key detection (simple)
+   ***********************/
+  const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
   };
-  const key = (root + (acc==="#" ? "#" : (acc==="b" ? "b" : ""))).replace("b","B");
-  return map[key] ?? null;
-}
-function keyFromHistogram(hist){
-  let best = { score:-1e9, name:"" };
-  const hnorm = norm(hist);
-  for(let t=0;t<12;t++){
-    const maj = rotate(KK_MAJOR, t);
-    const min = rotate(KK_MINOR, t);
-    const majScore = dot(hist, maj) / (hnorm * norm(maj));
-    const minScore = dot(hist, min) / (hnorm * norm(min));
-    if(majScore > best.score) best = { score:majScore, name: SHARP[t] + " maj" };
-    if(minScore > best.score) best = { score:minScore, name: SHARP[t] + " min" };
+  const MAJOR_PROFILE = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+  const MINOR_PROFILE = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+
+  function noteToPC(n){
+    const s = String(n||"").trim().toUpperCase();
+    if(!s || s === "NOT") return null;
+    const m = s.match(/^([A-G])([#B])?/);
+    if(!m) return null;
+    const root = m[1];
+    const acc = (m[2] || "").toUpperCase();
+    const key = root + (acc === "B" ? "B" : acc === "#" ? "#" : "");
+    return NOTE_TO_PC[key] ?? null;
   }
-  return best.name || "—";
-}
-function updateKeyFromAllNotes(){
-  const hist = Array(12).fill(0);
-  SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
-    (project.sections[sec]||[]).forEach(line=>{
-      (line.notes||[]).forEach(n=>{
-        const pc = noteToPC(n);
-        if(pc!==null) hist[pc] += 1;
-      });
-    });
-  });
-  state.key = keyFromHistogram(hist);
-  setKeyUI();
-}
+  function dot(a,b){
+    let s=0;
+    for(let i=0;i<12;i++) s += (a[i]||0) * (b[i]||0);
+    return s;
+  }
+  function norm(v){
+    return Math.sqrt(v.reduce((a,x)=>a+(x*x),0)) || 1;
+  }
+  function rotate(arr, t){
+    const out = Array(12).fill(0);
+    for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
+    return out;
+  }
+  function keyFromHistogram(hist){
+    const hn = norm(hist);
+    let best = { score:-1e9, name:"—" };
 
-/* -----------------------------
-   Rhymes (REAL: Datamuse)
-------------------------------*/
-const STOPWORDS = new Set([
-  "the","a","an","and","or","but","to","of","in","on","at","for","with","from",
-  "is","are","was","were","be","been","being",
-  "i","im","i'm","you","your","you're","we","they","he","she","it","me","my","mine","our","ours",
-  "this","that","these","those"
-]);
+    for(let t=0;t<12;t++){
+      const maj = rotate(MAJOR_PROFILE, t);
+      const min = rotate(MINOR_PROFILE, t);
+      const sMaj = dot(hist, maj)/hn/norm(maj);
+      const sMin = dot(hist, min)/hn/norm(min);
 
-function cleanWord(w){
-  return String(w||"")
-    .toLowerCase()
-    .replace(/^[^a-z]+|[^a-z]+$/g,"");
-}
-
-async function fetchRhymes(word){
-  // Datamuse: real rhymes + near rhymes
-  const q = encodeURIComponent(word);
-  const urls = [
-    `https://api.datamuse.com/words?rel_rhy=${q}&max=24`,
-    `https://api.datamuse.com/words?rel_nry=${q}&max=24`
-  ];
-  const out = [];
-  for(const u of urls){
-    try{
-      const res = await fetch(u, { mode:"cors" });
-      const json = await res.json();
-      for(const item of (json||[])){
-        if(item && item.word) out.push(String(item.word));
+      if(sMaj > best.score){
+        best = { score:sMaj, name: pcToName(t) + " maj" };
       }
-    }catch(e){}
-  }
-  return out;
-}
-
-function uniq(arr){
-  const s = new Set();
-  const out = [];
-  for(const x of arr){
-    const k = String(x).toLowerCase();
-    if(!s.has(k)){
-      s.add(k);
-      out.push(x);
+      if(sMin > best.score){
+        best = { score:sMin, name: pcToName(t) + " min" };
+      }
     }
+    return best.name;
   }
-  return out;
-}
+  function pcToName(pc){
+    const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+    return names[pc%12];
+  }
 
-function buildLocalWordBank(){
-  const set = new Set();
-  SECTIONS.filter(s=>s!=="Full").forEach(sec=>{
-    (project.sections[sec]||[]).forEach(line=>{
-      const words = String(line.lyrics||"").split(/\s+/).map(cleanWord).filter(Boolean);
-      words.forEach(x=>{
-        if(x.length>=2 && !STOPWORDS.has(x)) set.add(x);
+  function updateKeyFromAllNotes(){
+    const hist = Array(12).fill(0);
+    SECTIONS.filter(s => s !== "Full").forEach(sec => {
+      (state.project.sections[sec] || []).forEach(line => {
+        const notes = Array.isArray(line.notes) ? line.notes : [];
+        notes.forEach(n => {
+          const pc = noteToPC(n);
+          if(pc !== null) hist[pc] += 1;
+        });
       });
     });
-  });
-  return Array.from(set);
-}
-
-async function showRhymesFor(word){
-  const w = cleanWord(word);
-  if(!w || STOPWORDS.has(w)) return;
-
-  rhymeTitle.textContent = `Rhymes for "${w}"`;
-  rhymeWords.innerHTML = "";
-
-  // quick loading pill
-  const loading = document.createElement("div");
-  loading.style.color="#666";
-  loading.style.fontWeight="900";
-  loading.textContent = "Loading rhymes…";
-  rhymeWords.appendChild(loading);
-  rhymeDock.style.display="block";
-
-  // fetch real rhymes
-  const apiRhymes = await fetchRhymes(w);
-
-  // local words that also rhyme (bonus)
-  const local = buildLocalWordBank();
-  const combined = uniq([...apiRhymes, ...local])
-    .map(x=>cleanWord(x))
-    .filter(Boolean)
-    .filter(x=>x!==w)
-    .filter(x=>x.length>=2)
-    .filter(x=>!STOPWORDS.has(x));
-
-  rhymeWords.innerHTML = "";
-
-  const picks = combined.slice(0, 18); // ✅ multiple suggestions
-  if(picks.length===0){
-    const d = document.createElement("div");
-    d.style.color="#666";
-    d.style.fontWeight="900";
-    d.textContent = "No rhymes found (try another word).";
-    rhymeWords.appendChild(d);
-    return;
+    el.keyOutput.value = keyFromHistogram(hist);
   }
 
-  picks.forEach(r=>{
-    const b = document.createElement("button");
-    b.className="rWord";
-    b.textContent = r;
-    b.addEventListener("click", ()=>{
-      if(lastFocusedTextarea){
-        const t = lastFocusedTextarea.value;
-        const parts = t.trimEnd().split(/\s+/);
-        if(parts.length>0){
-          parts[parts.length-1] = r;
-          lastFocusedTextarea.value = parts.join(" ") + " ";
-          lastFocusedTextarea.dispatchEvent(new Event("input",{bubbles:true}));
-          lastFocusedTextarea.focus();
+  /***********************
+   * Recordings UI (layout fixed)
+   ***********************/
+  function fmtDate(ms){
+    try{ return new Date(ms).toLocaleString(); }catch{ return String(ms); }
+  }
+
+  async function renderRecordings(){
+    const all = await dbGetAll();
+    const mine = all.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+
+    el.recordingsList.innerHTML = "";
+
+    if(mine.length === 0){
+      const d = document.createElement("div");
+      d.style.color="#666";
+      d.style.fontWeight="900";
+      d.textContent = "No recordings yet.";
+      el.recordingsList.appendChild(d);
+      return;
+    }
+
+    mine.forEach(rec => {
+      const row = document.createElement("div");
+      row.style.display="flex";
+      row.style.gap="8px";
+      row.style.alignItems="center";
+      row.style.flexWrap="nowrap";
+      row.style.overflow="hidden";
+      row.style.whiteSpace="nowrap";
+      row.style.border="1px solid rgba(0,0,0,.10)";
+      row.style.borderRadius="14px";
+      row.style.padding="10px";
+
+      const title = document.createElement("div");
+      title.style.flex="1 1 0";
+      title.style.minWidth="0";
+      title.style.overflow="hidden";
+      title.style.textOverflow="ellipsis";
+      title.style.whiteSpace="nowrap";
+      title.style.fontWeight="1100";
+      title.textContent = (rec.title && rec.title.trim() ? rec.title.trim() + " — " : "") + fmtDate(rec.createdAt || now());
+
+      // rename
+      const edit = document.createElement("button");
+      edit.className="btn secondary";
+      edit.textContent="✏️";
+      edit.title="Rename recording";
+      edit.addEventListener("click", async () => {
+        const name = prompt("Recording title:", rec.title || "");
+        if(name === null) return;
+        rec.title = (name.trim() || "");
+        await dbPut(rec);
+        renderRecordings();
+      });
+
+      // play
+      const play = document.createElement("button");
+      play.className="btn secondary";
+      play.textContent="▶";
+      play.title="Play";
+      play.addEventListener("click", () => {
+        if(!rec.blob) return;
+        const url = URL.createObjectURL(rec.blob);
+
+        // stop any previous playback
+        if(state.currentAudio){
+          try{ state.currentAudio.pause(); }catch{}
+          state.currentAudio = null;
         }
-      }
+
+        const audio = new Audio(url);
+        state.currentAudio = audio;
+        audio.play().catch(()=>{});
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          state.currentAudio = null;
+        };
+      });
+
+      // stop
+      const stop = document.createElement("button");
+      stop.className="btn secondary";
+      stop.textContent="■";
+      stop.title="Stop";
+      stop.addEventListener("click", () => {
+        if(state.currentAudio){
+          try{
+            state.currentAudio.pause();
+            state.currentAudio.currentTime = 0;
+          }catch{}
+          state.currentAudio = null;
+        }
+      });
+
+      // download
+      const download = document.createElement("button");
+      download.className="btn secondary";
+      download.textContent="↓";
+      download.title="Download";
+      download.addEventListener("click", () => {
+        if(!rec.blob) return;
+        const url = URL.createObjectURL(rec.blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = (rec.title && rec.title.trim() ? rec.title.trim() : "recording") + ".webm";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 800);
+      });
+
+      // delete
+      const del = document.createElement("button");
+      del.className="btn secondary";
+      del.textContent="🗑️";
+      del.title="Delete recording";
+      del.addEventListener("click", async () => {
+        if(!confirm("Delete this recording?")) return;
+        await dbDelete(rec.id);
+        renderRecordings();
+      });
+
+      // ✅ order: title then buttons then trash at end
+      row.appendChild(title);
+      row.appendChild(edit);
+      row.appendChild(play);
+      row.appendChild(stop);
+      row.appendChild(download);
+      row.appendChild(del);
+
+      el.recordingsList.appendChild(row);
     });
-    rhymeWords.appendChild(b);
-  });
-}
-
-function getLastWordFromFocused(){
-  if(!lastFocusedTextarea) return "";
-  const txt = lastFocusedTextarea.value || "";
-  const parts = txt.trim().split(/\s+/);
-  return parts[parts.length-1] || "";
-}
-
-/* -----------------------------
-   Audio engine + Recording MIX (FIXED)
-   ✅ We now create a REAL mixed stream:
-      recordDest = mix of (app audio masterOut) + (mic)
-------------------------------*/
-let audioCtx = null;
-let masterOut = null;
-let recordDest = null;     // ✅ single mixed output stream
-let appToRecordGain = null;
-
-function ensureAudio(){
-  if(audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  masterOut = audioCtx.createGain();
-  masterOut.gain.value = 0.9;
-
-  // hear app audio
-  masterOut.connect(audioCtx.destination);
-
-  // ✅ recording destination (single mixed track)
-  recordDest = audioCtx.createMediaStreamDestination();
-
-  // ✅ feed app audio into recording
-  appToRecordGain = audioCtx.createGain();
-  appToRecordGain.gain.value = 1.0;
-  masterOut.connect(appToRecordGain).connect(recordDest);
-}
-
-function hzFromNoteName(name){
-  const s = String(name||"").trim();
-  if(!s || s.toLowerCase()==="not") return null;
-  const m = s.match(/^([A-G])(#|b)?/);
-  if(!m) return null;
-  const root = m[1] + (m[2]||"");
-  const map = {C:0,"C#":1,"Db":1,D:2,"D#":3,"Eb":3,E:4,F:5,"F#":6,"Gb":6,G:7,"G#":8,"Ab":8,A:9,"A#":10,"Bb":10,B:11};
-  const pc = map[root] ?? null;
-  if(pc===null) return null;
-  const a4 = 440;
-  const n = pc - 9;
-  return a4 * Math.pow(2, n/12);
-}
-
-function playTone(freq, t0, t1, type){
-  ensureAudio();
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  const f = audioCtx.createBiquadFilter();
-  f.type = "lowpass";
-  f.frequency.setValueAtTime(type==="Acoustic" ? 2200 : type==="Electric" ? 3200 : 1800, t0);
-
-  if(type==="Electric") o.type="sawtooth";
-  else if(type==="Piano") o.type="triangle";
-  else o.type="triangle";
-
-  o.frequency.setValueAtTime(freq, t0);
-
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(type==="Piano" ? 0.35 : 0.25, t0 + 0.01);
-  g.gain.setValueAtTime(type==="Piano" ? 0.20 : 0.18, Math.max(t0+0.02, t1-0.03));
-  g.gain.exponentialRampToValueAtTime(0.0001, t1);
-
-  o.connect(f).connect(g).connect(masterOut);
-  o.start(t0);
-  o.stop(t1 + 0.02);
-}
-
-function drumKick(t){
-  ensureAudio();
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.type="sine";
-  o.frequency.setValueAtTime(120, t);
-  o.frequency.exponentialRampToValueAtTime(45, t+0.08);
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.8, t+0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t+0.18);
-  o.connect(g).connect(masterOut);
-  o.start(t); o.stop(t+0.22);
-}
-function drumSnare(t){
-  ensureAudio();
-  const n = audioCtx.createBufferSource();
-  const g = audioCtx.createGain();
-  const f = audioCtx.createBiquadFilter();
-
-  const dur = 0.18;
-  const sr = audioCtx.sampleRate;
-  const buf = audioCtx.createBuffer(1, Math.floor(sr*dur), sr);
-  const data = buf.getChannelData(0);
-  for(let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * Math.exp(-i/(sr*0.04));
-
-  n.buffer = buf;
-  f.type="highpass";
-  f.frequency.setValueAtTime(800, t);
-  g.gain.setValueAtTime(0.9, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
-
-  n.connect(f).connect(g).connect(masterOut);
-  n.start(t); n.stop(t+dur);
-}
-function drumHat(t, open=false){
-  ensureAudio();
-  const dur = open ? 0.14 : 0.05;
-  const sr = audioCtx.sampleRate;
-  const buf = audioCtx.createBuffer(1, Math.floor(sr*dur), sr);
-  const data = buf.getChannelData(0);
-  for(let i=0;i<data.length;i++){
-    data[i] = (Math.random()*2-1) * Math.exp(-i/(sr*(open?0.03:0.015)));
   }
-  const src = audioCtx.createBufferSource();
-  src.buffer = buf;
-  const f = audioCtx.createBiquadFilter();
-  f.type="highpass";
-  f.frequency.setValueAtTime(6000, t);
-  const g = audioCtx.createGain();
-  g.gain.setValueAtTime(open?0.35:0.22, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
-  src.connect(f).connect(g).connect(masterOut);
-  src.start(t); src.stop(t+dur);
-}
 
-function scheduleDrums(t0, bars){
-  ensureAudio();
-  const bpm = state.bpm;
-  const beat = 60/bpm;
-  const barDur = beat*4;
+  /***********************
+   * Recording (simple)
+   ***********************/
+  async function startRecording(){
+    const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    const chunks = [];
+    const rec = new MediaRecorder(stream);
 
-  for(let b=0;b<bars;b++){
-    const base = t0 + b*barDur;
-    if(state.drumStyle==="Rap"){
-      drumKick(base + 0*beat);
-      drumKick(base + 1.5*beat);
-      drumKick(base + 2*beat);
-      drumSnare(base + 1*beat);
-      drumSnare(base + 3*beat);
-      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), i===7);
-    }else if(state.drumStyle==="Pop"){
-      drumKick(base + 0*beat);
-      drumKick(base + 2*beat);
-      drumSnare(base + 1*beat);
-      drumSnare(base + 3*beat);
-      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), false);
-    }else if(state.drumStyle==="Rock"){
-      drumKick(base + 0*beat);
-      drumKick(base + 2.5*beat);
-      drumSnare(base + 1*beat);
-      drumSnare(base + 3*beat);
-      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), i===7);
+    rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: "audio/webm" });
+      const id = crypto.randomUUID();
+      const item = { id, createdAt: now(), title: "", blob };
+      await dbPut(item);
+      await renderRecordings();
+    };
+
+    rec.start();
+    playClick(880, 60);
+    setTimeout(() => rec.stop(), 8000); // 8 sec default
+  }
+
+  /***********************
+   * Projects dropdown
+   ***********************/
+  function renderProjectsDropdown(){
+    const all = loadAllProjects();
+
+    // sort
+    const sort = el.sortSelect.value;
+    let list = [...all];
+    if(sort === "az"){
+      list.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
     }else{
-      drumKick(base + 0*beat);
-      drumKick(base + 2*beat);
-      drumKick(base + 2.75*beat);
-      drumSnare(base + 1*beat);
-      drumSnare(base + 3*beat);
-      for(let i=0;i<8;i++) drumHat(base + i*(beat/2), i===7);
-    }
-  }
-}
-
-function scheduleLineNotes(line, t0){
-  const bpm = state.bpm;
-  const step = (60/bpm)/2;
-  const notes = (line.notes||[]).map(x=>String(x||"").trim());
-
-  for(let i=0;i<8;i++){
-    const n = notes[i];
-    if(!n) continue;
-if(n.toLowerCase()==="not") continue; // keeps old projects compatible
-
-    let j=i+1;
-    while(j<8 && (!notes[j] || notes[j].toLowerCase()==="not")) j++;
-    const tStart = t0 + i*step;
-    const tEnd = t0 + (j<8 ? j*step : 8*step);
-
-    const hz = hzFromNoteName(n);
-    if(hz) playTone(hz, tStart, tEnd, state.instrument);
-  }
-  return t0 + 8*step;
-}
-
-/* -----------------------------
-   AutoScroll play
-------------------------------*/
-let playing = false;
-let playTimer = null;
-let activeCard = null;
-
-function clearActiveCard(){
-  if(activeCard) activeCard.classList.remove("activeLine");
-  activeCard = null;
-}
-function highlightCard(sec, idx){
-  clearActiveCard();
-  const card = document.querySelector(`.card[data-section="${sec}"][data-index="${idx}"]`);
-  if(card){
-    activeCard = card;
-    card.classList.add("activeLine");
-    card.scrollIntoView({ behavior:"smooth", block:"center" });
-  }
-}
-function getPlayableSequence(){
-  const order = SECTIONS.filter(s=>s!=="Full");
-  const seq = [];
-  order.forEach(sec=>{
-    (project.sections[sec]||[]).forEach((line, idx)=>{
-      if(String(line.lyrics||"").trim().length>0 || (line.notes||[]).some(n=>String(n||"").toLowerCase()!=="not")){
-        seq.push({sec, idx, line});
-      }
-    });
-  });
-  return seq;
-}
-async function startAutoPlay(){
-  ensureAudio();
-  if(audioCtx.state==="suspended") await audioCtx.resume();
-  state.autoPlay = true; setScrollUI();
-
-  playing = true;
-  const bpm = state.bpm;
-  const step = (60/bpm)/2;
-  const lineDur = step*8;
-
-  const seq = getPlayableSequence();
-  if(seq.length===0){ state.autoPlay=false; setScrollUI(); return; }
-
-  let cursor = 0;
-  const loop = ()=>{
-    if(!playing) return;
-    const now = audioCtx.currentTime + 0.05;
-
-    for(let k=0;k<2;k++){
-      const item = seq[(cursor+k) % seq.length];
-      const t0 = now + k*lineDur;
-
-      scheduleDrums(t0, 1);
-      scheduleLineNotes(item.line, t0);
-
-      setTimeout(()=>{
-        if(!playing) return;
-        if(state.currentSection !== item.sec){
-          state.currentSection = item.sec;
-          renderAll();
-        }
-        highlightCard(item.sec, item.idx);
-      }, Math.max(0, (t0 - audioCtx.currentTime)*1000));
+      list.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
     }
 
-    cursor = (cursor + 1) % seq.length;
-    playTimer = setTimeout(loop, lineDur*1000);
-  };
-  loop();
-}
-function stopAutoPlay(){
-  playing = false;
-  clearTimeout(playTimer);
-  playTimer = null;
-  clearActiveCard();
-  state.autoPlay = false;
-  setScrollUI();
-}
-
-/* -----------------------------
-   Recording (FIXED MIX)
-   ✅ MediaRecorder records ONE mixed stream (recordDest)
-------------------------------*/
-let mediaRecorder = null;
-let recChunks = [];
-let recording = false;
-let micStream = null;
-let micNode = null;
-let micGain = null;
-
-async function startRecording(){
-  try{
-    ensureAudio();
-    if(audioCtx.state==="suspended") await audioCtx.resume();
-
-    // ✅ mic
-    micStream = await navigator.mediaDevices.getUserMedia({ audio:true });
-    micNode = audioCtx.createMediaStreamSource(micStream);
-    micGain = audioCtx.createGain();
-    micGain.gain.value = 1.0;
-
-    // ✅ mic goes ONLY into recordDest (not to speakers)
-    micNode.connect(micGain).connect(recordDest);
-
-    recChunks = [];
-    mediaRecorder = new MediaRecorder(recordDest.stream);
-    mediaRecorder.ondataavailable = (e)=>{
-      if(e.data && e.data.size>0) recChunks.push(e.data);
-    };
-    mediaRecorder.onstop = async ()=>{
-      recording = false;
-      recordBtn.textContent = "Record";
-      mRecordBtn.textContent = "Record";
-
-      const blob = new Blob(recChunks, { type:"audio/webm" });
-      await dbPut(STORE_RECORDINGS, {
-        id: "rec_"+Date.now(),
-        projectId: state.projectId,
-        createdAt: Date.now(),
-        mime: "audio/webm",
-        title: "",
-        blob
-      });
-
-      // cleanup mic
-      try{ micNode && micNode.disconnect(); }catch(e){}
-      try{ micGain && micGain.disconnect(); }catch(e){}
-      if(micStream) micStream.getTracks().forEach(t=>t.stop());
-      micStream = null; micNode = null; micGain = null;
-
-      renderRecordings();
-    };
-
-    mediaRecorder.start();
-    recording = true;
-    recordBtn.textContent = "Stop";
-    mRecordBtn.textContent = "Stop";
-  }catch(e){
-    alert("Mic permission is required to record.");
-  }
-}
-function stopRecording(){
-  if(mediaRecorder && recording){
-    mediaRecorder.stop();
-  }
-}
-
-/* -----------------------------
-   Blink
-------------------------------*/
-function blinkOnce(){
-  const w = $("headshotWrap");
-  if(!w) return;
-  w.classList.add("blink");
-  setTimeout(()=>w.classList.remove("blink"), 120);
-}
-
-/* -----------------------------
-   Events
-------------------------------*/
-togglePanelBtn.addEventListener("click", ()=>{
-  const collapsed = !panelBody.classList.contains("hidden");
-  setPanelCollapsed(collapsed);
-});
-
-autoSplitBtn.addEventListener("click", ()=>{
-  state.autoSplit = !state.autoSplit;
-  setAutoSplitUI();
-  if(state.currentSection !== "Full"){
-    const sec = state.currentSection;
-    (project.sections[sec]||[]).forEach(line=>{
-      line.timing = state.autoSplit ? autosplitTiming(line.lyrics) : ["","","",""];
+    el.projectSelect.innerHTML = "";
+    list.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name || "Untitled";
+      if(state.project && p.id === state.project.id) opt.selected = true;
+      el.projectSelect.appendChild(opt);
     });
-    project.updatedAt = Date.now();
-    saveProjectSoon();
-    renderAllSoon();
   }
-});
 
-bpmInput.addEventListener("input", ()=>{ state.bpm = Math.max(40, Math.min(220, Number(bpmInput.value||95))); });
-capoInput.addEventListener("input", ()=>{ state.capo = Math.max(0, Math.min(12, Number(capoInput.value||0))); });
-
-instAcoustic.addEventListener("click", ()=>{
-  state.instrument = "Acoustic";
-
-  instAcoustic.classList.add("active");
-  instElectric.classList.remove("active");
-  instPiano.classList.remove("active");
-});
-
-instElectric.addEventListener("click", ()=>{
-  state.instrument = "Electric";
-
-  instElectric.classList.add("active");
-  instAcoustic.classList.remove("active");
-  instPiano.classList.remove("active");
-});
-
-instPiano.addEventListener("click", ()=>{
-  state.instrument = "Piano";
-
-  instPiano.classList.add("active");
-  instAcoustic.classList.remove("active");
-  instElectric.classList.remove("active");
-});
-function setDrumStyle(s){
-  state.drumStyle = s;
-
-  // Remove active from all drum buttons
-  [drumRock, drumHardRock, drumPop, drumRap,
-   mRock, mHardRock, mPop, mRap].forEach(btn=>{
-    if(btn) btn.classList.remove("active");
-  });
-
-  // Activate correct ones
-  if(s === "Rock"){
-    drumRock.classList.add("active");
-    mRock.classList.add("active");
+  function loadProjectById(id){
+    const all = loadAllProjects();
+    const p = all.find(x => x.id === id);
+    if(!p) return;
+    state.project = p;
+    upsertProject(state.project);
+    renderAll();
   }
-  if(s === "Hard Rock"){
-    drumHardRock.classList.add("active");
-    mHardRock.classList.add("active");
+
+  /***********************
+   * Syllable count (simple)
+   ***********************/
+  function countSyllablesInline(text){
+    const s = String(text||"").toLowerCase().replace(/[^a-z\s']/g," ").trim();
+    if(!s) return 0;
+    const words = s.split(/\s+/).filter(Boolean);
+    let total = 0;
+    for(const w0 of words){
+      let w = w0.replace(/'s$/,"").replace(/'$/,"");
+      if(!w) continue;
+      // simple heuristic
+      w = w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/,"");
+      w = w.replace(/^y/,"");
+      const m = w.match(/[aeiouy]{1,2}/g);
+      total += m ? m.length : 1;
+    }
+    return total;
   }
-  if(s === "Pop"){
-    drumPop.classList.add("active");
-    mPop.classList.add("active");
+
+  /***********************
+   * Panel hide/show
+   ***********************/
+  function setPanelHidden(hidden){
+    el.panelBody.classList.toggle("hidden", hidden);
+    el.togglePanelBtn.textContent = hidden ? "Show" : "Hide";
+    el.miniBar.classList.toggle("show", hidden);
   }
-  if(s === "Rap"){
-    drumRap.classList.add("active");
-    mRap.classList.add("active");
+
+  /***********************
+   * Render all
+   ***********************/
+  function renderAll(){
+    renderProjectsDropdown();
+    renderTabs();
+    renderSheet();
+    renderRecordings();
   }
-}
-drumRock.addEventListener("click", ()=>setDrumStyle("Rock"));
-drumHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
-drumPop.addEventListener("click", ()=>setDrumStyle("Pop"));
-drumRap.addEventListener("click", ()=>setDrumStyle("Rap"));
-mRock.addEventListener("click", ()=>setDrumStyle("Rock"));
-mHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
-mPop.addEventListener("click", ()=>setDrumStyle("Pop"));
-mRap.addEventListener("click", ()=>setDrumStyle("Rap"));
 
-autoPlayBtn.addEventListener("click", async ()=>{
-  if(state.autoPlay) stopAutoPlay();
-  else await startAutoPlay();
-});
+  /***********************
+   * Wire buttons (THE IMPORTANT FIX)
+   ***********************/
+  function wire(){
+    // panel
+    el.togglePanelBtn.addEventListener("click", () => {
+      const hidden = !el.panelBody.classList.contains("hidden");
+      setPanelHidden(hidden);
+    });
 
-mScrollBtn.addEventListener("click", async ()=>{
-  if(state.autoPlay) stopAutoPlay();
-  else await startAutoPlay();
-});
+    // autosplit
+    el.autoSplitBtn.addEventListener("click", () => {
+      state.autoSplit = !state.autoSplit;
+      el.autoSplitBtn.classList.toggle("active", state.autoSplit);
+      el.autoSplitBtn.textContent = "AutoSplit: " + (state.autoSplit ? "ON" : "OFF");
+    });
 
-recordBtn.addEventListener("click", async ()=>{ recording ? stopRecording() : await startRecording(); });
-mRecordBtn.addEventListener("click", async ()=>{ recording ? stopRecording() : await startRecording(); });
+    // bpm / capo
+    el.bpmInput.addEventListener("input", () => {
+      state.bpm = clamp(parseInt(el.bpmInput.value || "95",10) || 95, 40, 220);
+      el.bpmInput.value = String(state.bpm);
+    });
+    el.capoInput.addEventListener("input", () => {
+      state.capo = clamp(parseInt(el.capoInput.value || "0",10) || 0, 0, 12);
+      el.capoInput.value = String(state.capo);
+    });
 
-sortSelect.addEventListener("change", renderProjectsDropdown);
+    // ✅ instrument listeners (FIXED)
+    el.instAcoustic.addEventListener("click", () => setInstrument("acoustic"));
+    el.instElectric.addEventListener("click", () => setInstrument("electric"));
+    el.instPiano.addEventListener("click", () => setInstrument("piano"));
 
-projectSelect.addEventListener("change", async ()=>{
-  const id = projectSelect.value;
-  const p = await dbGet(STORE_PROJECTS, id);
-  if(!p) return;
-  project = p;
-  state.projectId = p.id;
-  state.projectName = p.name;
-  updateKeyFromAllNotes();
-  renderAll();
-  renderRecordings();
-});
+    // ✅ drum listeners (FIXED)
+    el.drumRock.addEventListener("click", () => setDrumStyle("rock"));
+    el.drumHardRock.addEventListener("click", () => setDrumStyle("hardrock"));
+    el.drumPop.addEventListener("click", () => setDrumStyle("pop"));
+    el.drumRap.addEventListener("click", () => setDrumStyle("rap"));
 
-renameProjectBtn.addEventListener("click", renameProject);
-deleteProjectBtn.addEventListener("click", deleteCurrentProject);
+    el.mRock.addEventListener("click", () => setDrumStyle("rock"));
+    el.mHardRock.addEventListener("click", () => setDrumStyle("hardrock"));
+    el.mPop.addEventListener("click", () => setDrumStyle("pop"));
+    el.mRap.addEventListener("click", () => setDrumStyle("rap"));
 
-rBtn.addEventListener("click", async ()=>{
-  blinkOnce();
-  const w = getLastWordFromFocused();
-  await showRhymesFor(w);
-});
-hideRhymeBtn.addEventListener("click", ()=>{ rhymeDock.style.display="none"; });
+    // ✅ AutoScroll ONLY (FIXED)
+    el.autoPlayBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
+    el.mScrollBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
 
-/* -----------------------------
-   Init
-------------------------------*/
-(async function init(){
-  await ensureProject();
-  setAutoSplitUI();
-  setPanelCollapsed(false);
-  renderTabs();
-  updateKeyFromAllNotes();
-  renderAll();
-})();
+    // recording buttons
+    el.recordBtn.addEventListener("click", startRecording);
+    el.mRecordBtn.addEventListener("click", startRecording);
+
+    // project dropdown
+    el.sortSelect.addEventListener("change", renderProjectsDropdown);
+    el.projectSelect.addEventListener("change", () => loadProjectById(el.projectSelect.value));
+
+    // rename/delete project
+    el.renameProjectBtn.addEventListener("click", () => {
+      const name = prompt("Project name:", state.project?.name || "");
+      if(name === null) return;
+      state.project.name = name.trim() || "Untitled";
+      state.project.updatedAt = now();
+      upsertProject(state.project);
+      renderProjectsDropdown();
+    });
+
+    el.deleteProjectBtn.addEventListener("click", () => {
+      if(!state.project) return;
+      if(!confirm(`Delete project "${state.project.name}"?`)) return;
+      deleteProject(state.project.id);
+      state.project = getCurrentProject();
+      renderAll();
+    });
+
+    // rhyme dock
+    el.rBtn.addEventListener("click", () => {
+      const showing = el.rhymeDock.style.display === "block";
+      el.rhymeDock.style.display = showing ? "none" : "block";
+    });
+    el.hideRhymeBtn.addEventListener("click", () => {
+      el.rhymeDock.style.display = "none";
+    });
+  }
+
+  /***********************
+   * Init
+   ***********************/
+  function init(){
+    state.project = getCurrentProject();
+
+    // initial UI
+    el.autoSplitBtn.textContent = "AutoSplit: ON";
+    el.autoSplitBtn.classList.add("active");
+
+    // defaults
+    setInstrument("piano");
+    setDrumStyle("rap");
+    setPanelHidden(false);
+    setAutoScroll(false);
+
+    wire();
+    renderAll();
+  }
+
+  init();
 })();
