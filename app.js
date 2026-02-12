@@ -1506,10 +1506,53 @@ async function fetchDatamuseNearRhymes(word, max = 24){
   }
 
   async function renderRhymes(seed){
-    let list = await fetchDatamuseRhymes(seed, 24);
+  // 1) decide what word we’re rhyming
+  let word = (seed || "").trim();
 
-if(!list || list.length === 0){
-  list = await fetchDatamuseNearRhymes(seed, 24);
+  // Beat-Sheet-style fallback: if seed is empty, use the last word typed
+  if(!word){
+    const ta = (typeof lastTextarea !== "undefined" && lastTextarea) ? lastTextarea : null;
+    const txt = ta && typeof ta.value === "string" ? ta.value : "";
+    const m = txt.match(/([A-Za-z']+)\W*$/); // last word
+    if(m) word = m[1];
+  }
+
+  // 2) reset UI immediately
+  el.rhymeWords.innerHTML = "";
+  el.rhymeTitle.textContent = word ? `Rhymes: ${word}` : "Rhymes";
+
+  const status = document.createElement("div");
+  status.style.color = "#666";
+  status.style.fontWeight = "900";
+  status.textContent = word ? "Loading…" : "Tap a word (or type a line) to see rhymes.";
+  el.rhymeWords.appendChild(status);
+
+  if(!word) return;
+
+  // 3) fetch rhymes
+  let list = await fetchDatamuseRhymes(word, 24);
+  if(!list || list.length === 0){
+    list = await fetchDatamuseNearRhymes(word, 24);
+  }
+  list = (list || []).filter(Boolean);
+
+  // 4) render
+  el.rhymeWords.innerHTML = "";
+
+  if(list.length === 0){
+    status.textContent = "No good rhymes found (try another word).";
+    el.rhymeWords.appendChild(status);
+    return;
+  }
+
+  list.forEach(w => {
+    const b = document.createElement("div");
+    b.className = "rword"; // matches your existing styling
+    b.textContent = w;
+    b.addEventListener("click", ()=> insertWordIntoLyrics(w));
+    el.rhymeWords.appendChild(b);
+  });
+  }
 }
 
 if(!list) list = [];
