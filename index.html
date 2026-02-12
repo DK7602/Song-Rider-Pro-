@@ -540,14 +540,13 @@
         <button class="btn rec" id="recordBtn">Record</button>
       </div>
 
-      <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
+      <div class="row" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;border-top:1px solid rgba(0,0,0,.06);">
         <select id="sortSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;">
           <option value="az">A–Z</option>
           <option value="recent">Recent</option>
         </select>
 
-        <select id="projectSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;flex:1 1 auto;min-width:120px;"></select>
-
+<select id="projectSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;flex:1;min-width:0;"></select>
         <button class="iconCircle" id="newProjectBtn" title="New Project">＋</button>
         <button class="iconCircle" id="renameProjectBtn" title="Rename Project">✏️</button>
         <button class="iconCircle" id="deleteProjectBtn" title="Delete Project">Ⓧ</button>
