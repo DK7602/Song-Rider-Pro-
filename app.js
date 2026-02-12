@@ -1330,7 +1330,49 @@ while(j >= 0 && vowelsGroup.includes(w[j])) j--;
 
 return w.slice(j+1);
   }
+// ============================
+// DATAMUSE RHYME FETCH (Beat Sheet style)
+// ============================
 
+async function fetchDatamuseRhymes(word, max = 24){
+  const w = normalizeWord(word);
+  if(!w) return [];
+
+  const url = `https://api.datamuse.com/words?rel_rhy=${encodeURIComponent(w)}&max=${max}`;
+
+  try{
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) return [];
+    const data = await res.json();
+
+    return data
+      .map(x => x.word)
+      .filter(Boolean)
+      .slice(0, max);
+  }catch(e){
+    return [];
+  }
+}
+
+async function fetchDatamuseNearRhymes(word, max = 24){
+  const w = normalizeWord(word);
+  if(!w) return [];
+
+  const url = `https://api.datamuse.com/words?rel_nry=${encodeURIComponent(w)}&max=${max}`;
+
+  try{
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) return [];
+    const data = await res.json();
+
+    return data
+      .map(x => x.word)
+      .filter(Boolean)
+      .slice(0, max);
+  }catch(e){
+    return [];
+  }
+}
   function wordsFromProject(){
     // pull words from all lyrics to boost suggestions
     const set = new Set();
