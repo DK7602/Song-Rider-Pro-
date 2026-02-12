@@ -1,4 +1,4 @@
-/* Song Rider Pro - app.js (FULL REPLACE v17) */
+/* Song Rider Pro - app.js (FULL REPLACE v18) */
 (() => {
   "use strict";
 
@@ -9,7 +9,6 @@
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const now = () => Date.now();
 
-  // crypto.randomUUID fallback (older Android WebViews)
   function uuid(){
     if (window.crypto?.randomUUID) return window.crypto.randomUUID();
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -46,8 +45,8 @@
     mPop: $("mPop"),
     mRap: $("mRap"),
 
-    autoPlayBtn: $("autoPlayBtn"), // scroll only
-    mScrollBtn: $("mScrollBtn"),   // scroll only
+    autoPlayBtn: $("autoPlayBtn"),
+    mScrollBtn: $("mScrollBtn"),
 
     recordBtn: $("recordBtn"),
     mRecordBtn: $("mRecordBtn"),
@@ -64,6 +63,7 @@
     sheetTitle: $("sheetTitle"),
     sheetHint: $("sheetHint"),
     sheetBody: $("sheetBody"),
+    sheetActions: $("sheetActions"),
 
     rBtn: $("rBtn"),
     rhymeDock: $("rhymeDock"),
@@ -79,8 +79,16 @@
   /***********************
    * Project storage (localStorage)
    ***********************/
-  const LS_KEY = "songrider_v17_projects";
-  const LS_CUR = "songrider_v17_currentProjectId";
+  const LS_KEY = "songrider_v18_projects";
+  const LS_CUR = "songrider_v18_currentProjectId";
+
+  function newLine(){
+    return {
+      id: uuid(),
+      lyrics: "",
+      notes: Array(8).fill("Not")
+    };
+  }
 
   function defaultProject(name="New Song"){
     return {
@@ -109,6 +117,7 @@
   function upsertProject(p){
     const all = loadAllProjects();
     const i = all.findIndex(x => x.id === p.id);
+    p.updatedAt = now();
     if(i >= 0) all[i] = p;
     else all.unshift(p);
     saveAllProjects(all);
@@ -135,7 +144,7 @@
   /***********************
    * IndexedDB (Recordings)
    ***********************/
-  const DB_NAME = "songrider_db_v17";
+  const DB_NAME = "songrider_db_v18";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -193,30 +202,30 @@
     capo: 0,
     autoSplit: true,
 
-    // audio toggles
     instrument: "piano",
     instrumentOn: false,
 
     drumStyle: "rap",
     drumsOn: false,
 
-    // autoscroll only
     autoScrollOn: false,
     autoScrollTimer: null,
 
-    // audio
     ctx: null,
     drumTimer: null,
     instNodes: null,
 
-    // recordings playback
-    currentAudio: null
+    currentAudio: null,
+
+    // recording
+    isRecording: false,
+    recStream: null,
+    rec: null,
+    recChunks: []
   };
 
   /***********************
-   * Audio (very lightweight “demo” engine)
-   * - Drum loop: kick/snare/hat based on style
-   * - Instrument: simple chord pad / pluck pattern per instrument
+   * Audio (demo engine)
    ***********************/
   function ensureCtx(){
     if(!state.ctx){
@@ -265,7 +274,6 @@
   }
 
   function drumHit(kind){
-    // super-simple: kick = low sine, snare/hat = noise + tiny tone
     if(kind === "kick") beep(70, 90, 0.16);
     if(kind === "snare"){ noise(60, 0.10); beep(180, 40, 0.04); }
     if(kind === "hat"){ noise(25, 0.05); }
@@ -284,18 +292,14 @@
     state.drumsOn = true;
 
     const bpm = clamp(state.bpm || 95, 40, 220);
-    const stepMs = Math.round((60000 / bpm) / 2); // 8th notes
+    const stepMs = Math.round((60000 / bpm) / 2);
     let step = 0;
 
     state.drumTimer = setInterval(() => {
       if(!state.drumsOn) return;
-
-      // 16-step pattern (8th = step, so 16 steps = 2 bars of 4/4 at 8ths)
       const s = step % 16;
 
-      // styles
       if(state.drumStyle === "rap"){
-        // kick on 1, “and” of 2, 3; snare on 2 & 4; hats steady
         if(s === 0 || s === 6 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
         drumHit("hat");
@@ -307,10 +311,9 @@
         if(s === 0 || s === 2 || s === 8 || s === 10) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
         drumHit("hat");
-      } else { // pop
+      } else {
         if(s === 0 || s === 7 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
-        // lighter hats
         if(s % 2 === 0) drumHit("hat");
       }
 
@@ -319,14 +322,10 @@
   }
 
   function stopInstrument(){
-    const ctx = ensureCtx();
+    ensureCtx();
     if(state.instNodes){
-      try{
-        state.instNodes.oscs.forEach(o => o.stop());
-      }catch{}
-      try{
-        state.instNodes.gain.disconnect();
-      }catch{}
+      try{ state.instNodes.oscs.forEach(o => o.stop()); }catch{}
+      try{ state.instNodes.gain.disconnect(); }catch{}
       state.instNodes = null;
     }
     state.instrumentOn = false;
@@ -337,8 +336,6 @@
     state.instrumentOn = true;
 
     const ctx = ensureCtx();
-
-    // simple “C major” pad so you can hear ON/OFF clearly
     const freqs = [261.63, 329.63, 392.00]; // C E G
     const oscs = freqs.map(f => {
       const o = ctx.createOscillator();
@@ -371,7 +368,6 @@
   }
 
   function renderInstrumentUI(){
-    // green only when instrumentOn AND it matches
     const map = { acoustic:"instAcoustic", electric:"instElectric", piano:"instPiano" };
     const active = state.instrumentOn ? map[state.instrument] : null;
     setActive(Object.values(map), active);
@@ -380,10 +376,8 @@
   function renderDrumUI(){
     const map = { rock:"drumRock", hardrock:"drumHardRock", pop:"drumPop", rap:"drumRap" };
     const mapMini = { rock:"mRock", hardrock:"mHardRock", pop:"mPop", rap:"mRap" };
-
     const active = state.drumsOn ? map[state.drumStyle] : null;
     setActive(Object.values(map), active);
-
     const activeMini = state.drumsOn ? mapMini[state.drumStyle] : null;
     setActive(Object.values(mapMini), activeMini);
   }
@@ -410,8 +404,14 @@
     el.miniBar.classList.toggle("show", hidden);
   }
 
+  function setRecordUI(){
+    const label = state.isRecording ? "Stop" : "Record";
+    if(el.recordBtn) el.recordBtn.textContent = label;
+    if(el.mRecordBtn) el.mRecordBtn.textContent = label;
+  }
+
   /***********************
-   * Tabs + editor
+   * Sections + editor
    ***********************/
   function ensureSectionArray(sec){
     if(sec === "Full") return [];
@@ -435,23 +435,6 @@
     });
   }
 
-  function buildFullPreviewText(){
-    const out = [];
-    SECTIONS.filter(s => s !== "Full").forEach(sec => {
-      const arr = state.project.sections[sec] || [];
-      const hasAny = arr.some(x => String(x.lyrics || "").trim());
-      if(!hasAny) return;
-      out.push(sec.toUpperCase());
-      out.push("");
-      arr.forEach(line => {
-        const t = String(line.lyrics || "").trim();
-        if(t) out.push(t);
-      });
-      out.push("");
-    });
-    return out.join("\n").trim() || "(No lyrics yet — start typing in a section)";
-  }
-
   function countSyllablesInline(text){
     const s = String(text||"").toLowerCase().replace(/[^a-z\s']/g," ").trim();
     if(!s) return 0;
@@ -468,102 +451,45 @@
     return total;
   }
 
-  function renderSheet(){
-    el.sheetTitle.textContent = state.currentSection;
-
-    if(state.currentSection === "Full"){
-      el.sheetHint.textContent = "Full Sheet Preview (auto from your cards):";
-      el.sheetBody.innerHTML = "";
-
-      const wrap = document.createElement("div");
-      wrap.className = "fullBoxWrap";
-
-      const ta = document.createElement("textarea");
-      ta.className = "fullBox";
-      ta.readOnly = true;
-      ta.value = buildFullPreviewText();
-
-      wrap.appendChild(ta);
-      el.sheetBody.appendChild(wrap);
-      return;
-    }
-
-    el.sheetHint.textContent = "";
-    const cardsWrap = document.createElement("div");
-    cardsWrap.className = "cards";
-
-    const arr = ensureSectionArray(state.currentSection);
-    if(arr.length === 0){
-      arr.push({ lyrics:"", notes:Array(8).fill("Not") });
-    }
-
-    arr.forEach((line, idx) => {
-      const card = document.createElement("div");
-      card.className = "card";
-
-      const top = document.createElement("div");
-      top.className = "cardTop";
-
-      const num = document.createElement("div");
-      num.className = "cardNum";
-      num.textContent = String(idx + 1);
-
-      const syll = document.createElement("div");
-      syll.className = "syllPill";
-      syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
-
-      top.appendChild(num);
-      top.appendChild(syll);
-
-      const notesRow = document.createElement("div");
-      notesRow.className = "notesRow";
-      const notes = Array.isArray(line.notes) ? line.notes : Array(8).fill("Not");
-
-      for(let i=0;i<8;i++){
-        const inp = document.createElement("input");
-        inp.className = "noteCell";
-        inp.value = notes[i] ?? "Not";
-        inp.addEventListener("input", () => {
-          notes[i] = String(inp.value || "").trim() || "Not";
-          line.notes = notes;
-          state.project.updatedAt = now();
-          upsertProject(state.project);
-          updateKeyFromAllNotes();
-        });
-        notesRow.appendChild(inp);
-      }
-
-      const lyr = document.createElement("textarea");
-      lyr.className = "lyrics";
-      lyr.placeholder = "Type lyrics (AutoSplit on)…";
-      lyr.value = line.lyrics || "";
-      lyr.addEventListener("input", () => {
-        line.lyrics = lyr.value;
-        state.project.updatedAt = now();
-        upsertProject(state.project);
-        syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
-      });
-
-      card.appendChild(top);
-      card.appendChild(notesRow);
-      card.appendChild(lyr);
-
-      cardsWrap.appendChild(card);
-    });
-
-    el.sheetBody.innerHTML = "";
-    el.sheetBody.appendChild(cardsWrap);
-  }
-
   /***********************
-   * Key detection + capo transpose (display only)
+   * Capo transpose helpers (display)
    ***********************/
   const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
   };
   const PC_TO_NAME = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+  function parseRootToken(token){
+    const s = String(token||"").trim();
+    if(!s) return null;
+    // match root like C, C#, Db then keep rest (Am7, Gsus4, etc.)
+    const m = s.match(/^([A-Ga-g])([#bB])?(.*)$/);
+    if(!m) return null;
+    const L = m[1].toUpperCase();
+    const acc = (m[2] || "").toUpperCase();
+    const rest = m[3] || "";
+    const key = L + (acc === "B" ? "B" : acc === "#" ? "#" : "");
+    const pc = NOTE_TO_PC[key];
+    if(pc === undefined) return null;
+    return { pc, rest };
+  }
+
+  function transposeToken(token, semis){
+    const t = parseRootToken(token);
+    if(!t) return token;
+    const pc2 = (t.pc + (semis % 12) + 12) % 12;
+    return PC_TO_NAME[pc2] + t.rest;
+  }
+
   const MAJOR_PROFILE = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
   const MINOR_PROFILE = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+  function dot(a,b){ let s=0; for(let i=0;i<12;i++) s += (a[i]||0) * (b[i]||0); return s; }
+  function norm(v){ return Math.sqrt(v.reduce((a,x)=>a+(x*x),0)) || 1; }
+  function rotate(arr, t){
+    const out = Array(12).fill(0);
+    for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
+    return out;
+  }
 
   function noteToPC(n){
     const s = String(n||"").trim().toUpperCase();
@@ -575,13 +501,7 @@
     const key = root + (acc === "B" ? "B" : acc === "#" ? "#" : "");
     return NOTE_TO_PC[key] ?? null;
   }
-  function dot(a,b){ let s=0; for(let i=0;i<12;i++) s += (a[i]||0) * (b[i]||0); return s; }
-  function norm(v){ return Math.sqrt(v.reduce((a,x)=>a+(x*x),0)) || 1; }
-  function rotate(arr, t){
-    const out = Array(12).fill(0);
-    for(let i=0;i<12;i++) out[(i+t)%12] = arr[i];
-    return out;
-  }
+
   function keyFromHistogram(hist){
     const hn = norm(hist);
     let best = { score:-1e9, pc:0, mode:"maj" };
@@ -610,13 +530,223 @@
     });
 
     const k = keyFromHistogram(hist);
-    // ✅ capo transpose display
     const transposedPC = (k.pc + (state.capo % 12) + 12) % 12;
     el.keyOutput.value = `${PC_TO_NAME[transposedPC]} ${k.mode}`;
   }
 
   /***********************
-   * Recordings UI (same as before)
+   * Full preview (lyrics + notes)
+   ***********************/
+  function buildFullPreviewText(){
+    const out = [];
+    const semis = state.capo % 12;
+
+    let any = false;
+
+    SECTIONS.filter(s => s !== "Full").forEach(sec => {
+      const arr = state.project.sections[sec] || [];
+      const hasAny = arr.some(x => String(x.lyrics || "").trim() || (Array.isArray(x.notes) && x.notes.some(n => String(n||"").trim() && String(n).trim() !== "Not")));
+      if(!hasAny) return;
+
+      any = true;
+      out.push(sec.toUpperCase());
+      out.push("");
+
+      arr.forEach((line, idx) => {
+        const lyr = String(line.lyrics || "").trim();
+        const notes = Array.isArray(line.notes) ? line.notes : [];
+        const notesClean = notes.map(n => String(n ?? "").trim() || "Not");
+
+        // capo-transposed display for notes ONLY in the Full preview
+        const notesTx = notesClean.map(n => {
+          if(!n || n.toLowerCase() === "not") return "Not";
+          return transposeToken(n, semis);
+        });
+
+        const notesLine = notesTx.join(" | ");
+        const hasNotes = notesTx.some(n => n !== "Not");
+
+        if(hasNotes) out.push(`(${idx+1})  ${notesLine}`);
+        if(lyr) out.push(`     ${lyr}`);
+        if(hasNotes || lyr) out.push("");
+      });
+
+      out.push("");
+    });
+
+    return any ? out.join("\n").trim() : "(No lyrics/notes yet — start typing in a section)";
+  }
+
+  function updateFullIfVisible(){
+    if(state.currentSection !== "Full") return;
+    const ta = el.sheetBody.querySelector("textarea.fullBox");
+    if(ta) ta.value = buildFullPreviewText();
+  }
+
+  /***********************
+   * Sheet rendering
+   ***********************/
+  function renderSheetActions(){
+    el.sheetActions.innerHTML = "";
+
+    if(state.currentSection === "Full") return;
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn secondary";
+    addBtn.textContent = "+ Line";
+    addBtn.title = "Add another card (line)";
+    addBtn.addEventListener("click", () => {
+      const arr = ensureSectionArray(state.currentSection);
+      arr.push(newLine());
+      upsertProject(state.project);
+      renderSheet();
+      updateFullIfVisible();
+    });
+
+    el.sheetActions.appendChild(addBtn);
+  }
+
+  function renderSheet(){
+    el.sheetTitle.textContent = state.currentSection;
+    renderSheetActions();
+
+    if(state.currentSection === "Full"){
+      el.sheetHint.textContent = "Full Sheet Preview (auto from your cards):";
+      el.sheetBody.innerHTML = "";
+
+      const wrap = document.createElement("div");
+      wrap.className = "fullBoxWrap";
+
+      const ta = document.createElement("textarea");
+      ta.className = "fullBox";
+      ta.readOnly = true;
+      ta.value = buildFullPreviewText();
+
+      wrap.appendChild(ta);
+      el.sheetBody.appendChild(wrap);
+      return;
+    }
+
+    el.sheetHint.textContent = "";
+    const cardsWrap = document.createElement("div");
+    cardsWrap.className = "cards";
+
+    const arr = ensureSectionArray(state.currentSection);
+    if(arr.length === 0){
+      arr.push(newLine());
+      upsertProject(state.project);
+    }
+
+    arr.forEach((line, idx) => {
+      // normalize
+      if(!Array.isArray(line.notes)) line.notes = Array(8).fill("Not");
+
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const top = document.createElement("div");
+      top.className = "cardTop";
+
+      const num = document.createElement("div");
+      num.className = "cardNum";
+      num.textContent = String(idx + 1);
+      num.title = "Long-press to delete this line";
+
+      // Long-press to delete (mobile friendly, no clutter)
+      let pressTimer = null;
+      const startPress = () => {
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+          if(!confirm(`Delete line ${idx+1} from ${state.currentSection}?`)) return;
+          arr.splice(idx, 1);
+          if(arr.length === 0) arr.push(newLine());
+          upsertProject(state.project);
+          renderSheet();
+          updateFullIfVisible();
+        }, 650);
+      };
+      const endPress = () => clearTimeout(pressTimer);
+
+      num.addEventListener("touchstart", startPress, {passive:true});
+      num.addEventListener("touchend", endPress);
+      num.addEventListener("touchcancel", endPress);
+      num.addEventListener("mousedown", startPress);
+      num.addEventListener("mouseup", endPress);
+      num.addEventListener("mouseleave", endPress);
+
+      const syll = document.createElement("div");
+      syll.className = "syllPill";
+      syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
+
+      top.appendChild(num);
+      top.appendChild(syll);
+
+      const notesRow = document.createElement("div");
+      notesRow.className = "notesRow";
+
+      for(let i=0;i<8;i++){
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "noteCell";
+        inp.value = (line.notes[i] ?? "Not");
+        inp.autocomplete = "off";
+        inp.autocapitalize = "characters";
+        inp.spellcheck = false;
+
+        // ensures taps always focus the input
+        inp.addEventListener("pointerdown", (e)=>{ e.stopPropagation(); });
+
+        inp.addEventListener("input", () => {
+          const v = String(inp.value || "").trim();
+          line.notes[i] = v || "Not";
+          upsertProject(state.project);
+          updateKeyFromAllNotes();
+          updateFullIfVisible();
+        });
+
+        notesRow.appendChild(inp);
+      }
+
+      const lyr = document.createElement("textarea");
+      lyr.className = "lyrics";
+      lyr.placeholder = "Type lyrics (AutoSplit on)…";
+      lyr.value = line.lyrics || "";
+
+      lyr.addEventListener("input", () => {
+        line.lyrics = lyr.value;
+        syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
+        upsertProject(state.project);
+        updateFullIfVisible();
+
+        // AutoSplit: pressing Enter creates a new line/card
+        if(state.autoSplit && lyr.value.includes("\n")){
+          const parts = lyr.value.split("\n");
+          const first = parts.shift();
+          line.lyrics = first;
+          const rest = parts.join("\n").trim();
+          if(rest){
+            const nl = newLine();
+            nl.lyrics = rest;
+            arr.splice(idx+1, 0, nl);
+          }
+          upsertProject(state.project);
+          renderSheet();
+          updateFullIfVisible();
+        }
+      });
+
+      card.appendChild(top);
+      card.appendChild(notesRow);
+      card.appendChild(lyr);
+      cardsWrap.appendChild(card);
+    });
+
+    el.sheetBody.innerHTML = "";
+    el.sheetBody.appendChild(cardsWrap);
+  }
+
+  /***********************
+   * Recordings UI
    ***********************/
   function fmtDate(ms){
     try{ return new Date(ms).toLocaleString(); }catch{ return String(ms); }
@@ -625,7 +755,6 @@
   async function renderRecordings(){
     const all = await dbGetAll();
     const mine = all.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-
     el.recordingsList.innerHTML = "";
 
     if(mine.length === 0){
@@ -735,32 +864,65 @@
       row.appendChild(stop);
       row.appendChild(download);
       row.appendChild(del);
-
       el.recordingsList.appendChild(row);
     });
   }
 
+  /***********************
+   * Recording start/stop (FIXED)
+   ***********************/
   async function startRecording(){
+    // iOS/Safari sometimes needs user gesture; we already have click
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-    const chunks = [];
-    const rec = new MediaRecorder(stream);
 
-    rec.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+    state.recStream = stream;
+    state.recChunks = [];
+
+    const rec = new MediaRecorder(stream);
+    state.rec = rec;
+
+    rec.ondataavailable = (e) => { if(e.data && e.data.size) state.recChunks.push(e.data); };
+
     rec.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop());
-      const blob = new Blob(chunks, { type: "audio/webm" });
+      try{ stream.getTracks().forEach(t => t.stop()); }catch{}
+      const blob = new Blob(state.recChunks, { type: "audio/webm" });
       const item = { id: uuid(), createdAt: now(), title: "", blob };
       await dbPut(item);
       await renderRecordings();
+      state.rec = null;
+      state.recStream = null;
+      state.recChunks = [];
     };
 
     rec.start();
+    state.isRecording = true;
+    setRecordUI();
     beep(880, 60, 0.12);
-    setTimeout(() => rec.stop(), 8000);
+  }
+
+  async function stopRecording(){
+    if(!state.rec) return;
+    try{
+      state.rec.stop();
+    }catch{}
+    state.isRecording = false;
+    setRecordUI();
+    beep(220, 60, 0.10);
+  }
+
+  async function toggleRecording(){
+    try{
+      if(state.isRecording) await stopRecording();
+      else await startRecording();
+    }catch(e){
+      state.isRecording = false;
+      setRecordUI();
+      alert("Recording failed. Make sure mic permission is allowed for this site.");
+    }
   }
 
   /***********************
-   * Projects dropdown
+   * Projects dropdown (FIXED)
    ***********************/
   function renderProjectsDropdown(){
     const all = loadAllProjects();
@@ -781,6 +943,14 @@
       if(state.project && p.id === state.project.id) opt.selected = true;
       el.projectSelect.appendChild(opt);
     });
+
+    // If for any reason dropdown ends empty, recreate one project
+    if(el.projectSelect.options.length === 0){
+      const p = defaultProject("New Song");
+      upsertProject(p);
+      state.project = p;
+      renderProjectsDropdown();
+    }
   }
 
   function loadProjectById(id){
@@ -793,10 +963,9 @@
   }
 
   /***********************
-   * Rhymes (simple stub so box always opens)
+   * Rhymes (always opens)
    ***********************/
   const DEMO_RHYMES = ["flow", "go", "show", "pro", "mode", "road", "cold", "bold", "gold", "hold"];
-
   function renderRhymes(){
     el.rhymeWords.innerHTML = "";
     DEMO_RHYMES.forEach(w => {
@@ -810,7 +979,6 @@
       el.rhymeWords.appendChild(b);
     });
   }
-
   function toggleRhymeDock(show){
     el.rhymeDock.style.display = show ? "block" : "none";
   }
@@ -826,10 +994,11 @@
     renderInstrumentUI();
     renderDrumUI();
     updateKeyFromAllNotes();
+    setRecordUI();
   }
 
   /***********************
-   * Button wiring
+   * Wiring
    ***********************/
   function wire(){
     // panel
@@ -838,7 +1007,7 @@
       setPanelHidden(hidden);
     });
 
-    // autosplit UI only
+    // autosplit
     el.autoSplitBtn.addEventListener("click", () => {
       state.autoSplit = !state.autoSplit;
       el.autoSplitBtn.classList.toggle("active", state.autoSplit);
@@ -849,17 +1018,19 @@
     el.bpmInput.addEventListener("input", () => {
       state.bpm = clamp(parseInt(el.bpmInput.value || "95",10) || 95, 40, 220);
       el.bpmInput.value = String(state.bpm);
-      if(state.drumsOn) startDrums(); // re-time drums live
+      if(state.drumsOn) startDrums();
     });
+
     el.capoInput.addEventListener("input", () => {
       state.capo = clamp(parseInt(el.capoInput.value || "0",10) || 0, 0, 12);
       el.capoInput.value = String(state.capo);
       updateKeyFromAllNotes();
+      updateFullIfVisible();
     });
 
-    // ✅ Instruments: tap = ON, tap same again = OFF
+    // instruments
     function handleInstrument(which){
-      ensureCtx(); // unlock audio
+      ensureCtx();
       if(state.instrument === which && state.instrumentOn){
         stopInstrument();
       }else{
@@ -868,14 +1039,13 @@
       }
       renderInstrumentUI();
     }
-
     el.instAcoustic.addEventListener("click", () => handleInstrument("acoustic"));
     el.instElectric.addEventListener("click", () => handleInstrument("electric"));
     el.instPiano.addEventListener("click", () => handleInstrument("piano"));
 
-    // ✅ Drums: tap = ON, tap same again = OFF, switch style while playing
+    // drums
     function handleDrums(which){
-      ensureCtx(); // unlock audio
+      ensureCtx();
       if(state.drumStyle === which && state.drumsOn){
         stopDrums();
       }else{
@@ -884,7 +1054,6 @@
       }
       renderDrumUI();
     }
-
     el.drumRock.addEventListener("click", () => handleDrums("rock"));
     el.drumHardRock.addEventListener("click", () => handleDrums("hardrock"));
     el.drumPop.addEventListener("click", () => handleDrums("pop"));
@@ -895,13 +1064,13 @@
     el.mPop.addEventListener("click", () => handleDrums("pop"));
     el.mRap.addEventListener("click", () => handleDrums("rap"));
 
-    // ✅ AutoScroll ONLY
+    // autoscroll ONLY
     el.autoPlayBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
     el.mScrollBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
 
-    // recording
-    el.recordBtn.addEventListener("click", startRecording);
-    el.mRecordBtn.addEventListener("click", startRecording);
+    // recording (FIXED toggle)
+    el.recordBtn.addEventListener("click", toggleRecording);
+    el.mRecordBtn.addEventListener("click", toggleRecording);
 
     // projects
     el.sortSelect.addEventListener("change", renderProjectsDropdown);
@@ -922,7 +1091,6 @@
       const name = prompt("Project name:", state.project.name || "");
       if(name === null) return;
       state.project.name = name.trim() || "Untitled";
-      state.project.updatedAt = now();
       upsertProject(state.project);
       renderProjectsDropdown();
     });
@@ -956,12 +1124,13 @@
     setPanelHidden(false);
     setAutoScroll(false);
 
-    // start with everything OFF visually
     state.instrumentOn = false;
     state.drumsOn = false;
+
     renderRhymes();
     toggleRhymeDock(false);
 
+    setRecordUI();
     wire();
     renderAll();
   }
