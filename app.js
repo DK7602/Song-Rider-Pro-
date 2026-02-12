@@ -1318,15 +1318,17 @@
     if(/(ew|ue|oo)$/.test(w)) return "oo";
     if(/ough$/.test(w)) return "oo"; // rough-ish is imperfect but helps
 
-    const vowels = "aeiouy";
-    let i = w.length - 1;
-    while(i >= 0 && !vowels.includes(w[i])) i--;
-    if(i < 0) return w.slice(Math.max(0, w.length-3));
+    const vowelsAny = "aeiouy";
+const vowelsGroup = "aeiou"; // <-- don't let leading 'y' eat the whole word
 
-    let j = i;
-    while(j >= 0 && vowels.includes(w[j])) j--;
+let i = w.length - 1;
+while(i >= 0 && !vowelsAny.includes(w[i])) i--;
+if(i < 0) return w.slice(Math.max(0, w.length-3));
 
-    return w.slice(j+1);
+let j = i;
+while(j >= 0 && vowelsGroup.includes(w[j])) j--;
+
+return w.slice(j+1);
   }
 
   function wordsFromProject(){
