@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v33) */
+/* app.js (FULL REPLACE MAIN v34) */
 (() => {
   "use strict";
 
@@ -316,12 +316,18 @@
     autoScrollTimer: null,
 
     ctx: null,
+    masterGain: null,        // ✅ master bus for app audio
+    recDest: null,           // ✅ MediaStreamDestination for recording mix
+    recWired: false,         // ✅ avoid double-connecting master->recDest
+
     drumTimer: null,
 
     isRecording: false,
-    recStream: null,
     rec: null,
     recChunks: [],
+
+    recMicStream: null,      // ✅ mic stream used only for vocals into recording mix
+    recMicSource: null,      // ✅ AudioNode
 
     beatTimer: null,
     tick8: 0
@@ -362,16 +368,26 @@
   }
 
   /***********************
-   * Audio
+   * Audio (✅ routed through masterGain so we can record it)
    ***********************/
   function ensureCtx(){
     if(!state.ctx){
       state.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // ✅ Master bus: ALL app audio goes here
+      state.masterGain = state.ctx.createGain();
+      state.masterGain.gain.value = 1.0;
+      state.masterGain.connect(state.ctx.destination);
     }
     if(state.ctx.state === "suspended"){
       state.ctx.resume().catch(()=>{});
     }
     return state.ctx;
+  }
+
+  function getOutNode(){
+    ensureCtx();
+    return state.masterGain || state.ctx.destination;
   }
 
   function pluck(freq=440, ms=180, gain=0.08, type="sine"){
@@ -388,7 +404,9 @@
     g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
 
-    o.connect(g); g.connect(ctx.destination);
+    o.connect(g);
+    g.connect(getOutNode()); // ✅ WAS ctx.destination
+
     o.start(t0);
     o.stop(t0 + ms/1000 + 0.02);
   }
@@ -408,7 +426,8 @@
     g.gain.setValueAtTime(gain, t0);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
 
-    src.connect(g); g.connect(ctx.destination);
+    src.connect(g);
+    g.connect(getOutNode()); // ✅ WAS ctx.destination
     src.start();
   }
 
@@ -867,8 +886,6 @@
     return String(s ?? "").trim();
   }
 
-  // notes[0..7] align to beats[0..3] as:
-  // beat1 = notes 0-1, beat2 = notes 2-3, beat3 = notes 4-5, beat4 = notes 6-7
   function buildAlignedLine(line, semis=0){
     const notes = Array.isArray(line?.notes) ? line.notes : Array(8).fill("");
     const beats = Array.isArray(line?.beats) ? line.beats : Array(4).fill("");
@@ -960,7 +977,6 @@
     return any ? out.join("\n").trim() : "(No lyrics/notes yet - start typing in a section)";
   }
 
-  // ✅ NEW: build printable HTML with dark-red notes + black lyrics
   function buildFullPreviewHtmlDoc(title){
     const lines = [];
     SECTIONS.filter(s => s !== "Full").forEach(sec => {
@@ -1019,7 +1035,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${safeTitle}</title>
 <style>
-  :root{ --noteRed:#7f1d1d; } /* ✅ dark red */
+  :root{ --noteRed:#7f1d1d; }
   body{
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     margin:24px;
@@ -1055,8 +1071,6 @@ ${bodyHtml}
 
   /***********************
    * ✅ EXPORT
-   * - .txt stays plain (no colors possible)
-   * - ALSO exports a printable .html with dark-red notes
    ***********************/
   async function exportFullPreview(){
     try{
@@ -1070,19 +1084,16 @@ ${bodyHtml}
         .replace(/[\\/:*?"<>|]+/g, "")
         .trim() || "Song Rider Pro";
 
-      // TXT (compat)
       const txtName = `${safeName} - Full Preview.txt`;
       const txt = "\ufeff" + String(plain).replace(/\n/g, "\r\n");
       const txtBlob = new Blob([txt], { type:"text/plain;charset=utf-8" });
       const txtFile = new File([txtBlob], txtName, { type:"text/plain" });
 
-      // HTML (colored notes)
       const htmlName = `${safeName} - Full Preview (Print).html`;
       const htmlDoc = buildFullPreviewHtmlDoc(`${safeName} - Full Preview`);
       const htmlBlob = new Blob([htmlDoc], { type:"text/html;charset=utf-8" });
       const htmlFile = new File([htmlBlob], htmlName, { type:"text/html" });
 
-      // Try share both (if supported)
       try{
         if(navigator.share && navigator.canShare && navigator.canShare({ files:[txtFile, htmlFile] })){
           await navigator.share({ title: safeName, files: [txtFile, htmlFile] });
@@ -1090,7 +1101,6 @@ ${bodyHtml}
         }
       }catch{}
 
-      // Fallback: download both
       const dl = (blob, name) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -1104,9 +1114,6 @@ ${bodyHtml}
 
       dl(txtBlob, txtName);
       setTimeout(() => dl(htmlBlob, htmlName), 350);
-
-      // Optional hint
-      // alert("Saved .txt + printable .html (notes are dark red in the .html).");
     }catch{
       alert("Export failed on this device/browser.");
     }
@@ -1480,27 +1487,101 @@ ${bodyHtml}
   }
 
   /***********************
-   * Recording
+   * ✅ Recording (FIXED: records vocals + drums + instruments)
    ***********************/
+  function ensureRecordingBus(){
+    const ctx = ensureCtx();
+
+    if(!state.recDest){
+      state.recDest = ctx.createMediaStreamDestination();
+    }
+
+    // ✅ Send app audio (masterGain) into recording destination (once)
+    if(!state.recWired && state.masterGain){
+      try{
+        state.masterGain.connect(state.recDest);
+        state.recWired = true;
+      }catch{}
+    }
+  }
+
+  function pickBestMimeType(){
+    const types = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/ogg"
+    ];
+    for(const t of types){
+      try{
+        if(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t;
+      }catch{}
+    }
+    return ""; // let browser choose
+  }
+
   async function startRecording(){
-    const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-    state.recStream = stream;
+    ensureCtx();
+    ensureRecordingBus();
+
+    // 🎤 Mic (vocals) goes into recording mix (recDest)
+    const micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    state.recMicStream = micStream;
     state.recChunks = [];
 
-    const rec = new MediaRecorder(stream);
+    const ctx = ensureCtx();
+
+    // Create mic source node
+    const micSource = ctx.createMediaStreamSource(micStream);
+    state.recMicSource = micSource;
+
+    // ✅ Route mic into recording destination ONLY (no monitoring to avoid feedback)
+    // If you want to monitor yourself, uncomment the next 2 lines:
+    // const micMon = ctx.createGain(); micMon.gain.value = 0.9; micSource.connect(micMon); micMon.connect(state.masterGain);
+
+    micSource.connect(state.recDest);
+
+    const options = {};
+    const mt = pickBestMimeType();
+    if(mt) options.mimeType = mt;
+
+    const rec = new MediaRecorder(state.recDest.stream, options);
     state.rec = rec;
 
     rec.ondataavailable = (e) => { if(e.data && e.data.size) state.recChunks.push(e.data); };
 
     rec.onstop = async () => {
-      try{ stream.getTracks().forEach(t => t.stop()); }catch{}
-      const blob = new Blob(state.recChunks, { type: "audio/webm" });
+      try{
+        // Disconnect mic from the recording bus
+        if(state.recMicSource){
+          try{ state.recMicSource.disconnect(); }catch{}
+        }
+      }catch{}
+
+      try{
+        if(state.recMicStream){
+          state.recMicStream.getTracks().forEach(t => t.stop());
+        }
+      }catch{}
+
+      const mime = (mt && mt.includes("ogg")) ? "audio/ogg" : "audio/webm";
+      const blob = new Blob(state.recChunks, { type: mime });
+
       const item = { id: uuid(), createdAt: now(), title: "", blob };
       await dbPut(item);
       await renderRecordings();
+
       state.rec = null;
-      state.recStream = null;
       state.recChunks = [];
+      state.recMicStream = null;
+      state.recMicSource = null;
     };
 
     rec.start();
@@ -1519,7 +1600,7 @@ ${bodyHtml}
     try{
       if(state.isRecording) await stopRecording();
       else await startRecording();
-    }catch{
+    }catch(e){
       state.isRecording = false;
       setRecordUI();
       alert("Recording failed. Make sure mic permission is allowed for this site.");
