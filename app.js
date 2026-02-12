@@ -1,4 +1,4 @@
-/* Song Rider Pro - app.js (FULL REPLACE v20) */
+/* app.js (FULL REPLACE v21) */
 (() => {
   "use strict";
 
@@ -74,7 +74,7 @@
   };
 
   /***********************
-   * Sections (ORDER FIXED, OUTRO REMOVED)
+   * Sections (ORDER LOCKED, OUTRO REMOVED)
    ***********************/
   const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
   const DEFAULT_LINES_PER_SECTION = 20;
@@ -82,15 +82,15 @@
   /***********************
    * Project storage
    ***********************/
-  const LS_KEY = "songrider_v20_projects";
-  const LS_CUR = "songrider_v20_currentProjectId";
+  const LS_KEY = "songrider_v21_projects";
+  const LS_CUR = "songrider_v21_currentProjectId";
 
   function newLine(){
     return {
       id: uuid(),
-      notes: Array(8).fill(""),  // ✅ top note boxes (blank)
+      notes: Array(8).fill(""),  // top 8th-note boxes (blank)
       lyrics: "",
-      beats: Array(4).fill("")   // ✅ bottom beat/syllable boxes
+      beats: Array(4).fill("")   // bottom quarter boxes (autosplit syllables)
     };
   }
 
@@ -183,7 +183,7 @@
   /***********************
    * IndexedDB (Recordings)
    ***********************/
-  const DB_NAME = "songrider_db_v20";
+  const DB_NAME = "songrider_db_v21";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -264,9 +264,7 @@
 
     // beat clock
     beatTimer: null,
-    tick8: 0,              // 8th-note counter
-    lastTickNoteEl: null,
-    lastTickBeatEl: null
+    tick8: 0 // 8th-note counter
   };
 
   /***********************
@@ -279,44 +277,33 @@
   }
 
   /***********************
-   * Beat tick highlighter (yellow tick on notes + beat boxes)
-   * - notes: 8 boxes (8th notes)
-   * - beats: 4 boxes (quarters) => index = floor((tick8 % 8)/2)
+   * Beat tick (FIXED): tick INSIDE EACH CARD
+   * - notes: 8 boxes (8th notes) => index = tick8 % 8
+   * - beats: 4 boxes (quarters)  => index = floor((tick8 % 8)/2)
    ***********************/
   function clearTick(){
-    if(state.lastTickNoteEl) state.lastTickNoteEl.classList.remove("tick");
-    if(state.lastTickBeatEl) state.lastTickBeatEl.classList.remove("tick");
-    state.lastTickNoteEl = null;
-    state.lastTickBeatEl = null;
+    const root = el.sheetBody;
+    if(!root) return;
+    root.querySelectorAll(".tick").forEach(x => x.classList.remove("tick"));
   }
 
   function applyTick(){
-    // Only tick what exists on screen in the current sheet
     const root = el.sheetBody;
     if(!root) return;
 
-    const noteCells = root.querySelectorAll(".noteCell");
-    const beatCells = root.querySelectorAll(".beatCell");
+    // Only tick on section pages (not Full)
+    if(state.currentSection === "Full") return;
 
-    if(noteCells.length > 0){
-      const nIdx = state.tick8 % 8;
-      const noteEl = noteCells[nIdx] || null;
-      if(noteEl){
-        if(state.lastTickNoteEl && state.lastTickNoteEl !== noteEl) state.lastTickNoteEl.classList.remove("tick");
-        noteEl.classList.add("tick");
-        state.lastTickNoteEl = noteEl;
-      }
-    }
+    const nIdx = state.tick8 % 8;
+    const bIdx = Math.floor((state.tick8 % 8) / 2);
 
-    if(beatCells.length > 0){
-      const bIdx = Math.floor((state.tick8 % 8) / 2); // 0..3
-      const beatEl = beatCells[bIdx] || null;
-      if(beatEl){
-        if(state.lastTickBeatEl && state.lastTickBeatEl !== beatEl) state.lastTickBeatEl.classList.remove("tick");
-        beatEl.classList.add("tick");
-        state.lastTickBeatEl = beatEl;
-      }
-    }
+    // tick the same position in EVERY visible card (this matches your old behavior)
+    root.querySelectorAll(".card").forEach(card => {
+      const notes = card.querySelectorAll(".noteCell");
+      const beats = card.querySelectorAll(".beatCell");
+      if(notes[nIdx]) notes[nIdx].classList.add("tick");
+      if(beats[bIdx]) beats[bIdx].classList.add("tick");
+    });
   }
 
   function startBeatClock(){
@@ -330,7 +317,10 @@
     state.beatTimer = setInterval(() => {
       // blink on quarter beats (every 2 eighths)
       if(state.tick8 % 2 === 0) doBlink();
+
+      clearTick();
       applyTick();
+
       state.tick8++;
     }, eighthMs);
   }
@@ -552,7 +542,7 @@
         state.currentSection = sec;
         renderTabs();
         renderSheet();
-        // keep tick working after rerender
+        // keep tick locked after re-render
         clearTick();
         applyTick();
       });
@@ -579,12 +569,17 @@
   /***********************
    * AutoSplit (SYLLABLES -> 4 beat boxes)
    ***********************/
-  function splitWordIntoSyllables(word){
-    const w = String(word||"").toLowerCase().replace(/[^a-z']/g,"");
-    if(!w) return [];
-    // crude but usable: split around vowel groups
-    const parts = w.match(/[bcdfghjklmnpqrstvwxyz]*[aeiouy]+(?:[^aeiouy]*)/g);
-    if(!parts || parts.length === 0) return [w];
+  function wordToSyllableTokens(word){
+    const clean = String(word||"")
+      .replace(/[’]/g,"'")
+      .replace(/[^a-zA-Z']/g,"")
+      .toLowerCase()
+      .trim();
+    if(!clean) return [];
+
+    // vowel-group split (simple + stable)
+    const parts = clean.match(/[bcdfghjklmnpqrstvwxyz]*[aeiouy]+(?:[bcdfghjklmnpqrstvwxyz]*)/g);
+    if(!parts || parts.length === 0) return [clean];
     return parts.map(p => p.trim()).filter(Boolean);
   }
 
@@ -593,45 +588,27 @@
     if(!raw) return [];
     const words = raw.split(/\s+/).filter(Boolean);
     const out = [];
-    for(const ww of words){
-      const clean = ww.replace(/[^\w'’-]/g,"").trim();
-      if(!clean) continue;
-      const syls = splitWordIntoSyllables(clean);
-      if(syls.length <= 1){
-        out.push(clean);
-      }else{
-        // push syllables as separate tokens (what you wanted)
-        syls.forEach(s => out.push(s));
-      }
+    for(const w of words){
+      const syls = wordToSyllableTokens(w);
+      if(syls.length <= 1) out.push(w.replace(/\s+/g,""));
+      else syls.forEach(s => out.push(s));
     }
-    return out;
+    return out.filter(Boolean);
   }
 
   function distributeTo4Boxes(syllables){
     const boxes = ["","","",""];
     if(!syllables || syllables.length === 0) return boxes;
 
+    // Even-ish distribution across 4 beats
     const total = syllables.length;
-    const target = total / 4;
+    const per = Math.ceil(total / 4);
 
-    let b = 0;
-    let countInBox = 0;
-    let threshold = target;
-
-    for(let i=0;i<syllables.length;i++){
-      const s = syllables[i];
-      if(!boxes[b]) boxes[b] = s;
-      else boxes[b] += " " + s;
-
-      countInBox += 1;
-
-      if(b < 3 && countInBox >= threshold){
-        b += 1;
-        threshold = target; // keep same
-        countInBox = 0;
-      }
+    let k = 0;
+    for(let i=0;i<4;i++){
+      boxes[i] = syllables.slice(k, k+per).join(" ").trim();
+      k += per;
     }
-
     return boxes;
   }
 
@@ -699,7 +676,7 @@
   }
 
   /***********************
-   * Full preview (from cards) — keep perfect
+   * Full preview (auto from cards)
    ***********************/
   function buildFullPreviewText(){
     const out = [];
@@ -729,7 +706,11 @@
         const notesLine = notes.map(n => (String(n||"").trim() || "—")).join(" | ");
         const beatsLine = beats.map(b => (String(b||"").trim() || "—")).join(" | ");
 
-        const hasAnything = (notesLine.replace(/—|\||\s/g,"").length > 0) || (beatsLine.replace(/—|\||\s/g,"").length > 0) || !!lyr;
+        const hasAnything =
+          (notesLine.replace(/—|\||\s/g,"").length > 0) ||
+          (beatsLine.replace(/—|\||\s/g,"").length > 0) ||
+          !!lyr;
+
         if(!hasAnything) return;
 
         out.push(`(${idx+1})  NOTES: ${notesLine}`);
@@ -755,7 +736,6 @@
    ***********************/
   function renderSheetActions(){
     el.sheetActions.innerHTML = "";
-
     if(state.currentSection === "Full") return;
 
     const addBtn = document.createElement("button");
@@ -769,6 +749,8 @@
       renderSheet();
       updateFullIfVisible();
       updateKeyFromAllNotes();
+      clearTick();
+      applyTick();
     });
 
     el.sheetActions.appendChild(addBtn);
@@ -852,6 +834,8 @@
           renderSheet();
           updateFullIfVisible();
           updateKeyFromAllNotes();
+          clearTick();
+          applyTick();
         }, 650);
       };
       const endPress = () => clearTimeout(pressTimer);
@@ -870,7 +854,7 @@
       top.appendChild(num);
       top.appendChild(syll);
 
-      // ✅ Notes row (8) - BLUE - BLANK
+      // NOTES row (8) - blue - blank
       const notesRow = document.createElement("div");
       notesRow.className = "notesRow";
 
@@ -878,8 +862,8 @@
         const inp = document.createElement("input");
         inp.type = "text";
         inp.className = "noteCell";
-        inp.placeholder = "Not";          // placeholder only
-        inp.value = line.notes[i] || "";  // value blank
+        inp.placeholder = "";           // ✅ blank (no "Not")
+        inp.value = line.notes[i] || "";
         inp.autocomplete = "off";
         inp.autocapitalize = "characters";
         inp.spellcheck = false;
@@ -896,13 +880,13 @@
         notesRow.appendChild(inp);
       }
 
-      // ✅ Lyrics (PINK)
+      // Lyrics (pink)
       const lyr = document.createElement("textarea");
       lyr.className = "lyrics";
       lyr.placeholder = "Type lyrics (AutoSplit on)…";
       lyr.value = line.lyrics || "";
 
-      // ✅ Beats row (4) - syllable boxes (green on 2 & 4 via CSS)
+      // Beats row (4) - green on 2 & 4 via CSS
       const beatsRow = document.createElement("div");
       beatsRow.className = "beatsRow";
 
@@ -934,7 +918,7 @@
         upsertProject(state.project);
         updateFullIfVisible();
 
-        // ✅ AutoSplit: lyrics -> syllables -> 4 beat boxes
+        // AutoSplit: syllables -> 4 beat boxes
         if(state.autoSplit){
           const boxes = autosplitBeatsFromLyrics(line.lyrics);
           line.beats = boxes;
@@ -945,7 +929,7 @@
           updateFullIfVisible();
         }
 
-        // Enter creates next line (still keeps 20+)
+        // Enter creates next line (keeps 20+)
         if(state.autoSplit && lyr.value.includes("\n")){
           const parts = lyr.value.split("\n");
           const first = parts.shift();
@@ -965,6 +949,8 @@
           renderSheet();
           updateFullIfVisible();
           updateKeyFromAllNotes();
+          clearTick();
+          applyTick();
         }
       });
 
@@ -978,6 +964,10 @@
 
     el.sheetBody.innerHTML = "";
     el.sheetBody.appendChild(cardsWrap);
+
+    // make sure tick appears right after render
+    clearTick();
+    applyTick();
   }
 
   /***********************
@@ -1104,7 +1094,7 @@
   }
 
   /***********************
-   * Recording start/stop (Record -> Stop)
+   * Recording start/stop
    ***********************/
   async function startRecording(){
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
@@ -1146,7 +1136,7 @@
     try{
       if(state.isRecording) await stopRecording();
       else await startRecording();
-    }catch(e){
+    }catch{
       state.isRecording = false;
       setRecordUI();
       alert("Recording failed. Make sure mic permission is allowed for this site.");
@@ -1191,8 +1181,6 @@
     state.project = p;
     localStorage.setItem(LS_CUR, p.id);
     renderAll();
-    clearTick();
-    applyTick();
   }
 
   /***********************
@@ -1228,7 +1216,6 @@
     renderDrumUI();
     updateKeyFromAllNotes();
     setRecordUI();
-    // refresh tick after rerender
     clearTick();
     applyTick();
   }
