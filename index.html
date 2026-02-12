@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=18"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=19"/>
 
   <style>
     :root{
@@ -20,7 +20,6 @@
 
       --noteBlue:#5CE1FF;
       --lyricPink:#FF5FB8;
-      --backbeatGreen:#86EFAC;
 
       --dangerRed:#dc2626;
 
@@ -311,13 +310,14 @@
       background:var(--dangerRed);
     }
 
-    .notesRow{
+    /* ✅ 4 beat boxes */
+    .beatsRow{
       display:grid;
-      grid-template-columns: repeat(8, minmax(0, 1fr));
-      gap:6px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap:8px;
       margin-bottom:8px;
     }
-    .noteCell{
+    .beatCell{
       border-radius:10px;
       border:1px solid rgba(0,0,0,.18);
       background:var(--noteBlue);
@@ -329,6 +329,10 @@
       height:34px;
       -webkit-appearance:none;
       appearance:none;
+    }
+    .beatCell::placeholder{
+      color: rgba(0,0,0,.45);
+      font-weight:900;
     }
 
     textarea.lyrics{
@@ -345,14 +349,32 @@
       color:#111;
     }
 
-    .fullBoxWrap{ padding:12px; }
+    .fullBoxWrap{ padding:12px; display:flex; flex-direction:column; gap:10px; }
+    .fullLabel{
+      font-size:12px;
+      font-weight:1000;
+      color:#333;
+    }
     textarea.fullBox{
       width:100%;
-      min-height:34vh;
+      min-height:22vh;
       padding:12px;
       border-radius:14px;
       border:1px solid rgba(0,0,0,.12);
       background:#fff;
+      font-family:var(--mono);
+      font-size:14px;
+      outline:none;
+      line-height:1.35;
+      white-space:pre;
+    }
+    textarea.fullPreview{
+      width:100%;
+      min-height:22vh;
+      padding:12px;
+      border-radius:14px;
+      border:1px solid rgba(0,0,0,.12);
+      background:#f7f7f8;
       font-family:var(--mono);
       font-size:14px;
       outline:none;
@@ -426,7 +448,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=18" alt="Headshot"/>
+    <img id="headshotImg" src="./headshot.png?v=19" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -527,6 +549,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=18"></script>
+<script src="./app.js?v=19"></script>
 </body>
-</html>
+                                </html>
