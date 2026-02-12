@@ -592,7 +592,7 @@ async function renderRecordings(){
   mine.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 
   recordingsList.innerHTML = "";
-
+let currentAudio = null;
   if(mine.length===0){
     const d = document.createElement("div");
     d.style.color="#666";
@@ -607,14 +607,19 @@ async function renderRecordings(){
     row.style.display="flex";
     row.style.gap="8px";
     row.style.alignItems="center";
-    row.style.flexWrap="wrap";
+    row.style.flexWrap="nowrap";
+row.style.overflow="hidden";
+row.style.whiteSpace="nowrap";
     row.style.border="1px solid rgba(0,0,0,.10)";
     row.style.borderRadius="14px";
     row.style.padding="10px";
 
     const title = document.createElement("div");
-    title.style.flex="1 1 auto";
-    title.style.minWidth="190px";
+    title.style.flex = "1 1 0";
+title.style.minWidth = "0";
+title.style.overflow = "hidden";
+title.style.textOverflow = "ellipsis";
+title.style.whiteSpace = "nowrap";
     title.style.fontWeight="1100";
     const d = new Date(rec.createdAt || Date.now());
     const label = (rec.title && rec.title.trim()) ? rec.title.trim()+" • " : "";
@@ -641,11 +646,30 @@ async function renderRecordings(){
       const blob = rec.blob;
       if(!blob) return;
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.play();
-      audio.onended = ()=>URL.revokeObjectURL(url);
-    });
+      if(currentAudio){
+  currentAudio.pause();
+  currentAudio.currentTime = 0;
+}
 
+currentAudio = new Audio(url);
+currentAudio.play();
+
+currentAudio.onended = ()=>{
+  URL.revokeObjectURL(url);
+  currentAudio = null;
+};
+    });
+const stop = document.createElement("button");
+stop.className="btn secondary";
+stop.textContent="⏹";
+stop.title="Stop";
+stop.addEventListener("click", ()=>{
+  if(currentAudio){
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+});
     const download = document.createElement("button");
     download.className="btn secondary";
     download.textContent="↓";
@@ -674,10 +698,11 @@ async function renderRecordings(){
     });
 
     row.appendChild(title);
-    row.appendChild(edit);
-    row.appendChild(play);
-    row.appendChild(download);
-    row.appendChild(del);
+row.appendChild(edit);
+row.appendChild(play);
+row.appendChild(stop);
+row.appendChild(download);
+row.appendChild(del);
     recordingsList.appendChild(row);
   });
 }
@@ -1242,11 +1267,56 @@ autoSplitBtn.addEventListener("click", ()=>{
 bpmInput.addEventListener("input", ()=>{ state.bpm = Math.max(40, Math.min(220, Number(bpmInput.value||95))); });
 capoInput.addEventListener("input", ()=>{ state.capo = Math.max(0, Math.min(12, Number(capoInput.value||0))); });
 
-instAcoustic.addEventListener("click", ()=>{ state.instrument="Acoustic"; setInstrumentUI(); });
-instElectric.addEventListener("click", ()=>{ state.instrument="Electric"; setInstrumentUI(); });
-instPiano.addEventListener("click", ()=>{ state.instrument="Piano"; setInstrumentUI(); });
+instAcoustic.addEventListener("click", ()=>{
+  state.instrument = "Acoustic";
 
-function setDrumStyle(s){ state.drumStyle = s; setDrumUI(); }
+  instAcoustic.classList.add("active");
+  instElectric.classList.remove("active");
+  instPiano.classList.remove("active");
+});
+
+instElectric.addEventListener("click", ()=>{
+  state.instrument = "Electric";
+
+  instElectric.classList.add("active");
+  instAcoustic.classList.remove("active");
+  instPiano.classList.remove("active");
+});
+
+instPiano.addEventListener("click", ()=>{
+  state.instrument = "Piano";
+
+  instPiano.classList.add("active");
+  instAcoustic.classList.remove("active");
+  instElectric.classList.remove("active");
+});
+function setDrumStyle(s){
+  state.drumStyle = s;
+
+  // Remove active from all drum buttons
+  [drumRock, drumHardRock, drumPop, drumRap,
+   mRock, mHardRock, mPop, mRap].forEach(btn=>{
+    if(btn) btn.classList.remove("active");
+  });
+
+  // Activate correct ones
+  if(s === "Rock"){
+    drumRock.classList.add("active");
+    mRock.classList.add("active");
+  }
+  if(s === "Hard Rock"){
+    drumHardRock.classList.add("active");
+    mHardRock.classList.add("active");
+  }
+  if(s === "Pop"){
+    drumPop.classList.add("active");
+    mPop.classList.add("active");
+  }
+  if(s === "Rap"){
+    drumRap.classList.add("active");
+    mRap.classList.add("active");
+  }
+}
 drumRock.addEventListener("click", ()=>setDrumStyle("Rock"));
 drumHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
 drumPop.addEventListener("click", ()=>setDrumStyle("Pop"));
@@ -1256,8 +1326,15 @@ mHardRock.addEventListener("click", ()=>setDrumStyle("Hard Rock"));
 mPop.addEventListener("click", ()=>setDrumStyle("Pop"));
 mRap.addEventListener("click", ()=>setDrumStyle("Rap"));
 
-autoPlayBtn.addEventListener("click", async ()=>{ state.autoPlay ? stopAutoPlay() : await startAutoPlay(); });
-mScrollBtn.addEventListener("click", async ()=>{ state.autoPlay ? stopAutoPlay() : await startAutoPlay(); });
+autoPlayBtn.addEventListener("click", async ()=>{
+  if(state.autoPlay) stopAutoPlay();
+  else await startAutoPlay();
+});
+
+mScrollBtn.addEventListener("click", async ()=>{
+  if(state.autoPlay) stopAutoPlay();
+  else await startAutoPlay();
+});
 
 recordBtn.addEventListener("click", async ()=>{ recording ? stopRecording() : await startRecording(); });
 mRecordBtn.addEventListener("click", async ()=>{ recording ? stopRecording() : await startRecording(); });
