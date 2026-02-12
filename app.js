@@ -1,10 +1,9 @@
-/* app.js (FULL REPLACE MAIN v32) */
+/* app.js (FULL REPLACE MAIN v33) */
 (() => {
   "use strict";
 
   /***********************
    * FORCE-NUKE OLD SERVICE WORKER CACHE
-   * (Fixes “I updated but it still runs old code”)
    ***********************/
   try{
     if("serviceWorker" in navigator){
@@ -28,6 +27,15 @@
       const v = c === "x" ? r : (r & 0x3) | 0x8;
       return v.toString(16);
     });
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;")
+      .replace(/'/g,"&#39;");
   }
 
   /***********************
@@ -866,7 +874,6 @@
     const beats = Array.isArray(line?.beats) ? line.beats : Array(4).fill("");
     const lyric = String(line?.lyrics ?? "").trim();
 
-    // transpose notes for display/export
     const n = Array.from({length:8}, (_,i)=>{
       const raw = String(notes[i] ?? "").trim();
       if(!raw) return "-";
@@ -875,7 +882,6 @@
 
     const b = Array.from({length:4}, (_,i)=> beatTok(beats[i] ?? ""));
 
-    // If beat boxes are totally empty, fall back to lyric (still aligned as 4 chunks)
     const anyBeats = b.some(x => x.trim().length);
     const beatRow = anyBeats ? b : (lyric ? autosplitBeatsFromLyrics(lyric) : ["","","",""]);
 
@@ -886,10 +892,9 @@
       `${safeTok(n[6])} ${safeTok(n[7])}`
     ];
 
-    // column widths per beat so the two rows line up
     const widths = [0,1,2,3].map(i => {
       const w = Math.max(noteGroups[i].length, String(beatRow[i]||"").length);
-      return Math.max(6, w) + 2; // minimum width + breathing room
+      return Math.max(6, w) + 2;
     });
 
     const pad = (s, w) => String(s||"").padEnd(w, " ");
@@ -955,6 +960,93 @@
     return any ? out.join("\n").trim() : "(No lyrics/notes yet - start typing in a section)";
   }
 
+  // ✅ NEW: build printable HTML with dark-red notes + black lyrics
+  function buildFullPreviewHtmlDoc(title){
+    const lines = [];
+    SECTIONS.filter(s => s !== "Full").forEach(sec => {
+      const arr = state.project.sections[sec] || [];
+
+      const hasAny = arr.some(line => {
+        const lyr = String(line?.lyrics || "").trim();
+        const notes = Array.isArray(line?.notes) ? line.notes : [];
+        const beats = Array.isArray(line?.beats) ? line.beats : [];
+        const hasNotes = notes.some(n => String(n||"").trim());
+        const hasBeats = beats.some(b => String(b||"").trim());
+        return !!lyr || hasNotes || hasBeats;
+      });
+      if(!hasAny) return;
+
+      lines.push({ kind:"section", text: sec.toUpperCase() });
+      lines.push({ kind:"blank", text:"" });
+
+      arr.forEach((line, idx) => {
+        const lyr = String(line?.lyrics || "").trim();
+        const notes = Array.isArray(line?.notes) ? line.notes : [];
+        const beats = Array.isArray(line?.beats) ? line.beats : [];
+
+        const hasNotes = notes.some(n => String(n||"").trim());
+        const hasBeats = beats.some(b => String(b||"").trim());
+        const hasLyrics = !!lyr;
+        if(!hasNotes && !hasBeats && !hasLyrics) return;
+
+        const aligned = buildAlignedLine(line, state.capo || 0);
+
+        lines.push({ kind:"idx", text:`(${idx+1})` });
+        lines.push({ kind:"notes", text:`    ${aligned.notesLine}` });
+        lines.push({ kind:"lyrics", text:`    ${aligned.beatsLine}` });
+        lines.push({ kind:"blank", text:"" });
+      });
+
+      lines.push({ kind:"blank", text:"" });
+    });
+
+    const safeTitle = escapeHtml(title || "Song Rider Pro - Full Preview");
+
+    const bodyHtml = lines.length
+      ? lines.map(L => {
+          if(L.kind === "section") return `<div class="section">${escapeHtml(L.text)}</div>`;
+          if(L.kind === "idx") return `<div class="idx">${escapeHtml(L.text)}</div>`;
+          if(L.kind === "notes") return `<div class="notes">${escapeHtml(L.text)}</div>`;
+          if(L.kind === "lyrics") return `<div class="lyrics">${escapeHtml(L.text)}</div>`;
+          return `<div class="blank">${escapeHtml(L.text)}</div>`;
+        }).join("\n")
+      : `<div class="lyrics">(No lyrics/notes yet - start typing in a section)</div>`;
+
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${safeTitle}</title>
+<style>
+  :root{ --noteRed:#7f1d1d; } /* ✅ dark red */
+  body{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    margin:24px;
+    color:#111;
+  }
+  .section{
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    font-weight:900;
+    margin-top:20px;
+    margin-bottom:8px;
+    letter-spacing:.3px;
+  }
+  .idx{ font-weight:900; margin:8px 0 2px; }
+  .notes{ color: var(--noteRed); font-weight:900; white-space:pre; }
+  .lyrics{ color:#111; white-space:pre; }
+  .blank{ white-space:pre; height:10px; }
+  @media print{
+    body{ margin:0.5in; }
+  }
+</style>
+</head>
+<body>
+${bodyHtml}
+</body>
+</html>`;
+  }
+
   function updateFullIfVisible(){
     if(state.currentSection !== "Full") return;
     const preview = el.sheetBody.querySelector("textarea.fullPreview");
@@ -962,41 +1054,59 @@
   }
 
   /***********************
-   * ✅ EXPORT FULL PREVIEW (UTF-8 BOM + CRLF)
+   * ✅ EXPORT
+   * - .txt stays plain (no colors possible)
+   * - ALSO exports a printable .html with dark-red notes
    ***********************/
   async function exportFullPreview(){
     try{
-      let text = buildFullPreviewText();
-      if(!text || !String(text).trim()){
+      const plain = buildFullPreviewText();
+      if(!plain || !String(plain).trim()){
         alert("Nothing to export yet.");
         return;
       }
-
-      text = "\ufeff" + String(text).replace(/\n/g, "\r\n");
 
       const safeName = String(state.project?.name || "Song Rider Pro")
         .replace(/[\\/:*?"<>|]+/g, "")
         .trim() || "Song Rider Pro";
 
-      const fileName = `${safeName} - Full Preview.txt`;
-      const blob = new Blob([text], { type:"text/plain;charset=utf-8" });
+      // TXT (compat)
+      const txtName = `${safeName} - Full Preview.txt`;
+      const txt = "\ufeff" + String(plain).replace(/\n/g, "\r\n");
+      const txtBlob = new Blob([txt], { type:"text/plain;charset=utf-8" });
+      const txtFile = new File([txtBlob], txtName, { type:"text/plain" });
 
+      // HTML (colored notes)
+      const htmlName = `${safeName} - Full Preview (Print).html`;
+      const htmlDoc = buildFullPreviewHtmlDoc(`${safeName} - Full Preview`);
+      const htmlBlob = new Blob([htmlDoc], { type:"text/html;charset=utf-8" });
+      const htmlFile = new File([htmlBlob], htmlName, { type:"text/html" });
+
+      // Try share both (if supported)
       try{
-        const file = new File([blob], fileName, { type:"text/plain" });
-        if(navigator.share && navigator.canShare && navigator.canShare({ files:[file] })){
-          await navigator.share({ title: fileName, files: [file] });
+        if(navigator.share && navigator.canShare && navigator.canShare({ files:[txtFile, htmlFile] })){
+          await navigator.share({ title: safeName, files: [txtFile, htmlFile] });
           return;
         }
       }catch{}
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 800);
+      // Fallback: download both
+      const dl = (blob, name) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 800);
+      };
+
+      dl(txtBlob, txtName);
+      setTimeout(() => dl(htmlBlob, htmlName), 350);
+
+      // Optional hint
+      // alert("Saved .txt + printable .html (notes are dark red in the .html).");
     }catch{
       alert("Export failed on this device/browser.");
     }
@@ -1619,7 +1729,6 @@
     applyTick();
     updateFullIfVisible();
     refreshRhymesFromActive();
-
     refreshDisplayedNoteCells();
   }
 
