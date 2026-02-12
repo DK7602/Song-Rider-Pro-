@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v31) */
+/* app.js (FULL REPLACE MAIN v32) */
 (() => {
   "use strict";
 
@@ -848,13 +848,14 @@
   }
 
   /***********************
-   * Full preview (ASCII-safe export fix)
+   * Full preview (FIXED NOTE PLACEMENT)
+   * Notes line + lyrics line aligned to same "column area"
    ***********************/
   function compactNotesLine(notesArr, semis=0){
     const notes = Array.isArray(notesArr) ? notesArr : Array(8).fill("");
     return notes.map(n => {
       const raw = String(n||"").trim();
-      if(!raw) return "-";              // ✅ ASCII placeholder (no em-dash)
+      if(!raw) return "-";
       return semis ? transposeNoteName(raw, semis) : raw;
     }).join(" ");
   }
@@ -886,8 +887,12 @@
 
         if(!hasNotes && !hasLyrics) return;
 
-        out.push(`(${idx+1}) ${notesLine}`);
-        if(hasLyrics) out.push(`    ${lyr}`);
+        // ✅ Align lyrics under the note "grid area" (same start column as notes)
+        const prefix = `(${idx+1}) `;
+        const pad = " ".repeat(prefix.length);
+
+        out.push(prefix + notesLine);
+        if(hasLyrics) out.push(pad + lyr);
         out.push("");
       });
 
@@ -905,7 +910,6 @@
 
   /***********************
    * ✅ EXPORT FULL PREVIEW (UTF-8 BOM + CRLF)
-   * Prevents â€” / â€™ / weird characters in some viewers
    ***********************/
   async function exportFullPreview(){
     try{
@@ -915,9 +919,6 @@
         return;
       }
 
-      // ✅ Make it super compatible:
-      // - UTF-8 BOM so picky apps detect UTF-8
-      // - CRLF newlines for Windows-style readers
       text = "\ufeff" + String(text).replace(/\n/g, "\r\n");
 
       const safeName = String(state.project?.name || "Song Rider Pro")
@@ -968,6 +969,7 @@
       updateKeyFromAllNotes();
       clearTick(); applyTick();
       refreshDisplayedNoteCells();
+      refreshRhymesFromActive();
     });
 
     el.sheetActions.appendChild(addBtn);
@@ -1052,6 +1054,7 @@
           updateKeyFromAllNotes();
           clearTick(); applyTick();
           refreshDisplayedNoteCells();
+          refreshRhymesFromActive();
         }, 650);
       };
       const endPress = () => clearTimeout(pressTimer);
@@ -1195,6 +1198,7 @@
           updateKeyFromAllNotes();
           clearTick(); applyTick();
           refreshDisplayedNoteCells();
+          refreshRhymesFromActive();
         }
       });
 
@@ -1299,7 +1303,7 @@
       const del = document.createElement("button");
       del.className="btn secondary";
       del.textContent="🗑️";
-      del.title="Delete recording";
+      del.title="Delete";
       del.addEventListener("click", async () => {
         if(!confirm("Delete this recording?")) return;
         await dbDelete(rec.id);
