@@ -848,16 +848,65 @@
   }
 
   /***********************
-   * Full preview (FIXED NOTE PLACEMENT)
-   * Notes line + lyrics line aligned to same "column area"
+   * ✅ Full preview / export with NOTE↔BEAT alignment
    ***********************/
-  function compactNotesLine(notesArr, semis=0){
-    const notes = Array.isArray(notesArr) ? notesArr : Array(8).fill("");
-    return notes.map(n => {
-      const raw = String(n||"").trim();
+  function safeTok(s){
+    const t = String(s ?? "").trim();
+    return t ? t : "-";
+  }
+
+  function beatTok(s){
+    return String(s ?? "").trim();
+  }
+
+  // notes[0..7] align to beats[0..3] as:
+  // beat1 = notes 0-1, beat2 = notes 2-3, beat3 = notes 4-5, beat4 = notes 6-7
+  function buildAlignedLine(line, semis=0){
+    const notes = Array.isArray(line?.notes) ? line.notes : Array(8).fill("");
+    const beats = Array.isArray(line?.beats) ? line.beats : Array(4).fill("");
+    const lyric = String(line?.lyrics ?? "").trim();
+
+    // transpose notes for display/export
+    const n = Array.from({length:8}, (_,i)=>{
+      const raw = String(notes[i] ?? "").trim();
       if(!raw) return "-";
       return semis ? transposeNoteName(raw, semis) : raw;
-    }).join(" ");
+    });
+
+    const b = Array.from({length:4}, (_,i)=> beatTok(beats[i] ?? ""));
+
+    // If beat boxes are totally empty, fall back to lyric (still aligned as 4 chunks)
+    const anyBeats = b.some(x => x.trim().length);
+    const beatRow = anyBeats ? b : (lyric ? autosplitBeatsFromLyrics(lyric) : ["","","",""]);
+
+    const noteGroups = [
+      `${safeTok(n[0])} ${safeTok(n[1])}`,
+      `${safeTok(n[2])} ${safeTok(n[3])}`,
+      `${safeTok(n[4])} ${safeTok(n[5])}`,
+      `${safeTok(n[6])} ${safeTok(n[7])}`
+    ];
+
+    // column widths per beat so the two rows line up
+    const widths = [0,1,2,3].map(i => {
+      const w = Math.max(noteGroups[i].length, String(beatRow[i]||"").length);
+      return Math.max(6, w) + 2; // minimum width + breathing room
+    });
+
+    const pad = (s, w) => String(s||"").padEnd(w, " ");
+
+    const notesLine =
+      pad(noteGroups[0], widths[0]) + "| " +
+      pad(noteGroups[1], widths[1]) + "| " +
+      pad(noteGroups[2], widths[2]) + "| " +
+      pad(noteGroups[3], widths[3]);
+
+    const beatsLine =
+      pad(beatRow[0], widths[0]) + "| " +
+      pad(beatRow[1], widths[1]) + "| " +
+      pad(beatRow[2], widths[2]) + "| " +
+      pad(beatRow[3], widths[3]);
+
+    return { notesLine: notesLine.trimEnd(), beatsLine: beatsLine.trimEnd() };
   }
 
   function buildFullPreviewText(){
@@ -866,11 +915,14 @@
 
     SECTIONS.filter(s => s !== "Full").forEach(sec => {
       const arr = state.project.sections[sec] || [];
+
       const hasAny = arr.some(line => {
-        const lyr = String(line.lyrics || "").trim();
-        const notes = Array.isArray(line.notes) ? line.notes : [];
+        const lyr = String(line?.lyrics || "").trim();
+        const notes = Array.isArray(line?.notes) ? line.notes : [];
+        const beats = Array.isArray(line?.beats) ? line.beats : [];
         const hasNotes = notes.some(n => String(n||"").trim());
-        return !!lyr || hasNotes;
+        const hasBeats = beats.some(b => String(b||"").trim());
+        return !!lyr || hasNotes || hasBeats;
       });
       if(!hasAny) return;
 
@@ -879,20 +931,21 @@
       out.push("");
 
       arr.forEach((line, idx) => {
-        const lyr = String(line.lyrics || "").trim();
-        const notesLine = compactNotesLine(line.notes, state.capo || 0);
+        const lyr = String(line?.lyrics || "").trim();
+        const notes = Array.isArray(line?.notes) ? line.notes : [];
+        const beats = Array.isArray(line?.beats) ? line.beats : [];
 
-        const hasNotes = notesLine.replace(/-|\s/g,"").length > 0;
+        const hasNotes = notes.some(n => String(n||"").trim());
+        const hasBeats = beats.some(b => String(b||"").trim());
         const hasLyrics = !!lyr;
 
-        if(!hasNotes && !hasLyrics) return;
+        if(!hasNotes && !hasBeats && !hasLyrics) return;
 
-        // ✅ Align lyrics under the note "grid area" (same start column as notes)
-        const prefix = `(${idx+1}) `;
-        const pad = " ".repeat(prefix.length);
+        const aligned = buildAlignedLine(line, state.capo || 0);
 
-        out.push(prefix + notesLine);
-        if(hasLyrics) out.push(pad + lyr);
+        out.push(`(${idx+1})`);
+        out.push(`    ${aligned.notesLine}`);
+        out.push(`    ${aligned.beatsLine}`);
         out.push("");
       });
 
@@ -969,7 +1022,6 @@
       updateKeyFromAllNotes();
       clearTick(); applyTick();
       refreshDisplayedNoteCells();
-      refreshRhymesFromActive();
     });
 
     el.sheetActions.appendChild(addBtn);
@@ -1054,7 +1106,6 @@
           updateKeyFromAllNotes();
           clearTick(); applyTick();
           refreshDisplayedNoteCells();
-          refreshRhymesFromActive();
         }, 650);
       };
       const endPress = () => clearTimeout(pressTimer);
@@ -1198,7 +1249,6 @@
           updateKeyFromAllNotes();
           clearTick(); applyTick();
           refreshDisplayedNoteCells();
-          refreshRhymesFromActive();
         }
       });
 
@@ -1303,7 +1353,7 @@
       const del = document.createElement("button");
       del.className="btn secondary";
       del.textContent="🗑️";
-      del.title="Delete";
+      del.title="Delete recording";
       del.addEventListener("click", async () => {
         if(!confirm("Delete this recording?")) return;
         await dbDelete(rec.id);
