@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v30) */
+/* app.js (FULL REPLACE MAIN v31) */
 (() => {
   "use strict";
 
@@ -49,7 +49,6 @@
     instElectric: $("instElectric"),
     instPiano: $("instPiano"),
 
-    // ✅ NEW
     exportBtn: $("exportBtn"),
 
     drumRock: $("drumRock"),
@@ -136,7 +135,6 @@
 
   /***********************
    * Project storage (MAIN)
-   * ✅ keeps main + test separate
    ***********************/
   const LS_KEY = "songrider_v25_projects";
   const LS_CUR = "songrider_v25_currentProjectId";
@@ -160,11 +158,8 @@
       name,
       createdAt: now(),
       updatedAt: now(),
-
-      // ✅ per-project settings (saved in localStorage)
       bpm: 95,
       capo: 0,
-
       fullText: "",
       sections
     };
@@ -244,7 +239,6 @@
 
   /***********************
    * IndexedDB (Recordings) MAIN
-   * ✅ keeps main + test separate
    ***********************/
   const DB_NAME = "songrider_db_v25";
   const DB_VER = 1;
@@ -418,28 +412,22 @@
 
   /***********************
    * NOTE / ACCIDENTAL PARSER (FIXED)
-   * Accepts: Bb, bb, B♭, C#, C♯, Db, D♭, etc.
-   * Also tolerates extra junk after the note (ex: "Bbmaj7" -> "Bb")
    ***********************/
   function parseNoteToken(v){
     const s0 = String(v||"").trim();
     if(!s0) return null;
 
-    // normalize unicode accidentals to ASCII
     const s = s0
       .replace(/♯/g, "#")
       .replace(/♭/g, "b")
       .trim();
 
-    // match leading note + optional accidental, ignore the rest
     const m = s.match(/^([A-Ga-g])\s*([#b])?/);
     if(!m) return null;
 
     const letter = m[1].toUpperCase();
-    const acc = (m[2] || "").toLowerCase(); // "#" or "b" or ""
+    const acc = (m[2] || "").toLowerCase();
 
-    // canonical key for maps:
-    // flats as "DB" etc to match your existing mapping style
     const key =
       acc === "#"
         ? (letter + "#")
@@ -447,7 +435,7 @@
           ? (letter + "B")
           : letter;
 
-    return { key, letter, acc }; // key used for maps, acc is "#" or "b" or ""
+    return { key, letter, acc };
   }
 
   /***********************
@@ -487,7 +475,7 @@
     const pc = noteToPC(note);
     if(pc === null) return String(note||"").trim();
     const t = ((pc + (semitones|0)) % 12 + 12) % 12;
-    return PC_TO_NAME[t]; // display uses sharps (clean + consistent)
+    return PC_TO_NAME[t];
   }
 
   function instWave(){
@@ -496,16 +484,13 @@
     return "sine";
   }
 
-  /***********************
-   * Capo refresh helper
-   ***********************/
   function refreshDisplayedNoteCells(){
     const root = el.sheetBody;
     if(!root) return;
     const active = document.activeElement;
 
     root.querySelectorAll("input.noteCell").forEach(inp => {
-      if(inp === active) return; // don't overwrite while editing
+      if(inp === active) return;
       const raw = String(inp.dataset.raw || "").trim();
       inp.value = (state.capo ? transposeNoteName(raw, state.capo) : raw);
     });
@@ -548,9 +533,6 @@
     return getNearestVisibleCard();
   }
 
-  /***********************
-   * Instrument playback (no double-transpose)
-   ***********************/
   function playInstrumentStep(){
     if(!state.instrumentOn) return;
     if(state.currentSection === "Full") return;
@@ -562,7 +544,6 @@
     const cells = card.querySelectorAll(".noteCell");
     if(!cells[nIdx]) return;
 
-    // use RAW note, apply capo once
     const rawNote = String(cells[nIdx].dataset.raw || cells[nIdx].value || "").trim();
     const freq = noteCellToFreq(rawNote);
     if(!freq) return;
@@ -807,14 +788,11 @@
       const remainingWords = words.length - i;
       const remainingBoxes = 4 - bi;
 
-      // If we have exactly one word per remaining box,
-      // advance so each box gets at least one word.
       if(bi < 3 && remainingWords === remainingBoxes && boxes[bi].length > 0){
         bi++;
         acc = 0;
       }
 
-      // Normal syllable-based split (only if current box already has something)
       if(bi < 3 && acc >= target && boxes[bi].length > 0){
         bi++;
         acc = 0;
@@ -870,13 +848,13 @@
   }
 
   /***********************
-   * Full preview (FIX: show transposed notes)
+   * Full preview (ASCII-safe export fix)
    ***********************/
   function compactNotesLine(notesArr, semis=0){
     const notes = Array.isArray(notesArr) ? notesArr : Array(8).fill("");
     return notes.map(n => {
       const raw = String(n||"").trim();
-      if(!raw) return "—";
+      if(!raw) return "-";              // ✅ ASCII placeholder (no em-dash)
       return semis ? transposeNoteName(raw, semis) : raw;
     }).join(" ");
   }
@@ -901,11 +879,9 @@
 
       arr.forEach((line, idx) => {
         const lyr = String(line.lyrics || "").trim();
-
-        // ✅ show transposed notes in full preview
         const notesLine = compactNotesLine(line.notes, state.capo || 0);
 
-        const hasNotes = notesLine.replace(/—|\s/g,"").length > 0;
+        const hasNotes = notesLine.replace(/-|\s/g,"").length > 0;
         const hasLyrics = !!lyr;
 
         if(!hasNotes && !hasLyrics) return;
@@ -918,7 +894,7 @@
       out.push("");
     });
 
-    return any ? out.join("\n").trim() : "(No lyrics/notes yet — start typing in a section)";
+    return any ? out.join("\n").trim() : "(No lyrics/notes yet - start typing in a section)";
   }
 
   function updateFullIfVisible(){
@@ -928,15 +904,21 @@
   }
 
   /***********************
-   * ✅ EXPORT FULL PREVIEW (NEW)
+   * ✅ EXPORT FULL PREVIEW (UTF-8 BOM + CRLF)
+   * Prevents â€” / â€™ / weird characters in some viewers
    ***********************/
   async function exportFullPreview(){
     try{
-      const text = buildFullPreviewText();
+      let text = buildFullPreviewText();
       if(!text || !String(text).trim()){
         alert("Nothing to export yet.");
         return;
       }
+
+      // ✅ Make it super compatible:
+      // - UTF-8 BOM so picky apps detect UTF-8
+      // - CRLF newlines for Windows-style readers
+      text = "\ufeff" + String(text).replace(/\n/g, "\r\n");
 
       const safeName = String(state.project?.name || "Song Rider Pro")
         .replace(/[\\/:*?"<>|]+/g, "")
@@ -945,7 +927,6 @@
       const fileName = `${safeName} - Full Preview.txt`;
       const blob = new Blob([text], { type:"text/plain;charset=utf-8" });
 
-      // Try Share (best on mobile)
       try{
         const file = new File([blob], fileName, { type:"text/plain" });
         if(navigator.share && navigator.canShare && navigator.canShare({ files:[file] })){
@@ -954,7 +935,6 @@
         }
       }catch{}
 
-      // Fallback: Download
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1101,7 +1081,6 @@
         const raw = String(line.notes[i] || "").trim();
         inp.dataset.raw = raw;
 
-        // show transposed display (capo) while not editing
         inp.value = (state.capo ? transposeNoteName(raw, state.capo) : raw);
 
         inp.autocomplete = "off";
@@ -1112,7 +1091,6 @@
 
         inp.addEventListener("focus", () => {
           lastActiveCardEl = card;
-          // show raw note while editing
           inp.value = inp.dataset.raw || "";
         });
 
@@ -1135,7 +1113,6 @@
           updateKeyFromAllNotes();
           updateFullIfVisible();
 
-          // show transposed again after editing
           inp.value = (state.capo ? transposeNoteName(rawNow, state.capo) : rawNow);
         });
 
@@ -1277,7 +1254,7 @@
       title.style.textOverflow="ellipsis";
       title.style.whiteSpace="nowrap";
       title.style.fontWeight="1100";
-      title.textContent = (rec.title && rec.title.trim() ? rec.title.trim() + " — " : "") + fmtDate(rec.createdAt || now());
+      title.textContent = (rec.title && rec.title.trim() ? rec.title.trim() + " - " : "") + fmtDate(rec.createdAt || now());
 
       const edit = document.createElement("button");
       edit.className="btn secondary";
@@ -1449,7 +1426,6 @@
     return words.length ? words[words.length - 1] : "";
   }
 
-  // ✅ FIX: ALWAYS rhyme from previous card's last word (not the current box)
   function getSeedFromTextarea(ta){
     if(!ta) return "";
 
@@ -1465,7 +1441,6 @@
       }
     }
 
-    // If there is no previous card (first line), fall back gracefully:
     const currentLast = getLastWord(String(ta.value||""));
     return currentLast || "";
   }
@@ -1609,12 +1584,10 @@
       el.autoSplitBtn.textContent = "AutoSplit: " + (state.autoSplit ? "ON" : "OFF");
     });
 
-    // ✅ NEW: Export button
     if(el.exportBtn){
       el.exportBtn.addEventListener("click", exportFullPreview);
     }
 
-    // BPM
     function commitBpm(){
       let n = parseInt(el.bpmInput.value, 10);
       if(!Number.isFinite(n)) n = state.bpm || 95;
@@ -1639,7 +1612,6 @@
       if(Number.isFinite(n) && n >= 40 && n <= 220){
         state.bpm = n;
         if(state.project){
-          // persist draft so it can’t snap back on a render
           state.project.bpm = n;
           upsertProject(state.project);
         }
@@ -1650,7 +1622,6 @@
     el.bpmInput.addEventListener("change", commitBpm);
     el.bpmInput.addEventListener("blur", commitBpm);
 
-    // ✅ CAPO (persist immediately so it can’t “snap back”)
     function commitCapo(){
       let n = parseInt(el.capoInput.value, 10);
       if(!Number.isFinite(n)) n = 0;
@@ -1678,7 +1649,6 @@
 
       const n = clamp(n0, 0, 12);
 
-      // update state + persist immediately
       state.capo = n;
       if(state.project){
         state.project.capo = n;
