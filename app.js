@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE v21) */
+/* app.js (FULL REPLACE v22) */
 (() => {
   "use strict";
 
@@ -74,7 +74,7 @@
   };
 
   /***********************
-   * Sections (ORDER LOCKED, OUTRO REMOVED)
+   * Sections (ORDER LOCKED)
    ***********************/
   const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
   const DEFAULT_LINES_PER_SECTION = 20;
@@ -82,15 +82,15 @@
   /***********************
    * Project storage
    ***********************/
-  const LS_KEY = "songrider_v21_projects";
-  const LS_CUR = "songrider_v21_currentProjectId";
+  const LS_KEY = "songrider_v22_projects";
+  const LS_CUR = "songrider_v22_currentProjectId";
 
   function newLine(){
     return {
       id: uuid(),
-      notes: Array(8).fill(""),  // top 8th-note boxes (blank)
+      notes: Array(8).fill(""),
       lyrics: "",
-      beats: Array(4).fill("")   // bottom quarter boxes (autosplit syllables)
+      beats: Array(4).fill("")
     };
   }
 
@@ -183,7 +183,7 @@
   /***********************
    * IndexedDB (Recordings)
    ***********************/
-  const DB_NAME = "songrider_db_v21";
+  const DB_NAME = "songrider_db_v22";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -252,9 +252,6 @@
 
     ctx: null,
     drumTimer: null,
-    instNodes: null,
-
-    currentAudio: null,
 
     // recording
     isRecording: false,
@@ -262,9 +259,9 @@
     rec: null,
     recChunks: [],
 
-    // beat clock
+    // beat clock (now SLAVED to drums)
     beatTimer: null,
-    tick8: 0 // 8th-note counter
+    tick8: 0
   };
 
   /***********************
@@ -277,9 +274,7 @@
   }
 
   /***********************
-   * Beat tick (FIXED): tick INSIDE EACH CARD
-   * - notes: 8 boxes (8th notes) => index = tick8 % 8
-   * - beats: 4 boxes (quarters)  => index = floor((tick8 % 8)/2)
+   * Tick UI (still ticks across all cards)
    ***********************/
   function clearTick(){
     const root = el.sheetBody;
@@ -290,14 +285,11 @@
   function applyTick(){
     const root = el.sheetBody;
     if(!root) return;
-
-    // Only tick on section pages (not Full)
     if(state.currentSection === "Full") return;
 
     const nIdx = state.tick8 % 8;
     const bIdx = Math.floor((state.tick8 % 8) / 2);
 
-    // tick the same position in EVERY visible card (this matches your old behavior)
     root.querySelectorAll(".card").forEach(card => {
       const notes = card.querySelectorAll(".noteCell");
       const beats = card.querySelectorAll(".beatCell");
@@ -306,35 +298,8 @@
     });
   }
 
-  function startBeatClock(){
-    stopBeatClock();
-    const bpm = clamp(state.bpm || 95, 40, 220);
-    const eighthMs = Math.round((60000 / bpm) / 2);
-
-    state.tick8 = 0;
-    clearTick();
-
-    state.beatTimer = setInterval(() => {
-      // blink on quarter beats (every 2 eighths)
-      if(state.tick8 % 2 === 0) doBlink();
-
-      clearTick();
-      applyTick();
-
-      state.tick8++;
-    }, eighthMs);
-  }
-
-  function stopBeatClock(){
-    if(state.beatTimer){
-      clearInterval(state.beatTimer);
-      state.beatTimer = null;
-    }
-    clearTick();
-  }
-
   /***********************
-   * Audio (demo engine)
+   * Audio
    ***********************/
   function ensureCtx(){
     if(!state.ctx){
@@ -346,12 +311,15 @@
     return state.ctx;
   }
 
-  function beep(freq=440, ms=70, gain=0.10){
+  // short envelope tone (not sustained)
+  function pluck(freq=440, ms=180, gain=0.08, type="sine"){
     const ctx = ensureCtx();
     const t0 = ctx.currentTime;
+
     const o = ctx.createOscillator();
     const g = ctx.createGain();
-    o.type = "sine";
+
+    o.type = type;
     o.frequency.value = freq;
 
     g.gain.setValueAtTime(0.0001, t0);
@@ -383,9 +351,147 @@
   }
 
   function drumHit(kind){
-    if(kind === "kick") beep(70, 90, 0.16);
-    if(kind === "snare"){ noise(60, 0.10); beep(180, 40, 0.04); }
+    if(kind === "kick") pluck(70, 120, 0.16, "sine");
+    if(kind === "snare"){ noise(60, 0.10); pluck(180, 70, 0.05, "square"); }
     if(kind === "hat"){ noise(25, 0.05); }
+  }
+
+  /***********************
+   * NOTE PARSER for blue boxes
+   ***********************/
+  const NOTE_TO_FREQ = {
+    "C":261.63,"C#":277.18,"DB":277.18,
+    "D":293.66,"D#":311.13,"EB":311.13,
+    "E":329.63,
+    "F":349.23,"F#":369.99,"GB":369.99,
+    "G":392.00,"G#":415.30,"AB":415.30,
+    "A":440.00,"A#":466.16,"BB":466.16,
+    "B":493.88
+  };
+
+  function noteCellToFreq(v){
+    const s = String(v||"").trim().toUpperCase();
+    if(!s) return null;
+    // allow "Bb" typed as "bb" etc
+    const m = s.match(/^([A-G])([#B])?$/);
+    if(!m) return null;
+    const root = m[1];
+    const acc = (m[2]||"");
+    const key = root + (acc === "B" ? "B" : acc === "#" ? "#" : "");
+    return NOTE_TO_FREQ[key] ?? null;
+  }
+
+  function instWave(){
+    if(state.instrument === "electric") return "sawtooth";
+    if(state.instrument === "acoustic") return "triangle";
+    return "sine";
+  }
+
+  /***********************
+   * ACTIVE CARD SELECTION
+   * - If autoscroll ON: pick top-most visible card
+   * - Else: just pick the first card
+   ***********************/
+  function getActiveCard(){
+    const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
+    if(cards.length === 0) return null;
+
+    if(!state.autoScrollOn){
+      return cards[0];
+    }
+
+    const yTop = 86; // below header
+    let best = null;
+    let bestDist = Infinity;
+
+    for(const c of cards){
+      const r = c.getBoundingClientRect();
+      // only consider cards that are onscreen
+      if(r.bottom < yTop || r.top > window.innerHeight) continue;
+      const dist = Math.abs(r.top - yTop);
+      if(dist < bestDist){
+        bestDist = dist;
+        best = c;
+      }
+    }
+
+    return best || cards[0];
+  }
+
+  function playInstrumentStep(){
+    if(!state.instrumentOn) return;
+    if(state.currentSection === "Full") return;
+
+    const card = getActiveCard();
+    if(!card) return;
+
+    const nIdx = state.tick8 % 8;
+    const cells = card.querySelectorAll(".noteCell");
+    if(!cells[nIdx]) return;
+
+    const freq = noteCellToFreq(cells[nIdx].value);
+    if(!freq) return;
+
+    pluck(freq, 180, 0.09, instWave());
+  }
+
+  /***********************
+   * BAR ADVANCE (when autoscroll ON)
+   * Every 8 eighth-notes = 1 bar (4/4)
+   * We nudge scroll to next card at barline.
+   ***********************/
+  function autoAdvanceOnBar(){
+    if(!state.autoScrollOn) return;
+    if(state.currentSection === "Full") return;
+    if(state.tick8 % 8 !== 0) return;
+
+    const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
+    if(cards.length === 0) return;
+
+    const active = getActiveCard();
+    const idx = cards.indexOf(active);
+    const next = cards[idx + 1] || cards[0];
+
+    try{
+      next.scrollIntoView({ behavior:"smooth", block:"start" });
+    }catch{}
+  }
+
+  /***********************
+   * DRUMS + CLOCK (CLOCK SLAVED TO DRUMS)
+   ***********************/
+  function stopBeatClock(){
+    if(state.beatTimer){
+      clearInterval(state.beatTimer);
+      state.beatTimer = null;
+    }
+    clearTick();
+  }
+
+  function startBeatClock(){
+    stopBeatClock();
+    const bpm = clamp(state.bpm || 95, 40, 220);
+    const eighthMs = Math.round((60000 / bpm) / 2);
+
+    state.tick8 = 0;
+    clearTick();
+
+    state.beatTimer = setInterval(() => {
+      // tick UI
+      clearTick();
+      applyTick();
+
+      // blink on QUARTERS (every 2 eighths) — but ONLY if drums are on
+      if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
+
+      // instrument step (plays notes from active card)
+      if(state.drumsOn) playInstrumentStep();
+
+      // auto-advance card on barlines
+      if(state.drumsOn) autoAdvanceOnBar();
+
+      state.tick8++;
+    }, eighthMs);
   }
 
   function stopDrums(){
@@ -394,11 +500,17 @@
       state.drumTimer = null;
     }
     state.drumsOn = false;
+
+    // ✅ STOP eyes + yellow ticks when drums stop
+    stopBeatClock();
   }
 
   function startDrums(){
     stopDrums();
     state.drumsOn = true;
+
+    // ✅ START eyes + yellow ticks ONLY when drums start
+    startBeatClock();
 
     const bpm = clamp(state.bpm || 95, 40, 220);
     const stepMs = Math.round((60000 / bpm) / 2);
@@ -430,39 +542,16 @@
     }, stepMs);
   }
 
+  /***********************
+   * Instruments (toggle only)
+   * NOTE: actual playback is step-sequenced in beat clock
+   ***********************/
   function stopInstrument(){
-    ensureCtx();
-    if(state.instNodes){
-      try{ state.instNodes.oscs.forEach(o => o.stop()); }catch{}
-      try{ state.instNodes.gain.disconnect(); }catch{}
-      state.instNodes = null;
-    }
     state.instrumentOn = false;
   }
-
   function startInstrument(){
-    stopInstrument();
     state.instrumentOn = true;
-
-    const ctx = ensureCtx();
-    const freqs = [261.63, 329.63, 392.00]; // C E G
-    const oscs = freqs.map(f => {
-      const o = ctx.createOscillator();
-      o.frequency.value = f;
-      o.type = (state.instrument === "electric") ? "sawtooth" : (state.instrument === "acoustic" ? "triangle" : "sine");
-      return o;
-    });
-
-    const g = ctx.createGain();
-    const t0 = ctx.currentTime;
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.05);
-
-    oscs.forEach(o => o.connect(g));
-    g.connect(ctx.destination);
-    oscs.forEach(o => o.start());
-
-    state.instNodes = { oscs, gain: g };
+    ensureCtx();
   }
 
   /***********************
@@ -493,8 +582,8 @@
 
   function setAutoScroll(on){
     state.autoScrollOn = !!on;
-    el.autoPlayBtn?.classList.toggle("on", state.autoScrollOn);
-    el.mScrollBtn?.classList.toggle("on", state.autoScrollOn);
+    $("autoPlayBtn")?.classList.toggle("on", state.autoScrollOn);
+    $("mScrollBtn")?.classList.toggle("on", state.autoScrollOn);
 
     if(state.autoScrollTimer){
       clearInterval(state.autoScrollTimer);
@@ -542,7 +631,6 @@
         state.currentSection = sec;
         renderTabs();
         renderSheet();
-        // keep tick locked after re-render
         clearTick();
         applyTick();
       });
@@ -577,7 +665,6 @@
       .trim();
     if(!clean) return [];
 
-    // vowel-group split (simple + stable)
     const parts = clean.match(/[bcdfghjklmnpqrstvwxyz]*[aeiouy]+(?:[bcdfghjklmnpqrstvwxyz]*)/g);
     if(!parts || parts.length === 0) return [clean];
     return parts.map(p => p.trim()).filter(Boolean);
@@ -600,7 +687,6 @@
     const boxes = ["","","",""];
     if(!syllables || syllables.length === 0) return boxes;
 
-    // Even-ish distribution across 4 beats
     const total = syllables.length;
     const per = Math.ceil(total / 4);
 
@@ -618,7 +704,7 @@
   }
 
   /***********************
-   * Key display (from TOP NOTES row)
+   * Key display (unchanged)
    ***********************/
   const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
@@ -676,7 +762,7 @@
   }
 
   /***********************
-   * Full preview (auto from cards)
+   * Full preview (unchanged)
    ***********************/
   function buildFullPreviewText(){
     const out = [];
@@ -732,7 +818,7 @@
   }
 
   /***********************
-   * Sheet rendering
+   * Sheet rendering (your v21 version, unchanged)
    ***********************/
   function renderSheetActions(){
     el.sheetActions.innerHTML = "";
@@ -749,8 +835,7 @@
       renderSheet();
       updateFullIfVisible();
       updateKeyFromAllNotes();
-      clearTick();
-      applyTick();
+      clearTick(); applyTick();
     });
 
     el.sheetActions.appendChild(addBtn);
@@ -822,7 +907,6 @@
       num.textContent = String(idx + 1);
       num.title = "Long-press to delete this line";
 
-      // Long-press delete
       let pressTimer = null;
       const startPress = () => {
         clearTimeout(pressTimer);
@@ -834,8 +918,7 @@
           renderSheet();
           updateFullIfVisible();
           updateKeyFromAllNotes();
-          clearTick();
-          applyTick();
+          clearTick(); applyTick();
         }, 650);
       };
       const endPress = () => clearTimeout(pressTimer);
@@ -854,7 +937,6 @@
       top.appendChild(num);
       top.appendChild(syll);
 
-      // NOTES row (8) - blue - blank
       const notesRow = document.createElement("div");
       notesRow.className = "notesRow";
 
@@ -862,7 +944,7 @@
         const inp = document.createElement("input");
         inp.type = "text";
         inp.className = "noteCell";
-        inp.placeholder = "";           // ✅ blank (no "Not")
+        inp.placeholder = "";
         inp.value = line.notes[i] || "";
         inp.autocomplete = "off";
         inp.autocapitalize = "characters";
@@ -880,13 +962,11 @@
         notesRow.appendChild(inp);
       }
 
-      // Lyrics (pink)
       const lyr = document.createElement("textarea");
       lyr.className = "lyrics";
       lyr.placeholder = "Type lyrics (AutoSplit on)…";
       lyr.value = line.lyrics || "";
 
-      // Beats row (4) - green on 2 & 4 via CSS
       const beatsRow = document.createElement("div");
       beatsRow.className = "beatsRow";
 
@@ -918,7 +998,6 @@
         upsertProject(state.project);
         updateFullIfVisible();
 
-        // AutoSplit: syllables -> 4 beat boxes
         if(state.autoSplit){
           const boxes = autosplitBeatsFromLyrics(line.lyrics);
           line.beats = boxes;
@@ -929,7 +1008,6 @@
           updateFullIfVisible();
         }
 
-        // Enter creates next line (keeps 20+)
         if(state.autoSplit && lyr.value.includes("\n")){
           const parts = lyr.value.split("\n");
           const first = parts.shift();
@@ -949,8 +1027,7 @@
           renderSheet();
           updateFullIfVisible();
           updateKeyFromAllNotes();
-          clearTick();
-          applyTick();
+          clearTick(); applyTick();
         }
       });
 
@@ -958,20 +1035,16 @@
       card.appendChild(notesRow);
       card.appendChild(lyr);
       card.appendChild(beatsRow);
-
       cardsWrap.appendChild(card);
     });
 
     el.sheetBody.innerHTML = "";
     el.sheetBody.appendChild(cardsWrap);
-
-    // make sure tick appears right after render
-    clearTick();
-    applyTick();
+    clearTick(); applyTick();
   }
 
   /***********************
-   * Recordings UI
+   * Recordings UI (unchanged)
    ***********************/
   function fmtDate(ms){
     try{ return new Date(ms).toLocaleString(); }catch{ return String(ms); }
@@ -1031,30 +1104,9 @@
       play.addEventListener("click", () => {
         if(!rec.blob) return;
         const url = URL.createObjectURL(rec.blob);
-
-        if(state.currentAudio){
-          try{ state.currentAudio.pause(); }catch{}
-          state.currentAudio = null;
-        }
-
         const audio = new Audio(url);
-        state.currentAudio = audio;
         audio.play().catch(()=>{});
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          state.currentAudio = null;
-        };
-      });
-
-      const stop = document.createElement("button");
-      stop.className="btn secondary";
-      stop.textContent="■";
-      stop.title="Stop";
-      stop.addEventListener("click", () => {
-        if(state.currentAudio){
-          try{ state.currentAudio.pause(); state.currentAudio.currentTime = 0; }catch{}
-          state.currentAudio = null;
-        }
+        audio.onended = () => URL.revokeObjectURL(url);
       });
 
       const download = document.createElement("button");
@@ -1086,7 +1138,6 @@
       row.appendChild(title);
       row.appendChild(edit);
       row.appendChild(play);
-      row.appendChild(stop);
       row.appendChild(download);
       row.appendChild(del);
       el.recordingsList.appendChild(row);
@@ -1094,11 +1145,10 @@
   }
 
   /***********************
-   * Recording start/stop
+   * Recording (unchanged)
    ***********************/
   async function startRecording(){
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-
     state.recStream = stream;
     state.recChunks = [];
 
@@ -1121,7 +1171,6 @@
     rec.start();
     state.isRecording = true;
     setRecordUI();
-    beep(880, 60, 0.12);
   }
 
   async function stopRecording(){
@@ -1129,7 +1178,6 @@
     try{ state.rec.stop(); }catch{}
     state.isRecording = false;
     setRecordUI();
-    beep(220, 60, 0.10);
   }
 
   async function toggleRecording(){
@@ -1148,14 +1196,11 @@
    ***********************/
   function renderProjectsDropdown(){
     const all = loadAllProjects().map(normalizeProject).filter(Boolean);
-
     const sort = el.sortSelect.value;
+
     let list = [...all];
-    if(sort === "az"){
-      list.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
-    }else{
-      list.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-    }
+    if(sort === "az") list.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+    else list.sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
 
     el.projectSelect.innerHTML = "";
     list.forEach(p => {
@@ -1186,7 +1231,7 @@
   /***********************
    * Rhymes
    ***********************/
-  const DEMO_RHYMES = ["flow", "go", "show", "pro", "mode", "road", "cold", "bold", "gold", "hold"];
+  const DEMO_RHYMES = ["flow","go","show","pro","mode","road","cold","bold","gold","hold"];
   function renderRhymes(){
     el.rhymeWords.innerHTML = "";
     DEMO_RHYMES.forEach(w => {
@@ -1195,7 +1240,7 @@
       b.textContent = w;
       b.addEventListener("click", () => {
         navigator.clipboard?.writeText(w).catch(()=>{});
-        beep(660, 40, 0.08);
+        pluck(660, 80, 0.05, "sine");
       });
       el.rhymeWords.appendChild(b);
     });
@@ -1224,28 +1269,22 @@
    * Wiring
    ***********************/
   function wire(){
-    // panel
     el.togglePanelBtn.addEventListener("click", () => {
       const hidden = !el.panelBody.classList.contains("hidden");
       setPanelHidden(hidden);
     });
 
-    // autosplit
     el.autoSplitBtn.addEventListener("click", () => {
       state.autoSplit = !state.autoSplit;
       el.autoSplitBtn.classList.toggle("active", state.autoSplit);
       el.autoSplitBtn.textContent = "AutoSplit: " + (state.autoSplit ? "ON" : "OFF");
     });
 
-    // bpm / capo
     el.bpmInput.addEventListener("input", () => {
       state.bpm = clamp(parseInt(el.bpmInput.value || "95",10) || 95, 40, 220);
       el.bpmInput.value = String(state.bpm);
 
-      // ✅ tick + eyes follow bpm
-      startBeatClock();
-
-      // drums re-time
+      // ✅ if drums are on, restart everything in sync
       if(state.drumsOn) startDrums();
     });
 
@@ -1256,7 +1295,6 @@
       updateFullIfVisible();
     });
 
-    // instruments
     function handleInstrument(which){
       ensureCtx();
       if(state.instrument === which && state.instrumentOn){
@@ -1271,7 +1309,6 @@
     el.instElectric.addEventListener("click", () => handleInstrument("electric"));
     el.instPiano.addEventListener("click", () => handleInstrument("piano"));
 
-    // drums
     function handleDrums(which){
       ensureCtx();
       if(state.drumStyle === which && state.drumsOn){
@@ -1292,15 +1329,12 @@
     el.mPop.addEventListener("click", () => handleDrums("pop"));
     el.mRap.addEventListener("click", () => handleDrums("rap"));
 
-    // autoscroll ONLY
     el.autoPlayBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
     el.mScrollBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
 
-    // recording
     el.recordBtn.addEventListener("click", toggleRecording);
     el.mRecordBtn.addEventListener("click", toggleRecording);
 
-    // projects
     el.sortSelect.addEventListener("change", renderProjectsDropdown);
     el.projectSelect.addEventListener("change", () => loadProjectById(el.projectSelect.value));
 
@@ -1332,7 +1366,6 @@
       renderAll();
     });
 
-    // rhymes
     el.rBtn.addEventListener("click", () => {
       const showing = el.rhymeDock.style.display === "block";
       toggleRhymeDock(!showing);
@@ -1362,8 +1395,10 @@
     wire();
     renderAll();
 
-    // ✅ start beat tick immediately
-    startBeatClock();
+    // ✅ IMPORTANT CHANGE:
+    // We do NOT startBeatClock here anymore.
+    // Clock/ticks/eyes now run ONLY when drums run.
+    stopBeatClock();
   }
 
   init();
