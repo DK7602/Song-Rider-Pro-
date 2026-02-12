@@ -1,4 +1,4 @@
-/* Song Rider Pro - app.js (FULL REPLACE v19) */
+/* Song Rider Pro - app.js (FULL REPLACE v20) */
 (() => {
   "use strict";
 
@@ -74,22 +74,23 @@
   };
 
   /***********************
-   * Sections
+   * Sections (ORDER FIXED, OUTRO REMOVED)
    ***********************/
-  const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","CHORUS 3","BRIDGE","OUTRO"];
-  const DEFAULT_LINES_PER_SECTION = 20; // ✅ required
+  const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
+  const DEFAULT_LINES_PER_SECTION = 20;
 
   /***********************
-   * Project storage (localStorage)
+   * Project storage
    ***********************/
-  const LS_KEY = "songrider_v19_projects";
-  const LS_CUR = "songrider_v19_currentProjectId";
+  const LS_KEY = "songrider_v20_projects";
+  const LS_CUR = "songrider_v20_currentProjectId";
 
   function newLine(){
     return {
       id: uuid(),
+      notes: Array(8).fill(""),  // ✅ top note boxes (blank)
       lyrics: "",
-      beats: ["", "", "", ""]  // ✅ 4 beat boxes
+      beats: Array(4).fill("")   // ✅ bottom beat/syllable boxes
     };
   }
 
@@ -98,13 +99,12 @@
     SECTIONS.filter(s=>s!=="Full").forEach(sec => {
       sections[sec] = Array.from({length: DEFAULT_LINES_PER_SECTION}, () => newLine());
     });
-
     return {
       id: uuid(),
       name,
       createdAt: now(),
       updatedAt: now(),
-      fullText: "",          // ✅ editable Full page text
+      fullText: "",
       sections
     };
   }
@@ -143,25 +143,24 @@
     if(!p || typeof p !== "object") return null;
 
     if(typeof p.fullText !== "string") p.fullText = "";
-
-    if(!p.sections || typeof p.sections !== "object"){
-      p.sections = {};
-    }
+    if(!p.sections || typeof p.sections !== "object") p.sections = {};
 
     SECTIONS.filter(s=>s!=="Full").forEach(sec => {
       if(!Array.isArray(p.sections[sec])) p.sections[sec] = [];
-      // normalize each line
+
       p.sections[sec] = p.sections[sec].map(line => {
         const L = (line && typeof line === "object") ? line : {};
         if(typeof L.id !== "string") L.id = uuid();
+        if(!Array.isArray(L.notes)) L.notes = Array(8).fill("");
         if(typeof L.lyrics !== "string") L.lyrics = "";
-        // ✅ beats (4)
-        if(!Array.isArray(L.beats)) L.beats = ["","","",""];
+        if(!Array.isArray(L.beats)) L.beats = Array(4).fill("");
+
+        L.notes = Array.from({length:8}, (_,i)=> String(L.notes[i] ?? "").trim());
         L.beats = Array.from({length:4}, (_,i)=> String(L.beats[i] ?? "").trim());
+
         return L;
       });
 
-      // ✅ pad to 20 cards
       while(p.sections[sec].length < DEFAULT_LINES_PER_SECTION){
         p.sections[sec].push(newLine());
       }
@@ -184,7 +183,7 @@
   /***********************
    * IndexedDB (Recordings)
    ***********************/
-  const DB_NAME = "songrider_db_v19";
+  const DB_NAME = "songrider_db_v20";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -263,9 +262,11 @@
     rec: null,
     recChunks: [],
 
-    // ✅ headshot beat blink
+    // beat clock
     beatTimer: null,
-    beatStep: 0
+    tick8: 0,              // 8th-note counter
+    lastTickNoteEl: null,
+    lastTickBeatEl: null
   };
 
   /***********************
@@ -277,17 +278,61 @@
     setTimeout(() => el.headshotWrap.classList.remove("blink"), 80);
   }
 
+  /***********************
+   * Beat tick highlighter (yellow tick on notes + beat boxes)
+   * - notes: 8 boxes (8th notes)
+   * - beats: 4 boxes (quarters) => index = floor((tick8 % 8)/2)
+   ***********************/
+  function clearTick(){
+    if(state.lastTickNoteEl) state.lastTickNoteEl.classList.remove("tick");
+    if(state.lastTickBeatEl) state.lastTickBeatEl.classList.remove("tick");
+    state.lastTickNoteEl = null;
+    state.lastTickBeatEl = null;
+  }
+
+  function applyTick(){
+    // Only tick what exists on screen in the current sheet
+    const root = el.sheetBody;
+    if(!root) return;
+
+    const noteCells = root.querySelectorAll(".noteCell");
+    const beatCells = root.querySelectorAll(".beatCell");
+
+    if(noteCells.length > 0){
+      const nIdx = state.tick8 % 8;
+      const noteEl = noteCells[nIdx] || null;
+      if(noteEl){
+        if(state.lastTickNoteEl && state.lastTickNoteEl !== noteEl) state.lastTickNoteEl.classList.remove("tick");
+        noteEl.classList.add("tick");
+        state.lastTickNoteEl = noteEl;
+      }
+    }
+
+    if(beatCells.length > 0){
+      const bIdx = Math.floor((state.tick8 % 8) / 2); // 0..3
+      const beatEl = beatCells[bIdx] || null;
+      if(beatEl){
+        if(state.lastTickBeatEl && state.lastTickBeatEl !== beatEl) state.lastTickBeatEl.classList.remove("tick");
+        beatEl.classList.add("tick");
+        state.lastTickBeatEl = beatEl;
+      }
+    }
+  }
+
   function startBeatClock(){
     stopBeatClock();
     const bpm = clamp(state.bpm || 95, 40, 220);
-    const quarterMs = Math.round(60000 / bpm);
+    const eighthMs = Math.round((60000 / bpm) / 2);
 
-    state.beatStep = 0;
+    state.tick8 = 0;
+    clearTick();
+
     state.beatTimer = setInterval(() => {
-      // blink every beat always (even with drums off)
-      doBlink();
-      state.beatStep++;
-    }, quarterMs);
+      // blink on quarter beats (every 2 eighths)
+      if(state.tick8 % 2 === 0) doBlink();
+      applyTick();
+      state.tick8++;
+    }, eighthMs);
   }
 
   function stopBeatClock(){
@@ -295,6 +340,7 @@
       clearInterval(state.beatTimer);
       state.beatTimer = null;
     }
+    clearTick();
   }
 
   /***********************
@@ -347,8 +393,8 @@
   }
 
   function drumHit(kind){
-    if(kind === "kick") { beep(70, 90, 0.16); doBlink(); }
-    if(kind === "snare"){ noise(60, 0.10); beep(180, 40, 0.04); doBlink(); }
+    if(kind === "kick") beep(70, 90, 0.16);
+    if(kind === "snare"){ noise(60, 0.10); beep(180, 40, 0.04); }
     if(kind === "hat"){ noise(25, 0.05); }
   }
 
@@ -489,7 +535,6 @@
   function ensureSectionArray(sec){
     if(sec === "Full") return [];
     if(!state.project.sections[sec]) state.project.sections[sec] = [];
-    // always keep at least 20
     while(state.project.sections[sec].length < DEFAULT_LINES_PER_SECTION){
       state.project.sections[sec].push(newLine());
     }
@@ -507,6 +552,9 @@
         state.currentSection = sec;
         renderTabs();
         renderSheet();
+        // keep tick working after rerender
+        clearTick();
+        applyTick();
       });
       el.tabs.appendChild(b);
     });
@@ -528,31 +576,72 @@
     return total;
   }
 
-  function splitTo4Chunks(text){
-    const t = String(text||"").trim();
-    if(!t) return ["","","",""];
-    const parts = t.split(/\s+/).filter(Boolean);
-    if(parts.length <= 4){
-      return [
-        parts[0] || "",
-        parts[1] || "",
-        parts[2] || "",
-        parts[3] || ""
-      ];
-    }
-    // spread words roughly evenly across 4 beats
-    const out = ["","","",""];
-    const per = Math.ceil(parts.length / 4);
-    let k = 0;
-    for(let i=0;i<4;i++){
-      out[i] = parts.slice(k, k+per).join(" ");
-      k += per;
+  /***********************
+   * AutoSplit (SYLLABLES -> 4 beat boxes)
+   ***********************/
+  function splitWordIntoSyllables(word){
+    const w = String(word||"").toLowerCase().replace(/[^a-z']/g,"");
+    if(!w) return [];
+    // crude but usable: split around vowel groups
+    const parts = w.match(/[bcdfghjklmnpqrstvwxyz]*[aeiouy]+(?:[^aeiouy]*)/g);
+    if(!parts || parts.length === 0) return [w];
+    return parts.map(p => p.trim()).filter(Boolean);
+  }
+
+  function textToSyllables(text){
+    const raw = String(text||"").trim();
+    if(!raw) return [];
+    const words = raw.split(/\s+/).filter(Boolean);
+    const out = [];
+    for(const ww of words){
+      const clean = ww.replace(/[^\w'’-]/g,"").trim();
+      if(!clean) continue;
+      const syls = splitWordIntoSyllables(clean);
+      if(syls.length <= 1){
+        out.push(clean);
+      }else{
+        // push syllables as separate tokens (what you wanted)
+        syls.forEach(s => out.push(s));
+      }
     }
     return out;
   }
 
+  function distributeTo4Boxes(syllables){
+    const boxes = ["","","",""];
+    if(!syllables || syllables.length === 0) return boxes;
+
+    const total = syllables.length;
+    const target = total / 4;
+
+    let b = 0;
+    let countInBox = 0;
+    let threshold = target;
+
+    for(let i=0;i<syllables.length;i++){
+      const s = syllables[i];
+      if(!boxes[b]) boxes[b] = s;
+      else boxes[b] += " " + s;
+
+      countInBox += 1;
+
+      if(b < 3 && countInBox >= threshold){
+        b += 1;
+        threshold = target; // keep same
+        countInBox = 0;
+      }
+    }
+
+    return boxes;
+  }
+
+  function autosplitBeatsFromLyrics(lyrics){
+    const syls = textToSyllables(lyrics);
+    return distributeTo4Boxes(syls);
+  }
+
   /***********************
-   * Key display (simple: from beat boxes)
+   * Key display (from TOP NOTES row)
    ***********************/
   const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
@@ -593,11 +682,11 @@
     return best;
   }
 
-  function updateKeyFromAllBeats(){
+  function updateKeyFromAllNotes(){
     const hist = Array(12).fill(0);
     SECTIONS.filter(s => s !== "Full").forEach(sec => {
       (state.project.sections[sec] || []).forEach(line => {
-        (Array.isArray(line.beats) ? line.beats : []).forEach(tok => {
+        (Array.isArray(line.notes) ? line.notes : []).forEach(tok => {
           const pc = noteToPC(tok);
           if(pc !== null) hist[pc] += 1;
         });
@@ -610,7 +699,7 @@
   }
 
   /***********************
-   * Full preview (from cards)
+   * Full preview (from cards) — keep perfect
    ***********************/
   function buildFullPreviewText(){
     const out = [];
@@ -620,9 +709,11 @@
       const arr = state.project.sections[sec] || [];
       const hasAny = arr.some(line => {
         const lyr = String(line.lyrics || "").trim();
+        const notes = Array.isArray(line.notes) ? line.notes : [];
         const beats = Array.isArray(line.beats) ? line.beats : [];
+        const hasNotes = notes.some(n => String(n||"").trim());
         const hasBeats = beats.some(b => String(b||"").trim());
-        return !!lyr || hasBeats;
+        return !!lyr || hasNotes || hasBeats;
       });
       if(!hasAny) return;
 
@@ -631,13 +722,20 @@
       out.push("");
 
       arr.forEach((line, idx) => {
-        const beats = Array.isArray(line.beats) ? line.beats : ["","","",""];
-        const beatLine = beats.map(b => (String(b||"").trim() || "—")).join(" | ");
+        const notes = Array.isArray(line.notes) ? line.notes : Array(8).fill("");
+        const beats = Array.isArray(line.beats) ? line.beats : Array(4).fill("");
         const lyr = String(line.lyrics || "").trim();
 
-        if(beatLine.replace(/—|\||\s/g,"").length > 0) out.push(`(${idx+1})  ${beatLine}`);
-        if(lyr) out.push(`     ${lyr}`);
-        if(lyr || beatLine) out.push("");
+        const notesLine = notes.map(n => (String(n||"").trim() || "—")).join(" | ");
+        const beatsLine = beats.map(b => (String(b||"").trim() || "—")).join(" | ");
+
+        const hasAnything = (notesLine.replace(/—|\||\s/g,"").length > 0) || (beatsLine.replace(/—|\||\s/g,"").length > 0) || !!lyr;
+        if(!hasAnything) return;
+
+        out.push(`(${idx+1})  NOTES: ${notesLine}`);
+        out.push(`     BEATS: ${beatsLine}`);
+        if(lyr) out.push(`     LYRICS: ${lyr}`);
+        out.push("");
       });
 
       out.push("");
@@ -670,6 +768,7 @@
       upsertProject(state.project);
       renderSheet();
       updateFullIfVisible();
+      updateKeyFromAllNotes();
     });
 
     el.sheetActions.appendChild(addBtn);
@@ -725,7 +824,9 @@
     const arr = ensureSectionArray(state.currentSection);
 
     arr.forEach((line, idx) => {
-      if(!Array.isArray(line.beats)) line.beats = ["","","",""];
+      if(!Array.isArray(line.notes)) line.notes = Array(8).fill("");
+      if(!Array.isArray(line.beats)) line.beats = Array(4).fill("");
+      line.notes = Array.from({length:8}, (_,i)=> String(line.notes[i] ?? "").trim());
       line.beats = Array.from({length:4}, (_,i)=> String(line.beats[i] ?? "").trim());
 
       const card = document.createElement("div");
@@ -746,12 +847,11 @@
         pressTimer = setTimeout(() => {
           if(!confirm(`Delete line ${idx+1} from ${state.currentSection}?`)) return;
           arr.splice(idx, 1);
-          // keep at least 20 always
           while(arr.length < DEFAULT_LINES_PER_SECTION) arr.push(newLine());
           upsertProject(state.project);
           renderSheet();
           updateFullIfVisible();
-          updateKeyFromAllBeats();
+          updateKeyFromAllNotes();
         }, 650);
       };
       const endPress = () => clearTimeout(pressTimer);
@@ -770,46 +870,63 @@
       top.appendChild(num);
       top.appendChild(syll);
 
-      // ✅ 4 beat boxes
-      const beatsRow = document.createElement("div");
-      beatsRow.className = "beatsRow";
+      // ✅ Notes row (8) - BLUE - BLANK
+      const notesRow = document.createElement("div");
+      notesRow.className = "notesRow";
 
-      for(let i=0;i<4;i++){
+      for(let i=0;i<8;i++){
         const inp = document.createElement("input");
         inp.type = "text";
-        inp.className = "beatCell";
-
-        // ✅ placeholder instead of "Not"
-        inp.placeholder = "Not";
-        inp.value = String(line.beats[i] || "");
-
+        inp.className = "noteCell";
+        inp.placeholder = "Not";          // placeholder only
+        inp.value = line.notes[i] || "";  // value blank
         inp.autocomplete = "off";
         inp.autocapitalize = "characters";
         inp.spellcheck = false;
 
-        // focus reliably on mobile
         inp.addEventListener("pointerdown", (e)=>{ e.stopPropagation(); });
 
-        inp.addEventListener("focus", () => {
-          // ✅ one-tap overwrite behavior
-          // if empty, do nothing; if user wants to replace, they can just type
-          // (placeholder handles the "Not" without deleting)
-        });
-
         inp.addEventListener("input", () => {
-          line.beats[i] = String(inp.value || "").trim();
+          line.notes[i] = String(inp.value || "").trim();
           upsertProject(state.project);
-          updateKeyFromAllBeats();
+          updateKeyFromAllNotes();
           updateFullIfVisible();
         });
 
-        beatsRow.appendChild(inp);
+        notesRow.appendChild(inp);
       }
 
+      // ✅ Lyrics (PINK)
       const lyr = document.createElement("textarea");
       lyr.className = "lyrics";
       lyr.placeholder = "Type lyrics (AutoSplit on)…";
       lyr.value = line.lyrics || "";
+
+      // ✅ Beats row (4) - syllable boxes (green on 2 & 4 via CSS)
+      const beatsRow = document.createElement("div");
+      beatsRow.className = "beatsRow";
+
+      const beatInputs = [];
+      for(let i=0;i<4;i++){
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "beatCell";
+        inp.placeholder = "";
+        inp.value = String(line.beats[i] || "");
+        inp.autocomplete = "off";
+        inp.spellcheck = false;
+
+        inp.addEventListener("pointerdown", (e)=>{ e.stopPropagation(); });
+
+        inp.addEventListener("input", () => {
+          line.beats[i] = String(inp.value || "").trim();
+          upsertProject(state.project);
+          updateFullIfVisible();
+        });
+
+        beatInputs.push(inp);
+        beatsRow.appendChild(inp);
+      }
 
       lyr.addEventListener("input", () => {
         line.lyrics = lyr.value;
@@ -817,21 +934,18 @@
         upsertProject(state.project);
         updateFullIfVisible();
 
-        // ✅ AutoSplit: fills 4 beat boxes from the lyrics (simple word spread)
+        // ✅ AutoSplit: lyrics -> syllables -> 4 beat boxes
         if(state.autoSplit){
-          const chunks = splitTo4Chunks(line.lyrics);
-          line.beats = chunks;
-          // update UI beat inputs instantly
-          const beatInputs = beatsRow.querySelectorAll("input.beatCell");
-          beatInputs.forEach((bi, k) => {
-            bi.value = line.beats[k] || "";
-          });
+          const boxes = autosplitBeatsFromLyrics(line.lyrics);
+          line.beats = boxes;
+          for(let k=0;k<4;k++){
+            beatInputs[k].value = line.beats[k] || "";
+          }
           upsertProject(state.project);
-          updateKeyFromAllBeats();
           updateFullIfVisible();
         }
 
-        // Enter makes a new card and keeps 20+
+        // Enter creates next line (still keeps 20+)
         if(state.autoSplit && lyr.value.includes("\n")){
           const parts = lyr.value.split("\n");
           const first = parts.shift();
@@ -841,23 +955,24 @@
           if(rest){
             const nl = newLine();
             nl.lyrics = rest;
-            nl.beats = splitTo4Chunks(rest);
+            nl.beats = autosplitBeatsFromLyrics(rest);
             arr.splice(idx+1, 0, nl);
           }
 
-          // keep at least 20 always
           while(arr.length < DEFAULT_LINES_PER_SECTION) arr.push(newLine());
 
           upsertProject(state.project);
           renderSheet();
           updateFullIfVisible();
-          updateKeyFromAllBeats();
+          updateKeyFromAllNotes();
         }
       });
 
       card.appendChild(top);
-      card.appendChild(beatsRow);
+      card.appendChild(notesRow);
       card.appendChild(lyr);
+      card.appendChild(beatsRow);
+
       cardsWrap.appendChild(card);
     });
 
@@ -989,7 +1104,7 @@
   }
 
   /***********************
-   * Recording start/stop (toggle)
+   * Recording start/stop (Record -> Stop)
    ***********************/
   async function startRecording(){
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
@@ -1076,10 +1191,12 @@
     state.project = p;
     localStorage.setItem(LS_CUR, p.id);
     renderAll();
+    clearTick();
+    applyTick();
   }
 
   /***********************
-   * Rhymes (always opens)
+   * Rhymes
    ***********************/
   const DEMO_RHYMES = ["flow", "go", "show", "pro", "mode", "road", "cold", "bold", "gold", "hold"];
   function renderRhymes(){
@@ -1109,8 +1226,11 @@
     renderRecordings();
     renderInstrumentUI();
     renderDrumUI();
-    updateKeyFromAllBeats();
+    updateKeyFromAllNotes();
     setRecordUI();
+    // refresh tick after rerender
+    clearTick();
+    applyTick();
   }
 
   /***********************
@@ -1135,7 +1255,7 @@
       state.bpm = clamp(parseInt(el.bpmInput.value || "95",10) || 95, 40, 220);
       el.bpmInput.value = String(state.bpm);
 
-      // ✅ beat blink matches BPM
+      // ✅ tick + eyes follow bpm
       startBeatClock();
 
       // drums re-time
@@ -1145,7 +1265,7 @@
     el.capoInput.addEventListener("input", () => {
       state.capo = clamp(parseInt(el.capoInput.value || "0",10) || 0, 0, 12);
       el.capoInput.value = String(state.capo);
-      updateKeyFromAllBeats();
+      updateKeyFromAllNotes();
       updateFullIfVisible();
     });
 
@@ -1255,7 +1375,7 @@
     wire();
     renderAll();
 
-    // ✅ start BPM blink immediately
+    // ✅ start beat tick immediately
     startBeatClock();
   }
 
