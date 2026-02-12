@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE v22) */
+/* app.js (FULL REPLACE v23) */
 (() => {
   "use strict";
 
@@ -70,8 +70,19 @@
     rBtn: $("rBtn"),
     rhymeDock: $("rhymeDock"),
     hideRhymeBtn: $("hideRhymeBtn"),
-    rhymeWords: $("rhymeWords")
+    rhymeWords: $("rhymeWords"),
+    rhymeTitle: $("rhymeTitle")
   };
+
+  // Track last lyric textarea (for rhyme insert)
+  let lastLyricsTextarea = null;
+
+  document.addEventListener("focusin", (e) => {
+    const t = e.target;
+    if(t && t.tagName === "TEXTAREA" && t.classList.contains("lyrics")){
+      lastLyricsTextarea = t;
+    }
+  });
 
   /***********************
    * Sections (ORDER LOCKED)
@@ -82,8 +93,8 @@
   /***********************
    * Project storage
    ***********************/
-  const LS_KEY = "songrider_v22_projects";
-  const LS_CUR = "songrider_v22_currentProjectId";
+  const LS_KEY = "songrider_v23_projects";
+  const LS_CUR = "songrider_v23_currentProjectId";
 
   function newLine(){
     return {
@@ -183,7 +194,7 @@
   /***********************
    * IndexedDB (Recordings)
    ***********************/
-  const DB_NAME = "songrider_db_v22";
+  const DB_NAME = "songrider_db_v23";
   const DB_VER = 1;
   const STORE = "recordings";
 
@@ -259,7 +270,7 @@
     rec: null,
     recChunks: [],
 
-    // beat clock (now SLAVED to drums)
+    // beat clock (slaved to drums)
     beatTimer: null,
     tick8: 0
   };
@@ -274,7 +285,7 @@
   }
 
   /***********************
-   * Tick UI (still ticks across all cards)
+   * Tick UI (ticks across all cards)
    ***********************/
   function clearTick(){
     const root = el.sheetBody;
@@ -311,7 +322,6 @@
     return state.ctx;
   }
 
-  // short envelope tone (not sustained)
   function pluck(freq=440, ms=180, gain=0.08, type="sine"){
     const ctx = ensureCtx();
     const t0 = ctx.currentTime;
@@ -372,7 +382,6 @@
   function noteCellToFreq(v){
     const s = String(v||"").trim().toUpperCase();
     if(!s) return null;
-    // allow "Bb" typed as "bb" etc
     const m = s.match(/^([A-G])([#B])?$/);
     if(!m) return null;
     const root = m[1];
@@ -389,8 +398,6 @@
 
   /***********************
    * ACTIVE CARD SELECTION
-   * - If autoscroll ON: pick top-most visible card
-   * - Else: just pick the first card
    ***********************/
   function getActiveCard(){
     const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
@@ -400,13 +407,12 @@
       return cards[0];
     }
 
-    const yTop = 86; // below header
+    const yTop = 86;
     let best = null;
     let bestDist = Infinity;
 
     for(const c of cards){
       const r = c.getBoundingClientRect();
-      // only consider cards that are onscreen
       if(r.bottom < yTop || r.top > window.innerHeight) continue;
       const dist = Math.abs(r.top - yTop);
       if(dist < bestDist){
@@ -435,11 +441,6 @@
     pluck(freq, 180, 0.09, instWave());
   }
 
-  /***********************
-   * BAR ADVANCE (when autoscroll ON)
-   * Every 8 eighth-notes = 1 bar (4/4)
-   * We nudge scroll to next card at barline.
-   ***********************/
   function autoAdvanceOnBar(){
     if(!state.autoScrollOn) return;
     if(state.currentSection === "Full") return;
@@ -477,17 +478,11 @@
     clearTick();
 
     state.beatTimer = setInterval(() => {
-      // tick UI
       clearTick();
       applyTick();
 
-      // blink on QUARTERS (every 2 eighths) — but ONLY if drums are on
       if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
-
-      // instrument step (plays notes from active card)
       if(state.drumsOn) playInstrumentStep();
-
-      // auto-advance card on barlines
       if(state.drumsOn) autoAdvanceOnBar();
 
       state.tick8++;
@@ -500,16 +495,12 @@
       state.drumTimer = null;
     }
     state.drumsOn = false;
-
-    // ✅ STOP eyes + yellow ticks when drums stop
     stopBeatClock();
   }
 
   function startDrums(){
     stopDrums();
     state.drumsOn = true;
-
-    // ✅ START eyes + yellow ticks ONLY when drums start
     startBeatClock();
 
     const bpm = clamp(state.bpm || 95, 40, 220);
@@ -544,15 +535,9 @@
 
   /***********************
    * Instruments (toggle only)
-   * NOTE: actual playback is step-sequenced in beat clock
    ***********************/
-  function stopInstrument(){
-    state.instrumentOn = false;
-  }
-  function startInstrument(){
-    state.instrumentOn = true;
-    ensureCtx();
-  }
+  function stopInstrument(){ state.instrumentOn = false; }
+  function startInstrument(){ state.instrumentOn = true; ensureCtx(); }
 
   /***********************
    * UI helpers
@@ -655,56 +640,54 @@
   }
 
   /***********************
-   * AutoSplit (SYLLABLES -> 4 beat boxes)
+   * ✅ AutoSplit v2
+   * - NEVER splits inside a word
+   * - Uses syllable estimate per word to distribute nicely
    ***********************/
-  function wordToSyllableTokens(word){
-    const clean = String(word||"")
-      .replace(/[’]/g,"'")
-      .replace(/[^a-zA-Z']/g,"")
-      .toLowerCase()
-      .trim();
-    if(!clean) return [];
-
-    const parts = clean.match(/[bcdfghjklmnpqrstvwxyz]*[aeiouy]+(?:[bcdfghjklmnpqrstvwxyz]*)/g);
-    if(!parts || parts.length === 0) return [clean];
-    return parts.map(p => p.trim()).filter(Boolean);
+  function tokenizeWords(text){
+    return String(text||"")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .filter(Boolean);
   }
 
-  function textToSyllables(text){
-    const raw = String(text||"").trim();
-    if(!raw) return [];
-    const words = raw.split(/\s+/).filter(Boolean);
-    const out = [];
-    for(const w of words){
-      const syls = wordToSyllableTokens(w);
-      if(syls.length <= 1) out.push(w.replace(/\s+/g,""));
-      else syls.forEach(s => out.push(s));
-    }
-    return out.filter(Boolean);
-  }
-
-  function distributeTo4Boxes(syllables){
-    const boxes = ["","","",""];
-    if(!syllables || syllables.length === 0) return boxes;
-
-    const total = syllables.length;
-    const per = Math.ceil(total / 4);
-
-    let k = 0;
-    for(let i=0;i<4;i++){
-      boxes[i] = syllables.slice(k, k+per).join(" ").trim();
-      k += per;
-    }
-    return boxes;
+  function estimateSyllablesWord(w){
+    // Use the same syllable counter logic but on a single token
+    return Math.max(1, countSyllablesInline(w));
   }
 
   function autosplitBeatsFromLyrics(lyrics){
-    const syls = textToSyllables(lyrics);
-    return distributeTo4Boxes(syls);
+    const words = tokenizeWords(lyrics);
+    if(words.length === 0) return ["","","",""];
+
+    const sylCounts = words.map(estimateSyllablesWord);
+    const totalSyl = sylCounts.reduce((a,b)=>a+b,0);
+    const target = Math.max(1, Math.ceil(totalSyl / 4));
+
+    const boxes = [[],[],[],[]];
+    let bi = 0;
+    let acc = 0;
+
+    for(let i=0;i<words.length;i++){
+      const w = words[i];
+      const s = sylCounts[i];
+
+      // move to next box if current box has enough AND we still have boxes left
+      if(bi < 3 && acc >= target){
+        bi++;
+        acc = 0;
+      }
+
+      boxes[bi].push(w);
+      acc += s;
+    }
+
+    return boxes.map(arr => arr.join(" ").trim());
   }
 
   /***********************
-   * Key display (unchanged)
+   * Key display
    ***********************/
   const NOTE_TO_PC = {
     "C":0,"C#":1,"DB":1,"D":2,"D#":3,"EB":3,"E":4,"F":5,"F#":6,"GB":6,"G":7,"G#":8,"AB":8,"A":9,"A#":10,"BB":10,"B":11
@@ -762,8 +745,16 @@
   }
 
   /***********************
-   * Full preview (unchanged)
+   * ✅ Full preview (NO BEATS)
+   * - keeps line number
+   * - removes "NOTES:" and "LYRICS:"
+   * - wraps nicely (CSS handles wrap)
    ***********************/
+  function compactNotesLine(notesArr){
+    const notes = Array.isArray(notesArr) ? notesArr : Array(8).fill("");
+    return notes.map(n => (String(n||"").trim() || "—")).join(" ");
+  }
+
   function buildFullPreviewText(){
     const out = [];
     let any = false;
@@ -773,10 +764,8 @@
       const hasAny = arr.some(line => {
         const lyr = String(line.lyrics || "").trim();
         const notes = Array.isArray(line.notes) ? line.notes : [];
-        const beats = Array.isArray(line.beats) ? line.beats : [];
         const hasNotes = notes.some(n => String(n||"").trim());
-        const hasBeats = beats.some(b => String(b||"").trim());
-        return !!lyr || hasNotes || hasBeats;
+        return !!lyr || hasNotes;
       });
       if(!hasAny) return;
 
@@ -785,23 +774,16 @@
       out.push("");
 
       arr.forEach((line, idx) => {
-        const notes = Array.isArray(line.notes) ? line.notes : Array(8).fill("");
-        const beats = Array.isArray(line.beats) ? line.beats : Array(4).fill("");
         const lyr = String(line.lyrics || "").trim();
+        const notesLine = compactNotesLine(line.notes);
 
-        const notesLine = notes.map(n => (String(n||"").trim() || "—")).join(" | ");
-        const beatsLine = beats.map(b => (String(b||"").trim() || "—")).join(" | ");
+        const hasNotes = notesLine.replace(/—|\s/g,"").length > 0;
+        const hasLyrics = !!lyr;
 
-        const hasAnything =
-          (notesLine.replace(/—|\||\s/g,"").length > 0) ||
-          (beatsLine.replace(/—|\||\s/g,"").length > 0) ||
-          !!lyr;
+        if(!hasNotes && !hasLyrics) return;
 
-        if(!hasAnything) return;
-
-        out.push(`(${idx+1})  NOTES: ${notesLine}`);
-        out.push(`     BEATS: ${beatsLine}`);
-        if(lyr) out.push(`     LYRICS: ${lyr}`);
+        out.push(`(${idx+1}) ${notesLine}`);
+        if(hasLyrics) out.push(`    ${lyr}`);
         out.push("");
       });
 
@@ -818,7 +800,7 @@
   }
 
   /***********************
-   * Sheet rendering (your v21 version, unchanged)
+   * Sheet rendering
    ***********************/
   function renderSheetActions(){
     el.sheetActions.innerHTML = "";
@@ -944,7 +926,6 @@
         const inp = document.createElement("input");
         inp.type = "text";
         inp.className = "noteCell";
-        inp.placeholder = "";
         inp.value = line.notes[i] || "";
         inp.autocomplete = "off";
         inp.autocapitalize = "characters";
@@ -967,17 +948,20 @@
       lyr.placeholder = "Type lyrics (AutoSplit on)…";
       lyr.value = line.lyrics || "";
 
+      lyr.addEventListener("focus", () => {
+        lastLyricsTextarea = lyr;
+        refreshRhymesFromActive();
+      });
+
       const beatsRow = document.createElement("div");
       beatsRow.className = "beatsRow";
 
       const beatInputs = [];
       for(let i=0;i<4;i++){
-        const inp = document.createElement("input");
-        inp.type = "text";
+        // ✅ textarea so words never get visually cut off
+        const inp = document.createElement("textarea");
         inp.className = "beatCell";
-        inp.placeholder = "";
         inp.value = String(line.beats[i] || "");
-        inp.autocomplete = "off";
         inp.spellcheck = false;
 
         inp.addEventListener("pointerdown", (e)=>{ e.stopPropagation(); });
@@ -997,6 +981,9 @@
         syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
         upsertProject(state.project);
         updateFullIfVisible();
+
+        // update rhymes live while typing (if dock open)
+        refreshRhymesFromActive();
 
         if(state.autoSplit){
           const boxes = autosplitBeatsFromLyrics(line.lyrics);
@@ -1044,7 +1031,7 @@
   }
 
   /***********************
-   * Recordings UI (unchanged)
+   * Recordings UI
    ***********************/
   function fmtDate(ms){
     try{ return new Date(ms).toLocaleString(); }catch{ return String(ms); }
@@ -1145,7 +1132,7 @@
   }
 
   /***********************
-   * Recording (unchanged)
+   * Recording
    ***********************/
   async function startRecording(){
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
@@ -1229,24 +1216,142 @@
   }
 
   /***********************
-   * Rhymes
+   * ✅ Rhymes (REAL suggestions + INSERT into lyrics)
    ***********************/
-  const DEMO_RHYMES = ["flow","go","show","pro","mode","road","cold","bold","gold","hold"];
-  function renderRhymes(){
+  const WORD_BANK = [
+    "flow","go","show","pro","mode","road","cold","bold","gold","hold",
+    "can","man","plan","land","stand","hand","brand","grand","command",
+    "best","test","rest","quest","blessed","pressed","stress","chest",
+    "love","above","dove","glove","shove","enough","tough","rough",
+    "light","night","fight","right","might","tight","sight","height",
+    "time","rhyme","climb","prime","crime","shine","mine","line",
+    "game","name","same","flame","fame","claim","frame","tame",
+    "heart","start","part","smart","chart","art","dart",
+    "grace","place","face","case","race","space","base",
+    "way","day","say","play","stay","pray","gray",
+    "pain","rain","gain","train","main","chain","brain",
+    "real","feel","deal","steel","heal","wheel","seal",
+    "king","thing","sing","bring","ring","wing","spring",
+    "sound","ground","round","found","bound","crown","down",
+    "peace","lease","cease","release","increase",
+    "fire","higher","wire","desire","supplier",
+    "soul","goal","role","whole","control",
+    "truth","youth","booth","proof","smooth"
+  ];
+
+  function lastWord(text){
+    const m = String(text||"").match(/([A-Za-z']+)\s*$/);
+    return m ? m[1] : "";
+  }
+
+  function rhymeKey(word){
+    const w = String(word||"").toLowerCase().replace(/[^a-z']/g,"").trim();
+    if(!w) return "";
+    const vowels = "aeiouy";
+    let lastV = -1;
+    for(let i=w.length-1;i>=0;i--){
+      if(vowels.includes(w[i])){
+        lastV = i;
+        break;
+      }
+    }
+    if(lastV >= 0) return w.slice(lastV);     // from last vowel to end
+    return w.slice(Math.max(0, w.length-3));   // fallback
+  }
+
+  function getRhymes(seed){
+    const s = String(seed||"").trim();
+    if(!s) return [];
+
+    const k = rhymeKey(s);
+    if(!k) return [];
+
+    const out = [];
+    for(const w of WORD_BANK){
+      if(w.toLowerCase() === s.toLowerCase()) continue;
+      const wk = rhymeKey(w);
+      if(wk === k) out.push(w);
+    }
+
+    // backup: if too few, do looser matching on last 2 letters
+    if(out.length < 6){
+      const tail = s.toLowerCase().slice(-2);
+      for(const w of WORD_BANK){
+        if(w.toLowerCase() === s.toLowerCase()) continue;
+        if(w.toLowerCase().slice(-2) === tail && !out.includes(w)) out.push(w);
+      }
+    }
+
+    return out.slice(0, 18);
+  }
+
+  function insertWordIntoLyrics(word){
+    if(!lastLyricsTextarea){
+      // try pick first visible lyrics box
+      const first = el.sheetBody.querySelector("textarea.lyrics");
+      if(first) lastLyricsTextarea = first;
+    }
+    if(!lastLyricsTextarea) return;
+
+    const ta = lastLyricsTextarea;
+    ta.focus();
+
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? ta.value.length;
+
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(end);
+
+    const needsSpaceBefore = before.length && !/\s$/.test(before);
+    const needsSpaceAfter = after.length && !/^\s/.test(after);
+
+    const insert = (needsSpaceBefore ? " " : "") + word + (needsSpaceAfter ? " " : "");
+    ta.value = before + insert + after;
+
+    // move cursor after inserted word
+    const newPos = (before + insert).length;
+    ta.selectionStart = ta.selectionEnd = newPos;
+
+    // trigger input so app saves + autosplits
+    ta.dispatchEvent(new Event("input", { bubbles:true }));
+  }
+
+  function renderRhymesFor(seed){
+    const list = getRhymes(seed);
+
     el.rhymeWords.innerHTML = "";
-    DEMO_RHYMES.forEach(w => {
+    el.rhymeTitle.textContent = seed ? `Rhymes: ${seed}` : "Rhymes";
+
+    if(list.length === 0){
+      const d = document.createElement("div");
+      d.style.color = "#666";
+      d.style.fontWeight = "900";
+      d.textContent = seed ? "No good rhymes found in bank (try another last word)." : "Tap a lyrics box and type a line.";
+      el.rhymeWords.appendChild(d);
+      return;
+    }
+
+    list.forEach(w => {
       const b = document.createElement("div");
       b.className = "rWord";
       b.textContent = w;
       b.addEventListener("click", () => {
-        navigator.clipboard?.writeText(w).catch(()=>{});
+        insertWordIntoLyrics(w);
         pluck(660, 80, 0.05, "sine");
       });
       el.rhymeWords.appendChild(b);
     });
   }
+
+  function refreshRhymesFromActive(){
+    if(el.rhymeDock.style.display !== "block") return;
+    const seed = lastLyricsTextarea ? lastWord(lastLyricsTextarea.value) : "";
+    renderRhymesFor(seed);
+  }
+
   function toggleRhymeDock(show){
     el.rhymeDock.style.display = show ? "block" : "none";
+    if(show) refreshRhymesFromActive();
   }
 
   /***********************
@@ -1263,6 +1368,8 @@
     setRecordUI();
     clearTick();
     applyTick();
+    updateFullIfVisible();
+    refreshRhymesFromActive();
   }
 
   /***********************
@@ -1283,8 +1390,6 @@
     el.bpmInput.addEventListener("input", () => {
       state.bpm = clamp(parseInt(el.bpmInput.value || "95",10) || 95, 40, 220);
       el.bpmInput.value = String(state.bpm);
-
-      // ✅ if drums are on, restart everything in sync
       if(state.drumsOn) startDrums();
     });
 
@@ -1388,16 +1493,11 @@
     state.instrumentOn = false;
     state.drumsOn = false;
 
-    renderRhymes();
-    toggleRhymeDock(false);
-
     setRecordUI();
     wire();
     renderAll();
 
-    // ✅ IMPORTANT CHANGE:
-    // We do NOT startBeatClock here anymore.
-    // Clock/ticks/eyes now run ONLY when drums run.
+    // no free-running clock
     stopBeatClock();
   }
 
