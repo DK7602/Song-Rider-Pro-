@@ -1,4 +1,4 @@
-<!-- index.html (FULL REPLACE v23) -->
+<!-- index.html (FULL REPLACE v24) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=23"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=24"/>
 
   <style>
     :root{
@@ -313,7 +313,6 @@
       max-width:100%;
     }
 
-    /* ✅ TOP NOTES ROW (8 boxes, blue) */
     .notesRow{
       display:grid;
       grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -334,7 +333,6 @@
       appearance:none;
     }
 
-    /* ✅ Lyrics */
     textarea.lyrics{
       width:100%;
       resize:vertical;
@@ -350,7 +348,6 @@
       margin-bottom:10px;
     }
 
-    /* ✅ Bottom beat/syllable row (NOW textarea so it WRAPS) */
     .beatsRow{
       display:grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -379,13 +376,11 @@
       background:var(--backbeatGreen);
     }
 
-    /* ✅ Yellow beat tick */
     .tick{
       box-shadow: 0 0 0 4px rgba(255,213,74,.90) inset, 0 0 0 2px rgba(0,0,0,.06);
       outline: none;
     }
 
-    /* Full page */
     .fullBoxWrap{ padding:12px; display:flex; flex-direction:column; gap:10px; }
     .fullLabel{
       font-size:12px;
@@ -418,9 +413,9 @@
       font-size:14px;
       outline:none;
       line-height:1.35;
-      white-space:pre-wrap;       /* ✅ no left/right scroll */
-      word-break:break-word;      /* ✅ force wrap */
-      overflow-wrap:anywhere;     /* ✅ force wrap */
+      white-space:pre-wrap;
+      word-break:break-word;
+      overflow-wrap:anywhere;
     }
 
     .rBtn{
@@ -489,7 +484,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=23" alt="Headshot"/>
+    <img id="headshotImg" src="./headshot.png?v=24" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -590,6 +585,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=23"></script>
+<script src="./app.js?v=24"></script>
 </body>
 </html>
