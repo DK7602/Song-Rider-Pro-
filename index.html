@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=17"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=18"/>
 
   <style>
     :root{
@@ -264,11 +264,11 @@
     .sheetHeader h2{ margin:0; font-size:14px; font-weight:1100; letter-spacing:.3px; }
     .hint{ font-size:12px; color:var(--muted); font-weight:900; }
 
-    .sectionHeader{
-      padding:12px 12px 6px;
-      font-weight:1100;
-      letter-spacing:.8px;
-      color:#b00020;
+    .sheetActions{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
     }
 
     .cards{
@@ -298,6 +298,8 @@
       padding:6px 10px;
       min-width:40px;
       text-align:center;
+      cursor:pointer;
+      user-select:none;
     }
     .syllPill{
       font-weight:1100;
@@ -325,6 +327,8 @@
       text-align:center;
       outline:none;
       height:34px;
+      -webkit-appearance:none;
+      appearance:none;
     }
 
     textarea.lyrics{
@@ -422,7 +426,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=17" alt="Headshot"/>
+    <img id="headshotImg" src="./headshot.png?v=18" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -504,6 +508,7 @@
   <div class="sheet" id="editorRoot">
     <div class="sheetHeader">
       <h2 id="sheetTitle">Full</h2>
+      <div class="sheetActions" id="sheetActions"></div>
       <div class="hint" id="sheetHint"></div>
     </div>
     <div id="sheetBody"></div>
@@ -522,6 +527,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=17"></script>
+<script src="./app.js?v=18"></script>
 </body>
 </html>
