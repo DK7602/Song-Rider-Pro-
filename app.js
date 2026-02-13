@@ -395,7 +395,7 @@ function ensureCtx(){
 
     // safer master levels (prevents harsh “screech” perception on phones)
     state.masterGain = state.ctx.createGain();
-    state.masterGain.gain.value = 0.72;
+    state.masterGain.gain.value = 0.90;
 
     state.masterComp = state.ctx.createDynamicsCompressor();
     state.masterComp.threshold.value = -22;
@@ -874,26 +874,39 @@ function acousticPluckSafe(ctx, freq, durMs, vel=0.9){
   o.connect(oGain);
 
   // --- Body shaping (warmth + tame top)
-  const hp = ctx.createBiquadFilter();
-  hp.type = "highpass";
-  hp.frequency.value = 85;
-  hp.Q.value = 0.7;
+// --- Body shaping (PHONE SPEAKER FRIENDLY)
+const hp = ctx.createBiquadFilter();
+hp.type = "highpass";
+// push up the highpass so tiny speakers don't waste energy on sub lows
+hp.frequency.value = 150;
+hp.Q.value = 0.7;
 
-  const body = ctx.createBiquadFilter();
-  body.type = "peaking";
-  body.frequency.value = 240;
-  body.Q.value = 0.9;
-  body.gain.value = 2.8;
+// reduce the boomy body bump a bit
+const body = ctx.createBiquadFilter();
+body.type = "peaking";
+body.frequency.value = 260;
+body.Q.value = 0.9;
+body.gain.value = 1.4;
 
-  const notch = ctx.createBiquadFilter();
-  notch.type = "notch";
-  notch.frequency.value = 3200;
-  notch.Q.value = 2.0;
+// add presence so it cuts on phone speaker
+const presence = ctx.createBiquadFilter();
+presence.type = "peaking";
+presence.frequency.value = 2400;
+presence.Q.value = 0.9;
+presence.gain.value = 3.5;
 
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 5200;
-  lp.Q.value = 0.7;
+// tame any harshness
+const notch = ctx.createBiquadFilter();
+notch.type = "notch";
+notch.frequency.value = 3200;
+notch.Q.value = 2.0;
+
+// let a bit more top through
+const lp = ctx.createBiquadFilter();
+lp.type = "lowpass";
+lp.frequency.value = 6800;
+lp.Q.value = 0.7;
+
 
   // route: (noiseMix + oGain) -> env -> EQ chain -> lp (returned out)
   const sum = ctx.createGain();
@@ -903,10 +916,12 @@ function acousticPluckSafe(ctx, freq, durMs, vel=0.9){
   oGain.connect(sum);
 
   sum.connect(env);
-  env.connect(hp);
-  hp.connect(body);
-  body.connect(notch);
-  notch.connect(lp);
+ env.connect(hp);
+hp.connect(body);
+body.connect(presence);
+presence.connect(notch);
+notch.connect(lp);
+
 
   // start/stop
   ns.start(t0);
@@ -915,7 +930,7 @@ function acousticPluckSafe(ctx, freq, durMs, vel=0.9){
   o.start(t0);
   o.stop(t0 + dur + rel + 0.10);
 
-  scheduleCleanup([ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,notch,lp], (durMs + rel*1000 + 1200));
+  scheduleCleanup([ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,presence,notch,lp], (durMs + rel*1000 + 1200));
   return { out: lp, nodes:[ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,notch,lp] };
 }
 
@@ -1338,6 +1353,10 @@ function getNoteRawFromCell(cell){
   if(!cell) return "";
   return String(cell.dataset?.raw || cell.value || "").trim();
 }
+function isTieToken(s){
+  const t = String(s || "").trim();
+  return (t === "_" || t === "..." || t === "…");
+}
 
 function findNextNoteForwardFrom(cardEl, startCellIndexPlus1){
   const cards = getCards();
@@ -1373,12 +1392,14 @@ function computeNoteDurEighths(cardEl, cells, nIdx){
   // Find next NON-empty note cell in SAME bar
   let next = -1;
   for(let j=nIdx+1;j<8;j++){
-    const raw = getNoteRawFromCell(cells[j]);
-    if(raw){
-      next = j;
-      break;
-    }
-  }
+  const raw = getNoteRawFromCell(cells[j]);
+  if(!raw) continue;
+  if(isTieToken(raw)) continue;        // skip "_" and "..."
+  if(!parseChordToken(raw)) continue;  // skip random text
+  next = j;
+  break;
+}
+
 
   if(mode === "half"){
     const blockEnd = (nIdx < 4) ? 4 : 8;
@@ -1419,14 +1440,20 @@ function playInstrumentStep(){
   const cells = card.querySelectorAll(".noteCell");
   if(!cells[nIdx]) return;
 
-  const rawChord = getNoteRawFromCell(cells[nIdx]);
-  if(!rawChord) return;
-  if(!parseChordToken(rawChord)) return;
+ const rawChord = getNoteRawFromCell(cells[nIdx]);
+if(!rawChord) return;
 
-  const durEighths = computeNoteDurEighths(card, cells, nIdx);
-  const durMs = Math.max(80, durEighths * (state.eighthMs || 300));
+// If "_" or "..." → do nothing (previous chord holds)
+if(isTieToken(rawChord)) return;
 
-  playChordForInstrument(rawChord, durMs);
+// Only play if it's a valid chord
+if(!parseChordToken(rawChord)) return;
+
+const durEighths = computeNoteDurEighths(card, cells, nIdx);
+const durMs = Math.max(80, durEighths * (state.eighthMs || 300));
+
+playChordForInstrument(rawChord, durMs);
+
 }
 
 /***********************
