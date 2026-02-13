@@ -326,6 +326,8 @@ lastChordRaw: "",
 
   autoScrollOn: false,
   playCardIndex: null,
+  
+lastAutoBar: -1,
 
   ctx: null,
   masterGain: null,
@@ -1527,7 +1529,7 @@ AutoScroll
 function scrollCardIntoView(card){
   if(!card) return;
   try{
-    card.scrollIntoView({ behavior:"smooth", block:"start" });
+  card.scrollIntoView({ behavior:"auto", block:"start" }); 
   }catch{}
 }
 
@@ -1535,8 +1537,13 @@ function autoAdvanceOnBar(){
   if(!state.autoScrollOn) return;
   if(state.currentSection === "Full") return;
 
+  // only on bar boundary (every 8 eighth-notes)
   if(state.tick8 === 0) return;
   if(state.tick8 % 8 !== 0) return;
+
+  const bar = Math.floor(state.tick8 / 8);
+  if(state.lastAutoBar === bar) return;   // ✅ guard against double-fire
+  state.lastAutoBar = bar;
 
   const cards = getCards();
   if(cards.length === 0) return;
@@ -1552,6 +1559,7 @@ function autoAdvanceOnBar(){
   lastActiveCardEl = next;
   scrollCardIntoView(next);
 }
+
 
 /***********************
 DRUMS + CLOCK (decoupled)
@@ -1575,6 +1583,7 @@ function startBeatClock(){
   state.eighthMs = eighthMs;
 
   state.tick8 = 0;
+  state.lastAutoBar = -1;
   clearTick();
 
  state.beatTimer = setInterval(() => {
