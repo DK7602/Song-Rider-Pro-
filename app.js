@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v39) */
+/* app.js (FULL REPLACE MAIN v40) */
 (() => {
 "use strict";
 
@@ -57,7 +57,7 @@ const el = {
   instElectric: $("instElectric"),
   instPiano: $("instPiano"),
 
-  // ✅ note-length buttons
+  // note-length buttons
   instDots: $("instDots"),
   instTieBar: $("instTieBar"),
 
@@ -313,7 +313,7 @@ const state = {
   instrument: "piano",
   instrumentOn: false,
 
-  // ✅ modes:
+  // modes:
   //   "half"  = DEFAULT (4/8ths OR next note OR end-of-bar)
   //   "eighth"= fixed 1/8 ( ... )
   //   "bar"   = tie-to-next across cards ( _ )
@@ -323,8 +323,6 @@ const state = {
   drumsOn: false,
 
   autoScrollOn: false,
-
-  // ✅ autoscroll cursor (which card is currently "playing")
   playCardIndex: null,
 
   ctx: null,
@@ -344,7 +342,6 @@ const state = {
   recMicStream: null,
   recMicSource: null,
 
-  // clock
   beatTimer: null,
   tick8: 0,
   eighthMs: 315
@@ -391,7 +388,6 @@ function ensureCtx(){
   if(!state.ctx){
     state.ctx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // master gain -> compressor -> post gain -> destination
     state.masterGain = state.ctx.createGain();
     state.masterGain.gain.value = 1.0;
 
@@ -409,6 +405,7 @@ function ensureCtx(){
     state.masterComp.connect(state.masterPost);
     state.masterPost.connect(state.ctx.destination);
   }
+
   if(state.ctx.state === "suspended"){
     state.ctx.resume().catch(()=>{});
   }
@@ -486,7 +483,6 @@ function drumHit(kind){
 
 /***********************
 NOTE / CHORD PARSERS
-(we keep noteToPC working on leading root)
 ***********************/
 function parseNoteToken(v){
   const s0 = String(v||"").trim();
@@ -537,7 +533,7 @@ function transposeNoteName(note, semitones){
   return PC_TO_NAME[t];
 }
 
-// ✅ transpose chord root only, preserve suffix (Am -> Bm, F#maj7 -> Gmaj7, Bb -> B)
+// transpose chord root only, preserve suffix
 function transposeChordName(chord, semis){
   const s0 = String(chord||"").trim();
   if(!s0) return "";
@@ -565,7 +561,6 @@ function parseChordToken(raw){
     .replace(/\s+/g,"")
     .trim();
 
-  // split slash
   const parts = s.split("/");
   const main = parts[0] || "";
   const bassTok = parts[1] || "";
@@ -579,7 +574,6 @@ function parseChordToken(raw){
 
   let qual = (m[3]||"");
 
-  // normalize common aliases
   qual = qual
     .replace(/^maj/i,"maj")
     .replace(/^min/i,"m")
@@ -589,7 +583,6 @@ function parseChordToken(raw){
 
   const bassPC = bassTok ? noteToPC(bassTok) : null;
 
-  // detect base triad quality
   let triad = "maj";
   if(/^m(?!aj)/i.test(qual)) triad = "min";
   if(/dim|o/i.test(qual)) triad = "dim";
@@ -597,7 +590,6 @@ function parseChordToken(raw){
   if(/sus2/i.test(qual)) triad = "sus2";
   if(/sus4|sus/i.test(qual)) triad = "sus4";
 
-  // base intervals
   let intervals = [];
   if(triad === "maj") intervals = [0,4,7];
   if(triad === "min") intervals = [0,3,7];
@@ -606,7 +598,6 @@ function parseChordToken(raw){
   if(triad === "sus2") intervals = [0,2,7];
   if(triad === "sus4") intervals = [0,5,7];
 
-  // extensions
   const hasMaj7 = /maj7/i.test(qual);
   const has7 = /7/.test(qual) && !hasMaj7;
   const hasM7minor = /m7/i.test(qual) && !hasMaj7;
@@ -617,23 +608,18 @@ function parseChordToken(raw){
   const isMaj9 = /maj9/i.test(qual);
   const isMin9 = /m9/i.test(qual) && !isMaj9;
 
-  // 7ths
   if(hasMaj7) intervals.push(11);
   else if(hasM7minor || (triad==="min" && has7)) intervals.push(10);
   else if(has7) intervals.push(10);
 
-  // 6th
   if(has6) intervals.push(9);
 
-  // 9th
   if(hasAdd9 || has9){
-    // choose 9 quality based on chord label
     if(isMaj9) { if(!intervals.includes(11)) intervals.push(11); intervals.push(14); }
     else if(isMin9) { if(!intervals.includes(10)) intervals.push(10); intervals.push(14); }
     else intervals.push(14);
   }
 
-  // dedupe + sort
   intervals = Array.from(new Set(intervals)).sort((a,b)=>a-b);
 
   return {
@@ -646,17 +632,10 @@ function parseChordToken(raw){
   };
 }
 
-function pcToMidi(pc, octave){
-  // octave where C4 = 60 means octave=4 -> C4
-  const base = (octave + 1) * 12; // C0 = 12
-  return base + (pc % 12);
-}
-
 function midiToFreq(m){
   return 440 * Math.pow(2, (m - 69)/12);
 }
 
-// pick a midi near target that matches pitch class
 function nearestMidiForPC(pc, targetMidi){
   const t = Math.round(targetMidi);
   const candidates = [];
@@ -675,23 +654,17 @@ function nearestMidiForPC(pc, targetMidi){
 
 /***********************
 Voicing builders
-- guitar: spread + bass
-- piano : playable “grand-ish” voicing
 ***********************/
 function buildPianoVoicing(ch){
-  // target around C3–C5
   const root = ch.rootPC;
   const tones = ch.intervals.map(iv => (root + iv) % 12);
 
-  // bass note: slash bass if provided else root
   const bassPC = (ch.bassPC !== null) ? ch.bassPC : root;
   const bass = nearestMidiForPC(bassPC, 48); // ~C3
 
-  // build right-hand cluster around C4–E4
   const target = 64; // ~E4
   const mids = [];
 
-  // prioritize 3rd, 7th, 5th, 9th, root
   const want = [];
   const has = (pc)=> tones.includes(pc);
 
@@ -712,47 +685,36 @@ function buildPianoVoicing(ch){
     if(mids.length >= 4) break;
   }
 
-  // ensure at least triad tones exist
   while(mids.length < 3){
     const pc = tones[mids.length % tones.length];
     const m = nearestMidiForPC(pc, target + mids.length*3);
     if(!mids.includes(m)) mids.push(m);
   }
 
-  // final: bass + mids
-  const all = [bass, ...mids].sort((a,b)=>a-b);
-  return all;
+  return [bass, ...mids].sort((a,b)=>a-b);
 }
 
-function buildGuitarStrumVoicing(ch, isElectric){
+function buildGuitarStrumVoicing(ch){
   const root = ch.rootPC;
   const tones = ch.intervals.map(iv => (root + iv) % 12);
-
   const bassPC = (ch.bassPC !== null) ? ch.bassPC : root;
 
-  // acoustic/electric base range: low E2 (40) to E5 (76)
-  const bass = nearestMidiForPC(bassPC, 43); // ~G2/A2 area
-
-  // pick 4-5 chord tones above bass
+  const bass = nearestMidiForPC(bassPC, 43); // ~G2/A2
   const mids = [];
-  const targets = [52, 55, 59, 64, 67]; // ~E3..G4
+  const targets = [52, 55, 59, 64, 67]; // E3..G4
+
   for(let i=0;i<targets.length;i++){
     const pc = tones[i % tones.length];
-    const m = nearestMidiForPC(pc, targets[i]);
-    mids.push(m);
-    if(mids.length >= (isElectric ? 5 : 5)) break;
+    mids.push(nearestMidiForPC(pc, targets[i]));
   }
 
-  // ensure ascending (simulate strings)
-  const all = [bass, ...mids].sort((a,b)=>a-b);
-  return all;
+  return [bass, ...mids].sort((a,b)=>a-b);
 }
 
 /***********************
-SYNTH FX helpers
+FX helpers
 ***********************/
 function makeSoftRoom(ctx){
-  // tiny “room” using feedback delay + LP
   const inG = ctx.createGain();
   const d = ctx.createDelay(0.25);
   d.delayTime.value = 0.09;
@@ -778,7 +740,6 @@ function makeSoftRoom(ctx){
 }
 
 function makeCabinet(ctx){
-  // typical guitar cab-ish EQ: HP + LP + mid bump
   const hp = ctx.createBiquadFilter();
   hp.type = "highpass";
   hp.frequency.value = 90;
@@ -808,7 +769,6 @@ function makeWaveshaper(ctx, drive=1.0){
   const k = clamp(drive, 0.2, 6.0);
   for(let i=0;i<n;i++){
     const x = (i/(n-1))*2 - 1;
-    // soft clip curve
     curve[i] = Math.tanh(k * x);
   }
   sh.curve = curve;
@@ -817,124 +777,136 @@ function makeWaveshaper(ctx, drive=1.0){
 }
 
 /***********************
-ACOUSTIC GUITAR: Karplus-Strong-ish string
-Noise burst -> Delay -> LP -> feedback loop
+ACOUSTIC GUITAR STRING (stable Karplus)
 ***********************/
-function ksString(ctx, freq, durMs, bright=0.6, outGain=0.10){
+function ksString(ctx, freq, durMs, bright=0.55, outGain=0.08){
   const t0 = ctx.currentTime;
   const dur = Math.max(0.08, durMs/1000);
 
+  // clamp freq to avoid extreme delay values
+  const f = clamp(freq, 70, 1200);
+
   const delay = ctx.createDelay(1.0);
-  delay.delayTime.value = Math.max(0.001, 1 / clamp(freq, 55, 1400));
+  delay.delayTime.value = Math.max(0.001, 1 / f);
 
+  // feedback depends on frequency (high notes decay faster)
+  const freqDamp = 1 - clamp((f - 120) / 1200, 0, 1) * 0.10; // 1..0.90
+  const durBoost = clamp(dur / 1.6, 0, 1) * 0.06;            // 0..0.06
   const fb = ctx.createGain();
-  // longer decay for longer notes
-  const baseFb = 0.86 + 0.10 * clamp(dur, 0.1, 2.0)/2.0; // 0.86..0.96
-  fb.gain.value = clamp(baseFb, 0.84, 0.965);
+  fb.gain.value = clamp((0.86 + durBoost) * freqDamp, 0.82, 0.93);
 
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 1200 + bright*2600;
-  lp.Q.value = 0.35;
+  // loop filtering (more damping = less screech)
+  const lp1 = ctx.createBiquadFilter();
+  lp1.type = "lowpass";
+  lp1.frequency.value = 900 + bright * 1800; // 900..2700
+  lp1.Q.value = 0.35;
+
+  const lp2 = ctx.createBiquadFilter();
+  lp2.type = "lowpass";
+  lp2.frequency.value = 1800 + bright * 2400; // 1800..4200
+  lp2.Q.value = 0.25;
 
   const hp = ctx.createBiquadFilter();
   hp.type = "highpass";
   hp.frequency.value = 70;
   hp.Q.value = 0.55;
 
-  // noise burst exciter
-  const burstLen = Math.max(0.012, Math.min(0.030, 1/(freq*0.9)));
+  // exciter burst
+  const burstLen = clamp(0.010 + (1/f)*3, 0.010, 0.030);
   const bufferSize = Math.max(256, Math.floor(ctx.sampleRate * burstLen));
   const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
   const data = buffer.getChannelData(0);
   for(let i=0;i<data.length;i++){
-    // slightly colored noise
     const x = (Math.random()*2-1);
-    data[i] = x * (1 - (i/data.length)*0.55);
+    data[i] = x * (1 - (i/data.length)*0.60);
   }
   const src = ctx.createBufferSource();
   src.buffer = buffer;
 
   const exc = ctx.createGain();
   exc.gain.setValueAtTime(0.0001, t0);
-  exc.gain.exponentialRampToValueAtTime(0.75, t0 + 0.002);
+  exc.gain.exponentialRampToValueAtTime(0.70, t0 + 0.002);
   exc.gain.exponentialRampToValueAtTime(0.0001, t0 + burstLen);
 
   const out = ctx.createGain();
   out.gain.setValueAtTime(0.0001, t0);
   out.gain.exponentialRampToValueAtTime(outGain, t0 + 0.006);
-  // natural decay — don’t hard sustain, but for ties let it ring longer
-  const rel = Math.min(0.75, 0.10 + dur*0.55);
+
+  // release shaped by dur (ties ring longer)
+  const rel = Math.min(0.85, 0.10 + dur*0.55);
   out.gain.setValueAtTime(outGain, t0 + Math.max(0.02, dur - rel));
   out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
-  // wiring loop
+  // wire loop
   src.connect(exc);
   exc.connect(delay);
 
-  delay.connect(lp);
-  lp.connect(fb);
+  delay.connect(lp1);
+  lp1.connect(lp2);
+  lp2.connect(fb);
   fb.connect(delay);
 
-  lp.connect(hp);
+  lp2.connect(hp);
   hp.connect(out);
 
   src.start(t0);
   src.stop(t0 + burstLen + 0.01);
 
-  // stop cleanup
-  scheduleCleanup([src,exc,delay,lp,fb,hp,out], durMs + 400);
-
-  return { out, nodes:[src,exc,delay,lp,fb,hp,out] };
+  scheduleCleanup([src,exc,delay,lp1,lp2,fb,hp,out], durMs + 600);
+  return { out, nodes:[src,exc,delay,lp1,lp2,fb,hp,out] };
 }
 
 /***********************
-PIANO note: partials + hammer noise + body
+PIANO NOTE (fixed sustain + decay)
 ***********************/
 function pianoNote(ctx, freq, durMs, vel=0.9){
   const t0 = ctx.currentTime;
-  const dur = Math.max(0.10, durMs/1000);
+  const dur = Math.max(0.12, durMs/1000);
 
   const out = ctx.createGain();
+  const peak = 0.18 * clamp(vel, 0.2, 1.0);
+
   out.gain.setValueAtTime(0.0001, t0);
-  out.gain.exponentialRampToValueAtTime(0.18*vel, t0 + 0.008);
+  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
 
-  // piano-like decay curve
-  const hold = Math.min(0.15, dur*0.25);
-  out.gain.setValueAtTime(0.18*vel, t0 + hold);
-  out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  // piano "hold" then long decay
+  const hold = Math.min(0.22, 0.06 + dur * 0.18); // longer holds when tied
+  out.gain.setValueAtTime(peak * 0.92, t0 + hold);
 
-  // partials
-  const partials = [
-    {h:1, a:1.00},
-    {h:2, a:0.35},
-    {h:3, a:0.18},
-    {h:4, a:0.11},
-    {h:5, a:0.06}
-  ];
+  // longer notes decay slower
+  const endTime = t0 + dur;
+  const tail = clamp(0.40 + dur * 0.55, 0.55, 2.6);
+  out.gain.exponentialRampToValueAtTime(0.0001, Math.min(endTime + tail, endTime + 2.8));
 
   const nodes = [out];
+
+  const partials = [
+    {h:1, a:1.00},
+    {h:2, a:0.32},
+    {h:3, a:0.18},
+    {h:4, a:0.10},
+    {h:5, a:0.06}
+  ];
 
   for(const p of partials){
     const o = ctx.createOscillator();
     const g = ctx.createGain();
 
-    // tiny inharmonicity + detune
     const inharm = 1 + (p.h>=3 ? 0.0018 : 0.0008);
     o.type = "sine";
     o.frequency.value = freq * p.h * inharm;
-    o.detune.value = (Math.random()*2-1) * 6;
+    o.detune.value = (Math.random()*2-1) * 5;
 
-    const a = (0.16 * vel) * p.a;
+    const a = (0.16 * clamp(vel,0.2,1.0)) * p.a;
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(a, t0 + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + Math.min(2.2, tail));
 
     o.connect(g);
     g.connect(out);
 
     o.start(t0);
-    o.stop(t0 + dur + 0.05);
+    o.stop(t0 + dur + Math.min(2.6, tail) + 0.08);
 
     nodes.push(o,g);
   }
@@ -957,7 +929,7 @@ function pianoNote(ctx, freq, durMs, vel=0.9){
 
   const ng = ctx.createGain();
   ng.gain.setValueAtTime(0.0001, t0);
-  ng.gain.exponentialRampToValueAtTime(0.07*vel, t0 + 0.002);
+  ng.gain.exponentialRampToValueAtTime(0.07 * clamp(vel,0.2,1.0), t0 + 0.002);
   ng.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
 
   ns.connect(nf);
@@ -969,169 +941,179 @@ function pianoNote(ctx, freq, durMs, vel=0.9){
 
   nodes.push(ns,nf,ng);
 
-  // light “soundboard” EQ
+  // soundboard/body EQ
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
   body.frequency.value = 280;
   body.Q.value = 0.8;
-  body.gain.value = 2.2;
+  body.gain.value = 2.0;
 
   out.connect(body);
 
-  scheduleCleanup([ ...nodes, body ], durMs + 500);
-
+  scheduleCleanup([...nodes, body], (durMs + 2200));
   return { out: body, nodes:[...nodes, body] };
 }
 
 /***********************
-ELECTRIC note: osc mix -> waveshaper -> cab -> envelope
+ELECTRIC STRING (more “guitar”, less synth)
+KS string -> drive -> cab -> envelope + pick transient
 ***********************/
-function electricNote(ctx, freq, durMs, vel=0.85){
+function electricString(ctx, freq, durMs, vel=0.85){
   const t0 = ctx.currentTime;
   const dur = Math.max(0.08, durMs/1000);
 
-  const mix = ctx.createGain();
-  const env = ctx.createGain();
-  env.gain.setValueAtTime(0.0001, t0);
-  env.gain.exponentialRampToValueAtTime(0.22*vel, t0 + 0.007);
+  // pluck source (stringy)
+  const ks = ksString(ctx, freq, durMs, 0.70, 0.10 * clamp(vel,0.2,1.0));
 
-  // let it sustain a bit, then release
-  const rel = Math.min(0.35, 0.08 + dur*0.25);
-  env.gain.setValueAtTime(0.22*vel, t0 + Math.max(0.03, dur - rel));
-  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-
-  // osc stack (detuned)
-  const o1 = ctx.createOscillator();
-  const o2 = ctx.createOscillator();
-  const o3 = ctx.createOscillator();
-  o1.type = "sawtooth";
-  o2.type = "square";
-  o3.type = "sawtooth";
-
-  o1.frequency.value = freq;
-  o2.frequency.value = freq;
-  o3.frequency.value = freq;
-
-  o2.detune.value = -6;
-  o3.detune.value = +6;
-
-  const g1 = ctx.createGain(); g1.gain.value = 0.55;
-  const g2 = ctx.createGain(); g2.gain.value = 0.30;
-  const g3 = ctx.createGain(); g3.gain.value = 0.35;
-
-  o1.connect(g1); o2.connect(g2); o3.connect(g3);
-  g1.connect(mix); g2.connect(mix); g3.connect(mix);
-
-  // pre EQ
+  // pre-shape
   const preHP = ctx.createBiquadFilter();
   preHP.type = "highpass";
-  preHP.frequency.value = 110;
+  preHP.frequency.value = 95;
   preHP.Q.value = 0.7;
 
-  // distortion
-  const sh = makeWaveshaper(ctx, 2.2);
+  const preLP = ctx.createBiquadFilter();
+  preLP.type = "lowpass";
+  preLP.frequency.value = 4600;
+  preLP.Q.value = 0.6;
 
-  // cab
+  // drive + cab
+  const sh = makeWaveshaper(ctx, 2.0);
   const cab = makeCabinet(ctx);
 
-  mix.connect(preHP);
-  preHP.connect(sh);
-  sh.connect(cab.in);
+  // final env (lets ties sustain)
+  const env = ctx.createGain();
+  const peak = 0.22 * clamp(vel,0.2,1.0);
 
-  // output
+  env.gain.setValueAtTime(0.0001, t0);
+  env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
+
+  const rel = Math.min(0.45, 0.10 + dur * 0.22);
+  env.gain.setValueAtTime(peak, t0 + Math.max(0.03, dur - rel));
+  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+  // pick transient (tiny noise click)
+  const pickLen = 0.012;
+  const bs = Math.max(256, Math.floor(ctx.sampleRate * pickLen));
+  const b = ctx.createBuffer(1, bs, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for(let i=0;i<d.length;i++){
+    d[i] = (Math.random()*2-1) * (1 - i/d.length);
+  }
+  const pick = ctx.createBufferSource();
+  pick.buffer = b;
+
+  const pickBP = ctx.createBiquadFilter();
+  pickBP.type = "bandpass";
+  pickBP.frequency.value = 2100;
+  pickBP.Q.value = 0.9;
+
+  const pickG = ctx.createGain();
+  pickG.gain.setValueAtTime(0.0001, t0);
+  pickG.gain.exponentialRampToValueAtTime(0.05 * clamp(vel,0.2,1.0), t0 + 0.002);
+  pickG.gain.exponentialRampToValueAtTime(0.0001, t0 + pickLen);
+
+  // route
+  ks.out.connect(preHP);
+  preHP.connect(preLP);
+  preLP.connect(sh);
+  sh.connect(cab.in);
   cab.out.connect(env);
 
-  o1.start(t0); o2.start(t0); o3.start(t0);
-  o1.stop(t0 + dur + 0.06);
-  o2.stop(t0 + dur + 0.06);
-  o3.stop(t0 + dur + 0.06);
+  pick.connect(pickBP);
+  pickBP.connect(pickG);
+  pickG.connect(sh); // goes into amp too
 
-  scheduleCleanup([mix,env,o1,o2,o3,g1,g2,g3,preHP,sh, ...cab.nodes], durMs + 600);
+  pick.start(t0);
+  pick.stop(t0 + pickLen + 0.01);
 
-  return { out: env, nodes:[mix,env,o1,o2,o3,g1,g2,g3,preHP,sh, ...cab.nodes] };
+  scheduleCleanup([preHP,preLP,sh,env,pick,pickBP,pickG, ...cab.nodes], durMs + 900);
+  return { out: env, nodes:[ks.out, preHP,preLP,sh,env,pick,pickBP,pickG, ...cab.nodes] };
 }
 
 /***********************
 CHORD PLAYERS
-- strum timing uses bpm so it feels like “hands”
 ***********************/
 function playAcousticChord(ch, durMs){
   const ctx = ensureCtx();
+
   const out = ctx.createGain();
   out.gain.value = 1.0;
 
-  // body resonance (quick)
+  // gentle limiter to prevent “screech” if user stacks chords fast
+  const lim = ctx.createDynamicsCompressor();
+  lim.threshold.value = -14;
+  lim.knee.value = 18;
+  lim.ratio.value = 6;
+  lim.attack.value = 0.003;
+  lim.release.value = 0.12;
+
+  // body resonance
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
-  body.frequency.value = 180;
+  body.frequency.value = 190;
   body.Q.value = 0.9;
-  body.gain.value = 2.0;
+  body.gain.value = 1.8;
 
   const air = ctx.createBiquadFilter();
   air.type = "highshelf";
-  air.frequency.value = 3200;
-  air.gain.value = 2.2;
+  air.frequency.value = 3400;
+  air.gain.value = 1.6;
 
   out.connect(body);
   body.connect(air);
+  air.connect(lim);
 
-  // room
   const room = makeSoftRoom(ctx);
-  air.connect(room.in);
+  lim.connect(room.in);
 
-  // dry + wet to master
-  const dry = ctx.createGain();
-  dry.gain.value = 0.85;
-  const wet = ctx.createGain();
-  wet.gain.value = 0.22;
+  const dry = ctx.createGain(); dry.gain.value = 0.88;
+  const wet = ctx.createGain(); wet.gain.value = 0.22;
 
-  air.connect(dry);
+  lim.connect(dry);
   room.wet.connect(wet);
 
   dry.connect(getOutNode());
   wet.connect(getOutNode());
 
-  // string notes
-  const midi = buildGuitarStrumVoicing(ch, false);
+  const midi = buildGuitarStrumVoicing(ch);
   const freqs = midi.map(midiToFreq);
 
   const bpm = clamp(state.bpm||95, 40, 220);
-  const strumMs = clamp(Math.round(32_000 / bpm), 14, 38); // downstroke speed
+  const strumMs = clamp(Math.round(32_000 / bpm), 14, 38);
 
   for(let i=0;i<freqs.length;i++){
     const f = freqs[i];
     const delayMs = i * strumMs;
 
     setTimeout(() => {
-      const bright = 0.45 + (i/(freqs.length-1 || 1))*0.35;
-      const g = 0.09 * (0.95 - i*0.07);
+      const bright = 0.45 + (i/(freqs.length-1 || 1)) * 0.30;
+      const g = 0.085 * (0.98 - i * 0.06);
       const ks = ksString(ctx, f, durMs, bright, g);
       ks.out.connect(out);
-      scheduleCleanup([ks.out], durMs + 400);
+      scheduleCleanup([ks.out], durMs + 450);
     }, delayMs);
   }
 
   // pick noise (tiny)
-  noise(Math.min(26, Math.max(14, strumMs*1.2)), 0.030);
+  noise(Math.min(26, Math.max(14, strumMs*1.2)), 0.028);
 
-  scheduleCleanup([out,body,air,dry,wet, ...room.nodes], durMs + 900);
+  scheduleCleanup([out,body,air,lim,dry,wet, ...room.nodes], durMs + 1200);
 }
 
 function playElectricChord(ch, durMs){
   const ctx = ensureCtx();
 
-  // room for electric too (subtle)
   const room = makeSoftRoom(ctx);
-  const wet = ctx.createGain(); wet.gain.value = 0.16;
+  const wet = ctx.createGain(); wet.gain.value = 0.14;
   room.wet.connect(wet);
   wet.connect(getOutNode());
 
   const dryBus = ctx.createGain();
-  dryBus.gain.value = 0.90;
+  dryBus.gain.value = 0.92;
   dryBus.connect(getOutNode());
   dryBus.connect(room.in);
 
-  const midi = buildGuitarStrumVoicing(ch, true);
+  const midi = buildGuitarStrumVoicing(ch);
   const freqs = midi.map(midiToFreq);
 
   const bpm = clamp(state.bpm||95, 40, 220);
@@ -1142,17 +1124,17 @@ function playElectricChord(ch, durMs){
     const delayMs = i * strumMs;
 
     setTimeout(() => {
-      const vel = 0.90 - i*0.06;
-      const n = electricNote(ctx, f, durMs, clamp(vel, 0.55, 0.95));
+      const vel = clamp(0.95 - i*0.07, 0.55, 0.98);
+      const n = electricString(ctx, f, durMs, vel);
       n.out.connect(dryBus);
-      scheduleCleanup([n.out], durMs + 500);
+      scheduleCleanup([n.out], durMs + 600);
     }, delayMs);
   }
 
-  // pick scrape
-  noise(Math.min(22, Math.max(10, strumMs)), 0.022);
+  // light scrape
+  noise(Math.min(22, Math.max(10, strumMs)), 0.020);
 
-  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 900);
+  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 1200);
 }
 
 function playPianoChord(ch, durMs){
@@ -1163,7 +1145,7 @@ function playPianoChord(ch, durMs){
   dryBus.gain.value = 0.95;
 
   const wet = ctx.createGain();
-  wet.gain.value = 0.25;
+  wet.gain.value = 0.26;
 
   dryBus.connect(getOutNode());
   dryBus.connect(room.in);
@@ -1173,7 +1155,6 @@ function playPianoChord(ch, durMs){
   const midi = buildPianoVoicing(ch);
   const freqs = midi.map(midiToFreq);
 
-  // slight rolled chord (piano player)
   const bpm = clamp(state.bpm||95, 40, 220);
   const rollMs = clamp(Math.round(16_000 / bpm), 6, 18);
 
@@ -1182,21 +1163,20 @@ function playPianoChord(ch, durMs){
     const delayMs = i * rollMs;
 
     setTimeout(() => {
-      const vel = 0.85 - i*0.07;
-      const n = pianoNote(ctx, f, durMs, clamp(vel, 0.55, 0.95));
+      const vel = clamp(0.90 - i*0.06, 0.55, 0.98);
+      const n = pianoNote(ctx, f, durMs, vel);
       n.out.connect(dryBus);
-      scheduleCleanup([n.out], durMs + 600);
+      scheduleCleanup([n.out], durMs + 2400);
     }, delayMs);
   }
 
-  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 1100);
+  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 2600);
 }
 
 function playChordForInstrument(rawChord, durMs){
   const ch0 = parseChordToken(rawChord);
   if(!ch0) return;
 
-  // apply capo by transposing root + bass pitch classes
   const capo = (state.capo|0) % 12;
   const ch = {
     ...ch0,
@@ -1306,17 +1286,17 @@ function findNextNoteForwardFrom(cardEl, startCellIndexPlus1){
 }
 
 /***********************
-NOTE DURATION (FIXED)
-- "eighth": 1/8
-- "half"  : 4/8 (half-bar) OR next note OR end-of-bar
-- "bar"   : tie-to-next across cards, else end-of-bar
+NOTE DURATION (your rules)
+"eighth": 1/8
+"half"  : 4/8 (half-bar) OR next note OR end-of-bar
+"bar"   : tie-to-next across cards, else end-of-bar
 ***********************/
 function computeNoteDurEighths(cardEl, cells, nIdx){
-  const mode = state.noteLenMode; // "half" | "eighth" | "bar"
+  const mode = state.noteLenMode;
 
   if(mode === "eighth") return 1;
 
-  // Find next NON-empty note cell in the SAME bar
+  // Find next NON-empty note cell in SAME bar
   let next = -1;
   for(let j=nIdx+1;j<8;j++){
     const raw = getNoteRawFromCell(cells[j]);
@@ -1334,6 +1314,7 @@ function computeNoteDurEighths(cardEl, cells, nIdx){
     return Math.max(1, blockEnd - nIdx);
   }
 
+  // mode === "bar"
   if(next !== -1){
     return Math.max(1, next - nIdx);
   }
@@ -1352,8 +1333,6 @@ function computeNoteDurEighths(cardEl, cells, nIdx){
 
 /***********************
 Instrument playback (CHORD-AWARE)
-- Only triggers on non-empty chord cells
-- Uses your duration modes
 ***********************/
 function playInstrumentStep(){
   if(!state.instrumentOn) return;
@@ -1368,20 +1347,16 @@ function playInstrumentStep(){
 
   const rawChord = getNoteRawFromCell(cells[nIdx]);
   if(!rawChord) return;
-
-  // Must be a parseable chord/root; ignore junk
   if(!parseChordToken(rawChord)) return;
 
   const durEighths = computeNoteDurEighths(card, cells, nIdx);
-  const durMs = Math.max(60, durEighths * (state.eighthMs || 300));
+  const durMs = Math.max(80, durEighths * (state.eighthMs || 300));
 
   playChordForInstrument(rawChord, durMs);
 }
 
 /***********************
-AutoScroll (FIXED)
-- Uses playCardIndex cursor
-- Advances at each NEW bar (not at tick 0)
+AutoScroll
 ***********************/
 function scrollCardIntoView(card){
   if(!card) return;
@@ -1472,7 +1447,6 @@ function startDrums(){
   updateClock();
 
   const bpm = clamp(state.bpm || 95, 40, 220);
-
   const stepMs = Math.round((60000 / bpm) / 4);
   let step = 0;
 
@@ -1638,7 +1612,6 @@ function tokenizeWords(text){
     .split(" ")
     .filter(Boolean);
 }
-
 function estimateSyllablesWord(w){
   return Math.max(1, countSyllablesInline(w));
 }
@@ -1710,7 +1683,6 @@ function updateKeyFromAllNotes(){
   SECTIONS.filter(s => s !== "Full").forEach(sec => {
     (state.project.sections[sec] || []).forEach(line => {
       (Array.isArray(line.notes) ? line.notes : []).forEach(tok => {
-        // chord-aware: take root pitch class from leading token
         const pc = noteToPC(tok);
         if(pc !== null) hist[pc] += 1;
       });
@@ -2335,15 +2307,13 @@ async function renderRecordings(){
 }
 
 /***********************
-Recording bus (now taps masterPost)
+Recording bus (taps masterPost)
 ***********************/
 function ensureRecordingBus(){
   const ctx = ensureCtx();
-
   if(!state.recDest){
     state.recDest = ctx.createMediaStreamDestination();
   }
-
   if(!state.recWired && state.masterPost){
     try{
       state.masterPost.connect(state.recDest);
@@ -2765,6 +2735,7 @@ function wire(){
     }
     renderInstrumentUI();
   }
+
   el.instAcoustic.addEventListener("click", () => handleInstrument("acoustic"));
   el.instElectric.addEventListener("click", () => handleInstrument("electric"));
   el.instPiano.addEventListener("click", () => handleInstrument("piano"));
@@ -2793,6 +2764,7 @@ function wire(){
     }
     renderDrumUI();
   }
+
   el.drumRock.addEventListener("click", () => handleDrums("rock"));
   el.drumHardRock.addEventListener("click", () => handleDrums("hardrock"));
   el.drumPop.addEventListener("click", () => handleDrums("pop"));
