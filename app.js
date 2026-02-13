@@ -800,27 +800,30 @@ ACOUSTIC STRING (MOBILE-PROOF)
 Karplus–Strong pluck: noise burst -> delay+feedback loop -> damping -> body EQ
 This is extremely reliable on phones (no “silent acoustic”).
 ***********************/
-function acousticStringSafe(ctx, freq, durMs, vel=0.9){
+/***********************
+ACOUSTIC (NO-FEEDBACK, MOBILE-SAFE)
+Noise-burst pluck + light pitched tone, shaped by body EQ.
+No delay feedback loops anywhere (prevents squeal/whine).
+***********************/
+function acousticPluckSafe(ctx, freq, durMs, vel=0.9){
   const t0 = ctx.currentTime;
-  const dur = Math.max(0.12, durMs/1000);
+  const dur = Math.max(0.10, durMs / 1000);
+  const f = clamp(freq, 70, 1400);
+  const v = clamp(vel, 0.15, 1.0);
 
-  // clamp frequency to stable range
-  const f = clamp(freq, 70, 1200);
+  // Main envelope
+  const env = ctx.createGain();
+  const peak = 0.18 * v;
 
-  // output envelope
-  const out = ctx.createGain();
-  const peak = 0.22 * clamp(vel, 0.15, 1.0);
+  env.gain.setValueAtTime(0.0001, t0);
+  env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
+  env.gain.setValueAtTime(peak * 0.78, t0 + 0.045);
+  // release
+  const rel = clamp(0.22 + dur * 0.50, 0.45, 2.20);
+  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + rel);
 
-  out.gain.setValueAtTime(0.0001, t0);
-  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
-  out.gain.setValueAtTime(peak * 0.82, t0 + 0.06);
-
-  // release tail
-  const rel = clamp(0.25 + dur * 0.55, 0.6, 3.0);
-  out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + rel);
-
-  // --- pluck exciter (short noise burst)
-  const nLen = 0.010; // 10ms
+  // --- Noise burst (pluck)
+  const nLen = 0.012; // 12ms
   const bs = Math.max(256, Math.floor(ctx.sampleRate * nLen));
   const buf = ctx.createBuffer(1, bs, ctx.sampleRate);
   const data = buf.getChannelData(0);
@@ -828,74 +831,94 @@ function acousticStringSafe(ctx, freq, durMs, vel=0.9){
     const fade = 1 - (i / data.length);
     data[i] = (Math.random()*2 - 1) * fade;
   }
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
+  const ns = ctx.createBufferSource();
+  ns.buffer = buf;
 
-  const exc = ctx.createGain();
-  exc.gain.setValueAtTime(0.0001, t0);
-  exc.gain.exponentialRampToValueAtTime(0.35 * clamp(vel,0.2,1.0), t0 + 0.002);
-  exc.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
+  const nGain = ctx.createGain();
+  nGain.gain.setValueAtTime(0.0001, t0);
+  nGain.gain.exponentialRampToValueAtTime(0.65 * v, t0 + 0.002);
+  nGain.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
 
-  // --- Karplus–Strong loop
-  const delay = ctx.createDelay(1.0);
-  delay.delayTime.setValueAtTime(1 / f, t0);
+  // “String” bandpass (focuses the noise into a pitched pluck)
+  const bp1 = ctx.createBiquadFilter();
+  bp1.type = "bandpass";
+  bp1.frequency.setValueAtTime(f, t0);
+  bp1.Q.value = 10;
 
-  const fb = ctx.createGain();
-  fb.gain.setValueAtTime(0.90, t0); // stable feedback
+  // A little brightness from a higher band (still safe)
+  const bp2 = ctx.createBiquadFilter();
+  bp2.type = "bandpass";
+  bp2.frequency.setValueAtTime(clamp(f * 2.0, 180, 4200), t0);
+  bp2.Q.value = 6;
 
-  // damping inside feedback loop (kills harsh highs)
-  const dampLP = ctx.createBiquadFilter();
-  dampLP.type = "lowpass";
-  dampLP.frequency.setValueAtTime(clamp(1800 + f*1.2, 1800, 4200), t0);
-  dampLP.Q.value = 0.7;
+  const noiseMix = ctx.createGain();
+  noiseMix.gain.value = 0.55;
 
-  // optional “body” shaping (adds warmth)
+  ns.connect(nGain);
+  nGain.connect(bp1);
+  nGain.connect(bp2);
+  bp1.connect(noiseMix);
+  bp2.connect(noiseMix);
+
+  // --- Tiny pitched tone (adds definition, decays fast)
+  const o = ctx.createOscillator();
+  o.type = "triangle";
+  o.frequency.setValueAtTime(f, t0);
+  o.detune.value = (Math.random()*2-1) * 4;
+
+  const oGain = ctx.createGain();
+  oGain.gain.setValueAtTime(0.0001, t0);
+  oGain.gain.exponentialRampToValueAtTime(0.055 * v, t0 + 0.006);
+  oGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+
+  o.connect(oGain);
+
+  // --- Body shaping (warmth + tame top)
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 85;
+  hp.Q.value = 0.7;
+
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
   body.frequency.value = 240;
   body.Q.value = 0.9;
-  body.gain.value = 2.6;
+  body.gain.value = 2.8;
 
-  // tame top end
-  const topLP = ctx.createBiquadFilter();
-  topLP.type = "lowpass";
-  topLP.frequency.value = 5600;
-  topLP.Q.value = 0.7;
-
-  // small anti-whistle notch
   const notch = ctx.createBiquadFilter();
   notch.type = "notch";
   notch.frequency.value = 3200;
   notch.Q.value = 2.0;
 
-  // routing:
-  // exciter into delay
-  src.connect(exc);
-  exc.connect(delay);
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 5200;
+  lp.Q.value = 0.7;
 
-  // feedback loop: delay -> damp -> fb -> delay
-  delay.connect(dampLP);
-  dampLP.connect(fb);
-  fb.connect(delay);
+  // route: (noiseMix + oGain) -> env -> EQ chain -> lp (returned out)
+  const sum = ctx.createGain();
+  sum.gain.value = 1.0;
 
-  // output tap: delay -> out envelope -> body -> notch -> topLP
-  delay.connect(out);
-  out.connect(body);
+  noiseMix.connect(sum);
+  oGain.connect(sum);
+
+  sum.connect(env);
+  env.connect(hp);
+  hp.connect(body);
   body.connect(notch);
-  notch.connect(topLP);
+  notch.connect(lp);
 
-  // start/stop exciter
-  src.start(t0);
-  src.stop(t0 + nLen + 0.01);
+  // start/stop
+  ns.start(t0);
+  ns.stop(t0 + nLen + 0.02);
 
-  // cleanup
-  scheduleCleanup(
-    [src, exc, delay, fb, dampLP, out, body, notch, topLP],
-    (durMs + rel*1000 + 1400)
-  );
+  o.start(t0);
+  o.stop(t0 + dur + rel + 0.10);
 
-  return { out: topLP, nodes:[src, exc, delay, fb, dampLP, out, body, notch, topLP] };
+  scheduleCleanup([ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,notch,lp], (durMs + rel*1000 + 1200));
+  return { out: lp, nodes:[ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,notch,lp] };
 }
+
 
 
 /***********************
@@ -1107,48 +1130,29 @@ function playAcousticChord(ch, durMs){
   const ctx = ensureCtx();
   const token = state.audioToken;
 
-  // chord bus + gentle sweetening (slightly louder)
+  // softer overall (prevents harshness on phones)
   const bus = ctx.createGain();
-  bus.gain.value = 1.20; // was 1.0
+  bus.gain.value = 0.95;
 
-  const body = ctx.createBiquadFilter();
-  body.type = "peaking";
-  body.frequency.value = 240;
-  body.Q.value = 0.9;
-  body.gain.value = 2.2;
+  // small “air” delay (NO FEEDBACK)
+  const dly = ctx.createDelay(0.25);
+  dly.delayTime.value = 0.065;
 
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 5600;
-  lp.Q.value = 0.7;
+  const dlyGain = ctx.createGain();
+  dlyGain.gain.value = 0.07;
 
-  const notch = ctx.createBiquadFilter();
-  notch.type = "notch";
-  notch.frequency.value = 3200;
-  notch.Q.value = 2.0;
-
-  const room = makeSoftRoom(ctx);
-
-  const dry = ctx.createGain(); dry.gain.value = 1.00; // was 0.90
-  const wet = ctx.createGain(); wet.gain.value = 0.20; // was 0.16
-
-  bus.connect(body);
-  body.connect(notch);
-  notch.connect(lp);
-
-  lp.connect(dry);
-  lp.connect(room.in);
-  room.wet.connect(wet);
-
-  dry.connect(getOutNode());
-  wet.connect(getOutNode());
+  // dry + delay to output
+  bus.connect(getOutNode());
+  bus.connect(dly);
+  dly.connect(dlyGain);
+  dlyGain.connect(getOutNode());
 
   // strum
   const midi = buildGuitarStrumVoicing(ch);
   const freqs = midi.map(midiToFreq);
 
   const bpm = clamp(state.bpm||95, 40, 220);
-  const strumMs = clamp(Math.round(28_000 / bpm), 14, 32);
+  const strumMs = clamp(Math.round(24_000 / bpm), 12, 28);
 
   for(let i=0;i<freqs.length;i++){
     const f = freqs[i];
@@ -1158,17 +1162,16 @@ function playAcousticChord(ch, durMs){
       if(token !== state.audioToken) return;
       if(!state.instrumentOn) return;
 
-      const vel = clamp(0.98 - i*0.10, 0.55, 0.98);
-    const n = acousticStringSafe(ctx, f, durMs, vel);
-n.out.connect(bus);
-// ensure nodes are kept alive & cleaned up
-scheduleCleanup(n.nodes, durMs + 3200);
-
+      const vel = clamp(0.95 - i*0.10, 0.55, 0.98);
+      const n = acousticPluckSafe(ctx, f, durMs, vel);
+      n.out.connect(bus);
+      scheduleCleanup(n.nodes, durMs + 2200);
     }, delayMs);
   }
 
-  scheduleCleanup([bus,body,lp,notch,dry,wet, ...room.nodes], durMs + 2600);
+  scheduleCleanup([bus,dly,dlyGain], durMs + 2600);
 }
+
 
 
 function playElectricChord(ch, durMs){
