@@ -1346,8 +1346,12 @@ function getHeaderBottomY(){
   return Math.max(0, Math.min(window.innerHeight, r.bottom)) + 8;
 }
 
+function getCards(){
+  return Array.from(el.sheetBody.querySelectorAll(".card"));
+}
+
 function getNearestVisibleCard(){
-  const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
+  const cards = getCards();
   if(cards.length === 0) return null;
 
   const yLine = getHeaderBottomY();
@@ -1362,53 +1366,30 @@ function getNearestVisibleCard(){
       bestDist = dist;
       best = c;
     }
-   function getCardAtPlayLine(){
-  const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
-  if(cards.length === 0) return null;
-
-  const yLine = getHeaderBottomY();
-
-  // 1) Prefer the card that the play-line actually passes through
-  for(const c of cards){
-    const r = c.getBoundingClientRect();
-    if(r.top <= yLine && r.bottom > yLine) return c;
   }
-
-  // 2) Otherwise, the first card below the play-line
-  for(const c of cards){
-    const r = c.getBoundingClientRect();
-    if(r.top > yLine) return c;
-  }
-
-  // 3) Otherwise, fallback last card
-  return cards[cards.length - 1] || null;
-}
- 
   return best || cards[0];
 }
 
-function getCards(){
-  return Array.from(el.sheetBody.querySelectorAll(".card"));
-}
+/**
+ * ✅ FIX: choose the card the play-line is actually on.
+ * Adds tolerance so we DON'T accidentally pick card #2 when card #1 is
+ * slightly tucked under the header.
+ */
+function getCardAtPlayLine(){
+  const cards = getCards();
+  if(cards.length === 0) return null;
 
-function getPlaybackCard(){
-  if(state.currentSection === "Full") return null;
+  const yLine = getHeaderBottomY();
+  const tol = 24; // pixels of forgiveness for header overlap / rounding
 
-  if(state.autoScrollOn){
-    const cards = getCards();
-    if(cards.length){
-        if(state.playCardIndex === null || state.playCardIndex < 0 || state.playCardIndex >= cards.length){
-    const cur = getCardAtPlayLine() || getNearestVisibleCard() || cards[0];
-    state.playCardIndex = Math.max(0, cards.indexOf(cur));
+  // 1) Prefer the card that the play-line passes through (with tolerance)
+  for(const c of cards){
+    const r = c.getBoundingClientRect();
+    if(r.top <= (yLine + tol) && r.bottom > (yLine - tol)) return c;
   }
 
-      return cards[state.playCardIndex] || cards[0];
-    }
-    return null;
-  }
-
-  if(lastActiveCardEl && document.contains(lastActiveCardEl)) return lastActiveCardEl;
-  return getNearestVisibleCard();
+  // 2) Fallback: nearest visible card (not "first below", which causes skipping)
+  return getNearestVisibleCard() || cards[0];
 }
 
 /***********************
