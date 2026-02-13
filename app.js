@@ -797,21 +797,21 @@ Noise-excited resonator (no feedback), filtered + warm body
 ***********************/
 function acousticStringSafe(ctx, freq, durMs, vel=0.9){
   const t0 = ctx.currentTime;
-  const dur = Math.max(0.08, durMs/1000);
+  const dur = Math.max(0.10, durMs/1000);
 
-  // output envelope
+  // output envelope (LOUDER but still safe)
   const out = ctx.createGain();
-  const peak = 0.10 * clamp(vel, 0.15, 1.0);
+  const peak = 0.22 * clamp(vel, 0.15, 1.0); // was ~0.10
 
   out.gain.setValueAtTime(0.0001, t0);
-  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
-  out.gain.setValueAtTime(peak * 0.82, t0 + 0.06);
+  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.007);
+  out.gain.setValueAtTime(peak * 0.84, t0 + 0.06);
 
-  const rel = clamp(0.18 + dur*0.45, 0.40, 2.4);
+  const rel = clamp(0.22 + dur*0.50, 0.55, 2.8);
   out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + rel);
 
-  // exciter: very short noise burst
-  const nLen = clamp(0.010 + (1/clamp(freq,100,1200))*1.2, 0.010, 0.022);
+  // exciter: short noise burst (a little stronger)
+  const nLen = clamp(0.012 + (1/clamp(freq,100,1200))*1.2, 0.012, 0.026);
   const bs = Math.max(256, Math.floor(ctx.sampleRate * nLen));
   const b = ctx.createBuffer(1, bs, ctx.sampleRate);
   const data = b.getChannelData(0);
@@ -824,19 +824,19 @@ function acousticStringSafe(ctx, freq, durMs, vel=0.9){
 
   const nGain = ctx.createGain();
   nGain.gain.setValueAtTime(0.0001, t0);
-  nGain.gain.exponentialRampToValueAtTime(0.09 * clamp(vel,0.2,1.0), t0 + 0.002);
+  nGain.gain.exponentialRampToValueAtTime(0.18 * clamp(vel,0.2,1.0), t0 + 0.002); // was 0.09
   nGain.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
 
-  // resonator: bandpass at fundamental + light harmonic
+  // resonator: WIDER bandpass so phones actually “hear” it
   const bp1 = ctx.createBiquadFilter();
   bp1.type = "bandpass";
   bp1.frequency.value = clamp(freq, 70, 1200);
-  bp1.Q.value = 9.0;
+  bp1.Q.value = 5.5; // was 9.0 (too narrow on many speakers)
 
   const bp2 = ctx.createBiquadFilter();
   bp2.type = "bandpass";
   bp2.frequency.value = clamp(freq*2, 140, 2400);
-  bp2.Q.value = 10.5;
+  bp2.Q.value = 6.5; // was 10.5
 
   const mix = ctx.createGain();
   mix.gain.value = 1.0;
@@ -844,18 +844,18 @@ function acousticStringSafe(ctx, freq, durMs, vel=0.9){
   // warm body + anti-squeal notch + top rolloff
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
-  body.frequency.value = 210;
+  body.frequency.value = 220;
   body.Q.value = 0.9;
-  body.gain.value = 2.2;
+  body.gain.value = 2.6;
 
   const notch = ctx.createBiquadFilter();
   notch.type = "notch";
   notch.frequency.value = 3200;
-  notch.Q.value = 2.2;
+  notch.Q.value = 2.0;
 
   const lp = ctx.createBiquadFilter();
   lp.type = "lowpass";
-  lp.frequency.value = 5200;
+  lp.frequency.value = 5600;
   lp.Q.value = 0.7;
 
   // route
@@ -875,9 +875,7 @@ function acousticStringSafe(ctx, freq, durMs, vel=0.9){
   ns.start(t0);
   ns.stop(t0 + nLen + 0.01);
 
-  const stopAt = t0 + dur + rel + 0.12;
-
-  scheduleCleanup([ns,nGain,bp1,bp2,mix,out,body,notch,lp], (durMs + rel*1000 + 900));
+  scheduleCleanup([ns,nGain,bp1,bp2,mix,out,body,notch,lp], (durMs + rel*1000 + 1200));
   return { out: lp, nodes:[ns,nGain,bp1,bp2,mix,out,body,notch,lp] };
 }
 
@@ -1090,19 +1088,19 @@ function playAcousticChord(ch, durMs){
   const ctx = ensureCtx();
   const token = state.audioToken;
 
-  // chord bus + gentle sweetening
+  // chord bus + gentle sweetening (slightly louder)
   const bus = ctx.createGain();
-  bus.gain.value = 1.0;
+  bus.gain.value = 1.20; // was 1.0
 
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
   body.frequency.value = 240;
   body.Q.value = 0.9;
-  body.gain.value = 2.0;
+  body.gain.value = 2.2;
 
   const lp = ctx.createBiquadFilter();
   lp.type = "lowpass";
-  lp.frequency.value = 5200;
+  lp.frequency.value = 5600;
   lp.Q.value = 0.7;
 
   const notch = ctx.createBiquadFilter();
@@ -1112,8 +1110,8 @@ function playAcousticChord(ch, durMs){
 
   const room = makeSoftRoom(ctx);
 
-  const dry = ctx.createGain(); dry.gain.value = 0.90;
-  const wet = ctx.createGain(); wet.gain.value = 0.16;
+  const dry = ctx.createGain(); dry.gain.value = 1.00; // was 0.90
+  const wet = ctx.createGain(); wet.gain.value = 0.20; // was 0.16
 
   bus.connect(body);
   body.connect(notch);
@@ -1140,15 +1138,16 @@ function playAcousticChord(ch, durMs){
     setTimeout(() => {
       if(token !== state.audioToken) return;
       if(!state.instrumentOn) return;
+
       const vel = clamp(0.98 - i*0.10, 0.55, 0.98);
       const n = acousticStringSafe(ctx, f, durMs, vel);
       n.out.connect(bus);
-      scheduleCleanup([n.out], durMs + 1200);
     }, delayMs);
   }
 
-  scheduleCleanup([bus,body,lp,notch,dry,wet, ...room.nodes], durMs + 2200);
+  scheduleCleanup([bus,body,lp,notch,dry,wet, ...room.nodes], durMs + 2600);
 }
+
 
 function playElectricChord(ch, durMs){
   const ctx = ensureCtx();
