@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v40) */
+/* app.js (FULL REPLACE MAIN v41) */
 (() => {
 "use strict";
 
@@ -35,7 +35,7 @@ function escapeHtml(s){
     .replace(/</g,"&lt;")
     .replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;")
-    .replace(/'/g,"&#39;");
+    .replace(/'/g,"&#039;");
 }
 
 /***********************
@@ -749,11 +749,11 @@ function makeCabinet(ctx){
   mid.type = "peaking";
   mid.frequency.value = 1650;
   mid.Q.value = 0.9;
-  mid.gain.value = 3.5;
+  mid.gain.value = 2.0; // was 3.5 (reduced to avoid screech)
 
   const lp = ctx.createBiquadFilter();
   lp.type = "lowpass";
-  lp.frequency.value = 5200;
+  lp.frequency.value = 4800; // was 5200 (slightly darker = less whistle)
   lp.Q.value = 0.7;
 
   hp.connect(mid);
@@ -777,7 +777,7 @@ function makeWaveshaper(ctx, drive=1.0){
 }
 
 /***********************
-ACOUSTIC GUITAR STRING (stable Karplus)
+ACOUSTIC GUITAR STRING (stable Karplus + anti-screech notch)
 ***********************/
 function ksString(ctx, freq, durMs, bright=0.55, outGain=0.08){
   const t0 = ctx.currentTime;
@@ -790,21 +790,29 @@ function ksString(ctx, freq, durMs, bright=0.55, outGain=0.08){
   delay.delayTime.value = Math.max(0.001, 1 / f);
 
   // feedback depends on frequency (high notes decay faster)
-  const freqDamp = 1 - clamp((f - 120) / 1200, 0, 1) * 0.10; // 1..0.90
-  const durBoost = clamp(dur / 1.6, 0, 1) * 0.06;            // 0..0.06
+  const freqDamp = 1 - clamp((f - 120) / 1200, 0, 1) * 0.12; // 1..0.88
+  const durBoost = clamp(dur / 2.2, 0, 1) * 0.05;            // 0..0.05
   const fb = ctx.createGain();
-  fb.gain.value = clamp((0.86 + durBoost) * freqDamp, 0.82, 0.93);
+  // safer feedback cap (prevents whistling runaway)
+  fb.gain.value = clamp((0.83 + durBoost) * freqDamp, 0.80, 0.90);
 
   // loop filtering (more damping = less screech)
   const lp1 = ctx.createBiquadFilter();
   lp1.type = "lowpass";
-  lp1.frequency.value = 900 + bright * 1800; // 900..2700
+  lp1.frequency.value = 850 + bright * 1500; // 850..2350
   lp1.Q.value = 0.35;
 
   const lp2 = ctx.createBiquadFilter();
   lp2.type = "lowpass";
-  lp2.frequency.value = 1800 + bright * 2400; // 1800..4200
+  lp2.frequency.value = 1500 + bright * 1700; // 1500..3200
   lp2.Q.value = 0.25;
+
+  // anti-screech notch (kills the “whistle” band)
+  const notch = ctx.createBiquadFilter();
+  notch.type = "peaking";
+  notch.frequency.value = 3200;
+  notch.Q.value = 2.4;
+  notch.gain.value = -5.0;
 
   const hp = ctx.createBiquadFilter();
   hp.type = "highpass";
@@ -833,7 +841,7 @@ function ksString(ctx, freq, durMs, bright=0.55, outGain=0.08){
   out.gain.exponentialRampToValueAtTime(outGain, t0 + 0.006);
 
   // release shaped by dur (ties ring longer)
-  const rel = Math.min(0.85, 0.10 + dur*0.55);
+  const rel = Math.min(1.10, 0.12 + dur*0.70);
   out.gain.setValueAtTime(outGain, t0 + Math.max(0.02, dur - rel));
   out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
@@ -843,21 +851,22 @@ function ksString(ctx, freq, durMs, bright=0.55, outGain=0.08){
 
   delay.connect(lp1);
   lp1.connect(lp2);
-  lp2.connect(fb);
+  lp2.connect(notch);
+  notch.connect(fb);
   fb.connect(delay);
 
-  lp2.connect(hp);
+  notch.connect(hp);
   hp.connect(out);
 
   src.start(t0);
   src.stop(t0 + burstLen + 0.01);
 
-  scheduleCleanup([src,exc,delay,lp1,lp2,fb,hp,out], durMs + 600);
-  return { out, nodes:[src,exc,delay,lp1,lp2,fb,hp,out] };
+  scheduleCleanup([src,exc,delay,lp1,lp2,notch,fb,hp,out], durMs + 900);
+  return { out, nodes:[src,exc,delay,lp1,lp2,notch,fb,hp,out] };
 }
 
 /***********************
-PIANO NOTE (fixed sustain + decay)
+PIANO NOTE (LONGER sustain on ties)
 ***********************/
 function pianoNote(ctx, freq, durMs, vel=0.9){
   const t0 = ctx.currentTime;
@@ -870,13 +879,15 @@ function pianoNote(ctx, freq, durMs, vel=0.9){
   out.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
 
   // piano "hold" then long decay
-  const hold = Math.min(0.22, 0.06 + dur * 0.18); // longer holds when tied
+  const hold = Math.min(0.34, 0.07 + dur * 0.22); // longer holds on longer notes
   out.gain.setValueAtTime(peak * 0.92, t0 + hold);
 
-  // longer notes decay slower
+  // MUCH longer tail for long tied notes
   const endTime = t0 + dur;
-  const tail = clamp(0.40 + dur * 0.55, 0.55, 2.6);
-  out.gain.exponentialRampToValueAtTime(0.0001, Math.min(endTime + tail, endTime + 2.8));
+  const longFactor = clamp((dur - 0.8) / 2.6, 0, 1); // kicks in on longer notes
+  const tail = clamp(0.80 + dur * 0.95 + longFactor * 2.6, 1.1, 6.8);
+
+  out.gain.exponentialRampToValueAtTime(0.0001, endTime + tail);
 
   const nodes = [out];
 
@@ -900,13 +911,13 @@ function pianoNote(ctx, freq, durMs, vel=0.9){
     const a = (0.16 * clamp(vel,0.2,1.0)) * p.a;
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(a, t0 + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + Math.min(2.2, tail));
+    g.gain.exponentialRampToValueAtTime(0.0001, endTime + Math.min(6.8, tail));
 
     o.connect(g);
     g.connect(out);
 
     o.start(t0);
-    o.stop(t0 + dur + Math.min(2.6, tail) + 0.08);
+    o.stop(endTime + Math.min(7.0, tail) + 0.12);
 
     nodes.push(o,g);
   }
@@ -950,49 +961,56 @@ function pianoNote(ctx, freq, durMs, vel=0.9){
 
   out.connect(body);
 
-  scheduleCleanup([...nodes, body], (durMs + 2200));
+  scheduleCleanup([...nodes, body], (durMs + (tail*1000) + 800));
   return { out: body, nodes:[...nodes, body] };
 }
 
 /***********************
-ELECTRIC STRING (more “guitar”, less synth)
-KS string -> drive -> cab -> envelope + pick transient
+ELECTRIC STRING (anti-screech: notch + darker top + safer gain)
+KS string -> drive -> cab -> presenceCut -> envelope + pick transient
 ***********************/
 function electricString(ctx, freq, durMs, vel=0.85){
   const t0 = ctx.currentTime;
   const dur = Math.max(0.08, durMs/1000);
 
   // pluck source (stringy)
-  const ks = ksString(ctx, freq, durMs, 0.70, 0.10 * clamp(vel,0.2,1.0));
+  const ks = ksString(ctx, freq, durMs, 0.60, 0.09 * clamp(vel,0.2,1.0)); // bright reduced
 
   // pre-shape
   const preHP = ctx.createBiquadFilter();
   preHP.type = "highpass";
-  preHP.frequency.value = 95;
+  preHP.frequency.value = 105;
   preHP.Q.value = 0.7;
 
   const preLP = ctx.createBiquadFilter();
   preLP.type = "lowpass";
-  preLP.frequency.value = 4600;
-  preLP.Q.value = 0.6;
+  preLP.frequency.value = 3900; // darker
+  preLP.Q.value = 0.7;
 
   // drive + cab
-  const sh = makeWaveshaper(ctx, 2.0);
+  const sh = makeWaveshaper(ctx, 1.7); // reduced drive
   const cab = makeCabinet(ctx);
+
+  // presence cut (kills “screech” band)
+  const presenceCut = ctx.createBiquadFilter();
+  presenceCut.type = "peaking";
+  presenceCut.frequency.value = 3200;
+  presenceCut.Q.value = 1.4;
+  presenceCut.gain.value = -5.5;
 
   // final env (lets ties sustain)
   const env = ctx.createGain();
-  const peak = 0.22 * clamp(vel,0.2,1.0);
+  const peak = 0.20 * clamp(vel,0.2,1.0);
 
   env.gain.setValueAtTime(0.0001, t0);
   env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
 
-  const rel = Math.min(0.45, 0.10 + dur * 0.22);
+  const rel = Math.min(0.55, 0.12 + dur * 0.24);
   env.gain.setValueAtTime(peak, t0 + Math.max(0.03, dur - rel));
   env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
   // pick transient (tiny noise click)
-  const pickLen = 0.012;
+  const pickLen = 0.010;
   const bs = Math.max(256, Math.floor(ctx.sampleRate * pickLen));
   const b = ctx.createBuffer(1, bs, ctx.sampleRate);
   const d = b.getChannelData(0);
@@ -1004,12 +1022,12 @@ function electricString(ctx, freq, durMs, vel=0.85){
 
   const pickBP = ctx.createBiquadFilter();
   pickBP.type = "bandpass";
-  pickBP.frequency.value = 2100;
-  pickBP.Q.value = 0.9;
+  pickBP.frequency.value = 1900; // slightly lower
+  pickBP.Q.value = 1.1;
 
   const pickG = ctx.createGain();
   pickG.gain.setValueAtTime(0.0001, t0);
-  pickG.gain.exponentialRampToValueAtTime(0.05 * clamp(vel,0.2,1.0), t0 + 0.002);
+  pickG.gain.exponentialRampToValueAtTime(0.035 * clamp(vel,0.2,1.0), t0 + 0.002);
   pickG.gain.exponentialRampToValueAtTime(0.0001, t0 + pickLen);
 
   // route
@@ -1017,17 +1035,18 @@ function electricString(ctx, freq, durMs, vel=0.85){
   preHP.connect(preLP);
   preLP.connect(sh);
   sh.connect(cab.in);
-  cab.out.connect(env);
+  cab.out.connect(presenceCut);
+  presenceCut.connect(env);
 
   pick.connect(pickBP);
   pickBP.connect(pickG);
-  pickG.connect(sh); // goes into amp too
+  pickG.connect(sh);
 
   pick.start(t0);
   pick.stop(t0 + pickLen + 0.01);
 
-  scheduleCleanup([preHP,preLP,sh,env,pick,pickBP,pickG, ...cab.nodes], durMs + 900);
-  return { out: env, nodes:[ks.out, preHP,preLP,sh,env,pick,pickBP,pickG, ...cab.nodes] };
+  scheduleCleanup([preHP,preLP,sh,presenceCut,env,pick,pickBP,pickG, ...cab.nodes], durMs + 1200);
+  return { out: env, nodes:[ks.out, preHP,preLP,sh,presenceCut,env,pick,pickBP,pickG, ...cab.nodes] };
 }
 
 /***********************
@@ -1039,35 +1058,50 @@ function playAcousticChord(ch, durMs){
   const out = ctx.createGain();
   out.gain.value = 1.0;
 
-  // gentle limiter to prevent “screech” if user stacks chords fast
+  // limiter (more protective)
   const lim = ctx.createDynamicsCompressor();
-  lim.threshold.value = -14;
+  lim.threshold.value = -18;
   lim.knee.value = 18;
-  lim.ratio.value = 6;
+  lim.ratio.value = 8;
   lim.attack.value = 0.003;
-  lim.release.value = 0.12;
+  lim.release.value = 0.14;
 
   // body resonance
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
   body.frequency.value = 190;
   body.Q.value = 0.9;
-  body.gain.value = 1.8;
+  body.gain.value = 1.6;
 
+  // less “air” (this was causing whistle)
   const air = ctx.createBiquadFilter();
   air.type = "highshelf";
-  air.frequency.value = 3400;
-  air.gain.value = 1.6;
+  air.frequency.value = 5200;
+  air.gain.value = 0.55;
+
+  // anti-screech notch + gentle top limit
+  const notch = ctx.createBiquadFilter();
+  notch.type = "peaking";
+  notch.frequency.value = 3200;
+  notch.Q.value = 2.2;
+  notch.gain.value = -5.0;
+
+  const topLP = ctx.createBiquadFilter();
+  topLP.type = "lowpass";
+  topLP.frequency.value = 5200;
+  topLP.Q.value = 0.6;
 
   out.connect(body);
   body.connect(air);
-  air.connect(lim);
+  air.connect(notch);
+  notch.connect(topLP);
+  topLP.connect(lim);
 
   const room = makeSoftRoom(ctx);
   lim.connect(room.in);
 
-  const dry = ctx.createGain(); dry.gain.value = 0.88;
-  const wet = ctx.createGain(); wet.gain.value = 0.22;
+  const dry = ctx.createGain(); dry.gain.value = 0.90;
+  const wet = ctx.createGain(); wet.gain.value = 0.18;
 
   lim.connect(dry);
   room.wet.connect(wet);
@@ -1086,30 +1120,30 @@ function playAcousticChord(ch, durMs){
     const delayMs = i * strumMs;
 
     setTimeout(() => {
-      const bright = 0.45 + (i/(freqs.length-1 || 1)) * 0.30;
-      const g = 0.085 * (0.98 - i * 0.06);
+      const bright = 0.30 + (i/(freqs.length-1 || 1)) * 0.28; // less bright
+      const g = 0.080 * (0.98 - i * 0.06);
       const ks = ksString(ctx, f, durMs, bright, g);
       ks.out.connect(out);
-      scheduleCleanup([ks.out], durMs + 450);
+      scheduleCleanup([ks.out], durMs + 700);
     }, delayMs);
   }
 
   // pick noise (tiny)
-  noise(Math.min(26, Math.max(14, strumMs*1.2)), 0.028);
+  noise(Math.min(24, Math.max(14, strumMs*1.1)), 0.022);
 
-  scheduleCleanup([out,body,air,lim,dry,wet, ...room.nodes], durMs + 1200);
+  scheduleCleanup([out,body,air,notch,topLP,lim,dry,wet, ...room.nodes], durMs + 1600);
 }
 
 function playElectricChord(ch, durMs){
   const ctx = ensureCtx();
 
   const room = makeSoftRoom(ctx);
-  const wet = ctx.createGain(); wet.gain.value = 0.14;
+  const wet = ctx.createGain(); wet.gain.value = 0.12;
   room.wet.connect(wet);
   wet.connect(getOutNode());
 
   const dryBus = ctx.createGain();
-  dryBus.gain.value = 0.92;
+  dryBus.gain.value = 0.90;
   dryBus.connect(getOutNode());
   dryBus.connect(room.in);
 
@@ -1124,17 +1158,15 @@ function playElectricChord(ch, durMs){
     const delayMs = i * strumMs;
 
     setTimeout(() => {
-      const vel = clamp(0.95 - i*0.07, 0.55, 0.98);
+      const vel = clamp(0.92 - i*0.07, 0.52, 0.96);
       const n = electricString(ctx, f, durMs, vel);
       n.out.connect(dryBus);
-      scheduleCleanup([n.out], durMs + 600);
+      scheduleCleanup([n.out], durMs + 900);
     }, delayMs);
   }
 
-  // light scrape
-  noise(Math.min(22, Math.max(10, strumMs)), 0.020);
-
-  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 1200);
+  noise(Math.min(20, Math.max(10, strumMs)), 0.016);
+  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 1600);
 }
 
 function playPianoChord(ch, durMs){
@@ -1166,11 +1198,11 @@ function playPianoChord(ch, durMs){
       const vel = clamp(0.90 - i*0.06, 0.55, 0.98);
       const n = pianoNote(ctx, f, durMs, vel);
       n.out.connect(dryBus);
-      scheduleCleanup([n.out], durMs + 2400);
+      scheduleCleanup([n.out], durMs + 8000);
     }, delayMs);
   }
 
-  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 2600);
+  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 8200);
 }
 
 function playChordForInstrument(rawChord, durMs){
@@ -1899,7 +1931,7 @@ async function exportFullPreview(){
     }
 
     const safeName = String(state.project?.name || "Song Rider Pro")
-      .replace(/[\/:*?"<>|]+/g, "")
+      .replace(/[/:*?"<>|]+/g, "")
       .trim() || "Song Rider Pro";
 
     const txtName = `${safeName} - Full Preview.txt`;
@@ -1932,6 +1964,7 @@ async function exportFullPreview(){
 
     dl(txtBlob, txtName);
     setTimeout(() => dl(htmlBlob, htmlName), 350);
+
   }catch{
     alert("Export failed on this device/browser.");
   }
