@@ -1362,7 +1362,28 @@ function getNearestVisibleCard(){
       bestDist = dist;
       best = c;
     }
+   function getCardAtPlayLine(){
+  const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
+  if(cards.length === 0) return null;
+
+  const yLine = getHeaderBottomY();
+
+  // 1) Prefer the card that the play-line actually passes through
+  for(const c of cards){
+    const r = c.getBoundingClientRect();
+    if(r.top <= yLine && r.bottom > yLine) return c;
   }
+
+  // 2) Otherwise, the first card below the play-line
+  for(const c of cards){
+    const r = c.getBoundingClientRect();
+    if(r.top > yLine) return c;
+  }
+
+  // 3) Otherwise, fallback last card
+  return cards[cards.length - 1] || null;
+}
+ 
   return best || cards[0];
 }
 
@@ -1376,10 +1397,11 @@ function getPlaybackCard(){
   if(state.autoScrollOn){
     const cards = getCards();
     if(cards.length){
-      if(state.playCardIndex === null || state.playCardIndex < 0 || state.playCardIndex >= cards.length){
-        const near = getNearestVisibleCard() || cards[0];
-        state.playCardIndex = Math.max(0, cards.indexOf(near));
-      }
+        if(state.playCardIndex === null || state.playCardIndex < 0 || state.playCardIndex >= cards.length){
+    const cur = getCardAtPlayLine() || getNearestVisibleCard() || cards[0];
+    state.playCardIndex = Math.max(0, cards.indexOf(cur));
+  }
+
       return cards[state.playCardIndex] || cards[0];
     }
     return null;
@@ -1718,11 +1740,11 @@ function setAutoScroll(on){
   $("autoPlayBtn")?.classList.toggle("on", state.autoScrollOn);
   $("mScrollBtn")?.classList.toggle("on", state.autoScrollOn);
 
-  if(state.autoScrollOn){
+    if(state.autoScrollOn){
     const cards = getCards();
     if(cards.length){
-      const near = getNearestVisibleCard() || cards[0];
-      state.playCardIndex = Math.max(0, cards.indexOf(near));
+      const cur = getCardAtPlayLine() || getNearestVisibleCard() || cards[0];
+      state.playCardIndex = Math.max(0, cards.indexOf(cur));
     }else{
       state.playCardIndex = null;
     }
