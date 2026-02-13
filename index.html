@@ -1,4 +1,4 @@
-<!-- index.html (FULL REPLACE MAIN v38) -->
+<!-- index.html (FULL REPLACE MAIN v39) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=38"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=39"/>
 
   <style>
     :root{
@@ -300,6 +300,9 @@
       border-radius:14px;
       background:#fff;
       padding:10px;
+
+      /* ✅ makes scrollIntoView land correctly under sticky header */
+      scroll-margin-top: 210px;
     }
 
     .cardTop{
@@ -501,7 +504,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=38" alt="Headshot"/>
+    <img id="headshotImg" src="./headshot.png?v=39" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -547,7 +550,7 @@
           <button class="pill" id="instPiano">Piano</button>
 
           <button class="tinyBtn" id="instDots" title="Note length: fixed 1/8 (… )">...</button>
-          <button class="tinyBtn" id="instTieBar" title="Note length: tie to next note (across cards) ( _ )">_</button>
+          <button class="tinyBtn" id="instTieBar" title="Note length: tie to next note across cards ( _ )">_</button>
 
           <div style="flex:1 1 auto;"></div>
           <button class="exportBtn" id="exportBtn" title="Export (.txt + printable colored .html)">Export</button>
@@ -606,6 +609,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=38"></script>
+  <script src="./app.js?v=39"></script>
 </body>
-</html>
+  </html>
