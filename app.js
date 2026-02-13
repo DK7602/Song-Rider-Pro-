@@ -1402,6 +1402,9 @@ function isRepeatToken(s){
   const t = String(s || "").trim();
   return (t === "_");
 }
+function isTieToken(s){
+  return isDotsToken(s) || isRepeatToken(s);
+}
 
 function findNextNoteForwardFrom(cardEl, startCellIndexPlus1){
   const cards = getCards();
