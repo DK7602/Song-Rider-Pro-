@@ -313,6 +313,7 @@ const state = {
 
   instrument: "piano",
   instrumentOn: false,
+lastChordRaw: "",
 
   // modes:
   //   "half"  = DEFAULT (4/8ths OR next note OR end-of-bar)
@@ -813,7 +814,7 @@ function acousticPluckSafe(ctx, freq, durMs, vel=0.9){
 
   // Main envelope
   const env = ctx.createGain();
-  const peak = 0.18 * v;
+  const peak = 0.38 * v;
 
   env.gain.setValueAtTime(0.0001, t0);
   env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
@@ -868,7 +869,7 @@ function acousticPluckSafe(ctx, freq, durMs, vel=0.9){
 
   const oGain = ctx.createGain();
   oGain.gain.setValueAtTime(0.0001, t0);
-  oGain.gain.exponentialRampToValueAtTime(0.055 * v, t0 + 0.006);
+  oGain.gain.exponentialRampToValueAtTime(0.10 * v, t0 + 0.006);
   oGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
 
   o.connect(oGain);
@@ -893,7 +894,7 @@ const presence = ctx.createBiquadFilter();
 presence.type = "peaking";
 presence.frequency.value = 2400;
 presence.Q.value = 0.9;
-presence.gain.value = 3.5;
+presence.gain.value = 5.0;
 
 // tame any harshness
 const notch = ctx.createBiquadFilter();
@@ -921,6 +922,10 @@ hp.connect(body);
 body.connect(presence);
 presence.connect(notch);
 notch.connect(lp);
+// makeup gain so phone speakers can actually hear it
+const makeup = ctx.createGain();
+makeup.gain.value = 2.2;
+lp.connect(makeup);
 
 
   // start/stop
@@ -930,8 +935,9 @@ notch.connect(lp);
   o.start(t0);
   o.stop(t0 + dur + rel + 0.10);
 
-  scheduleCleanup([ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,presence,notch,lp], (durMs + rel*1000 + 1200));
-  return { out: lp, nodes:[ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,notch,lp] };
+ scheduleCleanup([ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,presence,notch,lp,makeup], (durMs + rel*1000 + 1200));
+return { out: makeup, nodes:[ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,presence,notch,lp,makeup] };
+
 }
 
 
@@ -1141,20 +1147,55 @@ function electricGuitarSafe(ctx, freq, durMs, vel=0.85){
 /***********************
 CHORD PLAYERS
 ***********************/
-function playAcousticChord(ch, durMs){
+function playSingleNoteForInstrument(rawChord, durMs){
+  const ch0 = parseChordToken(rawChord);
+  if(!ch0) return;
+
+  const capo = (state.capo|0) % 12;
+  const ch = {
+    ...ch0,
+    rootPC: (ch0.rootPC + capo + 12) % 12,
+    bassPC: (ch0.bassPC === null) ? null : ((ch0.bassPC + capo + 12) % 12)
+  };
+
+  const ctx = ensureCtx();
+
+  // pick a mid/upper note so phone speakers hear it
+  let freqs = [];
+  if(state.instrument === "piano") freqs = buildPianoVoicing(ch).map(midiToFreq);
+  else freqs = buildGuitarStrumVoicing(ch).map(midiToFreq);
+
+  const f = freqs[Math.min(freqs.length-1, 3)] || freqs[0] || 440;
+
+  if(state.instrument === "acoustic"){
+    const n = acousticPluckSafe(ctx, f, durMs, 0.95);
+    n.out.connect(getOutNode());
+    scheduleCleanup(n.nodes, durMs + 2200);
+  }else if(state.instrument === "electric"){
+    const n = electricGuitarSafe(ctx, f, durMs, 0.90);
+    n.out.connect(getOutNode());
+    scheduleCleanup([n.out], durMs + 1400);
+  }else{
+    const n = pianoNote(ctx, f, durMs, 0.95);
+    n.out.connect(getOutNode());
+    scheduleCleanup([n.out], durMs + 6000);
+  }
+}
+
+  function playAcousticChord(ch, durMs){
   const ctx = ensureCtx();
   const token = state.audioToken;
 
   // softer overall (prevents harshness on phones)
   const bus = ctx.createGain();
-  bus.gain.value = 0.95;
+  bus.gain.value = 1.25;
 
   // small “air” delay (NO FEEDBACK)
   const dly = ctx.createDelay(0.25);
   dly.delayTime.value = 0.065;
 
   const dlyGain = ctx.createGain();
-  dlyGain.gain.value = 0.07;
+  dlyGain.gain.value = 0.10;
 
   // dry + delay to output
   bus.connect(getOutNode());
@@ -1353,9 +1394,13 @@ function getNoteRawFromCell(cell){
   if(!cell) return "";
   return String(cell.dataset?.raw || cell.value || "").trim();
 }
-function isTieToken(s){
+function isDotsToken(s){
   const t = String(s || "").trim();
-  return (t === "_" || t === "..." || t === "…");
+  return (t === "..." || t === "…");
+}
+function isRepeatToken(s){
+  const t = String(s || "").trim();
+  return (t === "_");
 }
 
 function findNextNoteForwardFrom(cardEl, startCellIndexPlus1){
@@ -1440,21 +1485,38 @@ function playInstrumentStep(){
   const cells = card.querySelectorAll(".noteCell");
   if(!cells[nIdx]) return;
 
- const rawChord = getNoteRawFromCell(cells[nIdx]);
-if(!rawChord) return;
+  const raw = getNoteRawFromCell(cells[nIdx]);
+  if(!raw) return;
 
-// If "_" or "..." → do nothing (previous chord holds)
-if(isTieToken(rawChord)) return;
+  const eighthMs = Math.max(80, (state.eighthMs || 300));
 
-// Only play if it's a valid chord
-if(!parseChordToken(rawChord)) return;
+  // "..." = single pluck note using LAST chord
+  if(isDotsToken(raw)){
+    if(state.lastChordRaw && parseChordToken(state.lastChordRaw)){
+      playSingleNoteForInstrument(state.lastChordRaw, eighthMs);
+    }
+    return;
+  }
 
-const durEighths = computeNoteDurEighths(card, cells, nIdx);
-const durMs = Math.max(80, durEighths * (state.eighthMs || 300));
+  // "_" = repeat strum using LAST chord
+  if(isRepeatToken(raw)){
+    if(state.lastChordRaw && parseChordToken(state.lastChordRaw)){
+      playChordForInstrument(state.lastChordRaw, eighthMs);
+    }
+    return;
+  }
 
-playChordForInstrument(rawChord, durMs);
+  // default chord cell = normal strum
+  if(!parseChordToken(raw)) return;
 
+  state.lastChordRaw = raw; // remember it for "_" and "..."
+
+  const durEighths = computeNoteDurEighths(card, cells, nIdx);
+  const durMs = Math.max(80, durEighths * (state.eighthMs || 300));
+
+  playChordForInstrument(raw, durMs);
 }
+
 
 /***********************
 AutoScroll
@@ -1512,17 +1574,21 @@ function startBeatClock(){
   state.tick8 = 0;
   clearTick();
 
-  state.beatTimer = setInterval(() => {
-    clearTick();
-    applyTick();
+ state.beatTimer = setInterval(() => {
 
-    if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
+  // ✅ move scroll FIRST at bar boundary so audio+screen match
+  autoAdvanceOnBar();
 
-    playInstrumentStep();
-    autoAdvanceOnBar();
+  clearTick();
+  applyTick();
 
-    state.tick8++;
-  }, eighthMs);
+  if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
+
+  playInstrumentStep();
+
+  state.tick8++;
+}, eighthMs);
+
 }
 
 function updateClock(){
@@ -2004,36 +2070,26 @@ async function exportFullPreview(){
       .replace(/[/:*?"<>|]+/g, "")
       .trim() || "Song Rider Pro";
 
-    const txtName = `${safeName} - Full Preview.txt`;
-    const txt = "\ufeff" + String(plain).replace(/\n/g, "\r\n");
-    const txtBlob = new Blob([txt], { type:"text/plain;charset=utf-8" });
-    const txtFile = new File([txtBlob], txtName, { type:"text/plain" });
-
     const htmlName = `${safeName} - Full Preview (Print).html`;
     const htmlDoc = buildFullPreviewHtmlDoc(`${safeName} - Full Preview`);
     const htmlBlob = new Blob([htmlDoc], { type:"text/html;charset=utf-8" });
     const htmlFile = new File([htmlBlob], htmlName, { type:"text/html" });
 
     try{
-      if(navigator.share && navigator.canShare && navigator.canShare({ files:[txtFile, htmlFile] })){
-        await navigator.share({ title: safeName, files: [txtFile, htmlFile] });
+      if(navigator.share && navigator.canShare && navigator.canShare({ files:[htmlFile] })){
+        await navigator.share({ title: safeName, files: [htmlFile] });
         return;
       }
     }catch{}
 
-    const dl = (blob, name) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 800);
-    };
-
-    dl(txtBlob, txtName);
-    setTimeout(() => dl(htmlBlob, htmlName), 350);
+    const url = URL.createObjectURL(htmlBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = htmlName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 800);
 
   }catch{
     alert("Export failed on this device/browser.");
