@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v35) */
+/* app.js (FULL REPLACE MAIN v36) */
 (() => {
   "use strict";
 
@@ -56,6 +56,10 @@
     instAcoustic: $("instAcoustic"),
     instElectric: $("instElectric"),
     instPiano: $("instPiano"),
+
+    // ✅ NEW: note-length buttons
+    instDots: $("instDots"),
+    instTieBar: $("instTieBar"),
 
     exportBtn: $("exportBtn"),
 
@@ -309,6 +313,12 @@
     instrument: "piano",
     instrumentOn: false,
 
+    // ✅ NEW: note length mode
+    // "beat" = (default) tie to next note OR end of current beat (2 eighths)
+    // "eighth" = "..." fixed 1/8
+    // "bar" = "_" tie to next note OR end of bar (8 eighths)
+    noteLenMode: "beat",
+
     drumStyle: "rap",
     drumsOn: false,
 
@@ -316,9 +326,9 @@
     autoScrollTimer: null,
 
     ctx: null,
-    masterGain: null,        // ✅ master bus for app audio
-    recDest: null,           // ✅ MediaStreamDestination for recording mix
-    recWired: false,         // ✅ avoid double-connecting master->recDest
+    masterGain: null,
+    recDest: null,
+    recWired: false,
 
     drumTimer: null,
 
@@ -326,11 +336,12 @@
     rec: null,
     recChunks: [],
 
-    recMicStream: null,      // ✅ mic stream used only for vocals into recording mix
-    recMicSource: null,      // ✅ AudioNode
+    recMicStream: null,
+    recMicSource: null,
 
     beatTimer: null,
-    tick8: 0
+    tick8: 0,
+    eighthMs: 315
   };
 
   /***********************
@@ -368,13 +379,11 @@
   }
 
   /***********************
-   * Audio (✅ routed through masterGain so we can record it)
+   * Audio (routed through masterGain)
    ***********************/
   function ensureCtx(){
     if(!state.ctx){
       state.ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-      // ✅ Master bus: ALL app audio goes here
       state.masterGain = state.ctx.createGain();
       state.masterGain.gain.value = 1.0;
       state.masterGain.connect(state.ctx.destination);
@@ -405,10 +414,37 @@
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
 
     o.connect(g);
-    g.connect(getOutNode()); // ✅ WAS ctx.destination
+    g.connect(getOutNode());
 
     o.start(t0);
     o.stop(t0 + ms/1000 + 0.02);
+  }
+
+  // ✅ NEW: sustained instrument voice for ties
+  function playSustain(freq=440, durMs=180, gain=0.085, type="sine"){
+    const ctx = ensureCtx();
+    const t0 = ctx.currentTime;
+    const dur = Math.max(0.03, durMs/1000);
+
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+
+    o.type = type;
+    o.frequency.value = freq;
+
+    const atk = 0.01;
+    const rel = Math.min(0.06, dur * 0.35);
+
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + atk);
+    g.gain.setValueAtTime(gain, t0 + Math.max(atk, dur - rel));
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    o.connect(g);
+    g.connect(getOutNode());
+
+    o.start(t0);
+    o.stop(t0 + dur + 0.02);
   }
 
   function noise(ms=40, gain=0.08){
@@ -427,7 +463,7 @@
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
 
     src.connect(g);
-    g.connect(getOutNode()); // ✅ WAS ctx.destination
+    g.connect(getOutNode());
     src.start();
   }
 
@@ -438,7 +474,7 @@
   }
 
   /***********************
-   * NOTE / ACCIDENTAL PARSER (FIXED)
+   * NOTE / ACCIDENTAL PARSER
    ***********************/
   function parseNoteToken(v){
     const s0 = String(v||"").trim();
@@ -560,6 +596,34 @@
     return getNearestVisibleCard();
   }
 
+  // ✅ NEW: compute duration in eighths based on mode + next note
+  function computeNoteDurEighths(cells, nIdx){
+    const mode = state.noteLenMode; // "beat" | "eighth" | "bar"
+    if(mode === "eighth") return 1;
+
+    // Find next NON-empty note cell
+    let next = -1;
+    for(let j=nIdx+1;j<8;j++){
+      const raw = String(cells[j]?.dataset?.raw || cells[j]?.value || "").trim();
+      if(raw){
+        next = j;
+        break;
+      }
+    }
+
+    if(next !== -1){
+      return Math.max(1, next - nIdx);
+    }
+
+    if(mode === "bar"){
+      return Math.max(1, 8 - nIdx); // to end of bar
+    }
+
+    // default "beat": to end of current beat (each beat = 2 eighths)
+    const endOfBeat = (Math.floor(nIdx/2) + 1) * 2; // 2,4,6,8
+    return Math.max(1, endOfBeat - nIdx);
+  }
+
   function playInstrumentStep(){
     if(!state.instrumentOn) return;
     if(state.currentSection === "Full") return;
@@ -575,8 +639,11 @@
     const freq = noteCellToFreq(rawNote);
     if(!freq) return;
 
+    const durEighths = computeNoteDurEighths(cells, nIdx);
+    const durMs = Math.max(30, durEighths * (state.eighthMs || 300));
+
     const capoShift = Math.pow(2, (state.capo || 0) / 12);
-    pluck(freq * capoShift, 180, 0.09, instWave());
+    playSustain(freq * capoShift, durMs, 0.09, instWave());
   }
 
   /***********************
@@ -614,6 +681,7 @@
     stopBeatClock();
     const bpm = clamp(state.bpm || 95, 40, 220);
     const eighthMs = Math.round((60000 / bpm) / 2);
+    state.eighthMs = eighthMs;
 
     state.tick8 = 0;
     clearTick();
@@ -646,36 +714,35 @@
 
     const bpm = clamp(state.bpm || 95, 40, 220);
 
-    // ✅ DRUM GRID IS 16th NOTES (16 steps per bar)
+    // DRUM GRID: 16th notes (16 steps per bar)
     const stepMs = Math.round((60000 / bpm) / 4);
-
     let step = 0;
 
     state.drumTimer = setInterval(() => {
       if(!state.drumsOn) return;
-      const s = step % 16; // 0..15 = one bar in 16ths
+      const s = step % 16; // 0..15
 
       if(state.drumStyle === "rap"){
-        // ✅ Requested rap pattern:
-        // Hat: every 16th
-        // Kick: 1 and 3  -> steps 0, 8
-        // Snare: 2 and 4 -> steps 4, 12
         if(s === 0 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
-        drumHit("hat");
+        drumHit("hat"); // 16ths
       } else if(state.drumStyle === "rock"){
         if(s === 0 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
         if(s % 2 === 0) drumHit("hat"); // 8ths
       } else if(state.drumStyle === "hardrock"){
-        if(s === 0 || s === 2 || s === 8 || s === 10) drumHit("kick");
+        // ✅ UPDATED: more hard rock / metal drive
+        // - Hats: steady 16ths
+        // - Snare: 2 & 4 (steps 4,12)
+        // - Kick: double-kick-ish pattern
         if(s === 4 || s === 12) drumHit("snare");
-        if(s % 2 === 0) drumHit("hat"); // 8ths
+        if(s === 0 || s === 3 || s === 6 || s === 8 || s === 11 || s === 14) drumHit("kick");
+        drumHit("hat");
       } else {
         // pop
         if(s === 0 || s === 7 || s === 8) drumHit("kick");
         if(s === 4 || s === 12) drumHit("snare");
-        if(s % 2 === 0) drumHit("hat"); // 8ths
+        if(s % 2 === 0) drumHit("hat");
       }
 
       step++;
@@ -696,10 +763,16 @@
     });
   }
 
+  function renderNoteLenUI(){
+    if(el.instDots) el.instDots.classList.toggle("active", state.noteLenMode === "eighth");
+    if(el.instTieBar) el.instTieBar.classList.toggle("active", state.noteLenMode === "bar");
+  }
+
   function renderInstrumentUI(){
     const map = { acoustic:"instAcoustic", electric:"instElectric", piano:"instPiano" };
     const active = state.instrumentOn ? map[state.instrument] : null;
     setActive(Object.values(map), active);
+    renderNoteLenUI();
   }
 
   function renderDrumUI(){
@@ -883,7 +956,7 @@
   }
 
   /***********************
-   * ✅ Full preview / export with NOTE↔BEAT alignment
+   * Full preview helpers
    ***********************/
   function safeTok(s){
     const t = String(s ?? "").trim();
@@ -1078,7 +1151,7 @@ ${bodyHtml}
   }
 
   /***********************
-   * ✅ EXPORT
+   * EXPORT
    ***********************/
   async function exportFullPreview(){
     try{
@@ -1495,7 +1568,7 @@ ${bodyHtml}
   }
 
   /***********************
-   * ✅ Recording (FIXED: records vocals + drums + instruments)
+   * Recording bus
    ***********************/
   function ensureRecordingBus(){
     const ctx = ensureCtx();
@@ -1504,7 +1577,6 @@ ${bodyHtml}
       state.recDest = ctx.createMediaStreamDestination();
     }
 
-    // ✅ Send app audio (masterGain) into recording destination (once)
     if(!state.recWired && state.masterGain){
       try{
         state.masterGain.connect(state.recDest);
@@ -1525,14 +1597,13 @@ ${bodyHtml}
         if(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t;
       }catch{}
     }
-    return ""; // let browser choose
+    return "";
   }
 
   async function startRecording(){
     ensureCtx();
     ensureRecordingBus();
 
-    // 🎤 Mic (vocals) goes into recording mix (recDest)
     const micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -1546,11 +1617,9 @@ ${bodyHtml}
 
     const ctx = ensureCtx();
 
-    // Create mic source node
     const micSource = ctx.createMediaStreamSource(micStream);
     state.recMicSource = micSource;
 
-    // ✅ Route mic into recording destination ONLY (no monitoring to avoid feedback)
     micSource.connect(state.recDest);
 
     const options = {};
@@ -1664,7 +1733,7 @@ ${bodyHtml}
   }
 
   /***********************
-   * RHYMES (CLEAN)
+   * RHYMES
    ***********************/
   function normalizeWord(w){
     return String(w||"").toLowerCase().replace(/[^a-z']/g,"").trim();
@@ -1925,6 +1994,22 @@ ${bodyHtml}
     el.instElectric.addEventListener("click", () => handleInstrument("electric"));
     el.instPiano.addEventListener("click", () => handleInstrument("piano"));
 
+    // ✅ NEW: note-length buttons
+    if(el.instDots){
+      el.instDots.addEventListener("click", () => {
+        // toggle "..." (eighth)
+        state.noteLenMode = (state.noteLenMode === "eighth") ? "beat" : "eighth";
+        renderNoteLenUI();
+      });
+    }
+    if(el.instTieBar){
+      el.instTieBar.addEventListener("click", () => {
+        // toggle "_" (bar tie)
+        state.noteLenMode = (state.noteLenMode === "bar") ? "beat" : "bar";
+        renderNoteLenUI();
+      });
+    }
+
     function handleDrums(which){
       ensureCtx();
       if(state.drumStyle === which && state.drumsOn){
@@ -2008,6 +2093,7 @@ ${bodyHtml}
     state.instrumentOn = false;
     state.drumsOn = false;
 
+    renderNoteLenUI();
     setRecordUI();
     wire();
     renderAll();
