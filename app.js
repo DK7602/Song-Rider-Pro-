@@ -1528,10 +1528,24 @@ AutoScroll
 ***********************/
 function scrollCardIntoView(card){
   if(!card) return;
+
+  // scroll so the card sits just UNDER the header, not behind it
+  const yLine = getHeaderBottomY(); // already includes +8 padding
+  const r = card.getBoundingClientRect();
+
+  // where the card's top currently is in document space
+  const cardTopDoc = r.top + window.scrollY;
+
+  // target top = cardTopDoc - headerBottom
+  const targetY = Math.max(0, Math.round(cardTopDoc - yLine));
+
   try{
-  card.scrollIntoView({ behavior:"auto", block:"start" }); 
-  }catch{}
+    window.scrollTo({ top: targetY, behavior: "auto" });
+  }catch{
+    window.scrollTo(0, targetY);
+  }
 }
+
 
 function autoAdvanceOnBar(){
   if(!state.autoScrollOn) return;
