@@ -1,4 +1,4 @@
-<!-- index.html (FULL REPLACE MAIN v36) -->
+<!-- index.html (FULL REPLACE MAIN v37) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=36"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=37"/>
 
   <style>
     :root{
@@ -501,113 +501,112 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=36" alt="Headshot"/>
+    <img id="headshotImg" src="./headshot.png?v=37" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
 
-<header>
-  <div class="topRow">
-    <div class="brand">
-      <h1>Song Rider Pro</h1>
-      <div class="sub">Chords/notes • timing • lyrics • sections</div>
+  <header>
+    <div class="topRow">
+      <div class="brand">
+        <h1>Song Rider Pro</h1>
+        <div class="sub">Chords/notes • timing • lyrics • sections</div>
+      </div>
+      <div style="width:56px;height:56px;"></div>
     </div>
-    <div style="width:56px;height:56px;"></div>
+
+    <div class="panel">
+      <div class="panelTop">
+        <div class="left">PROJECTS • CONTROLS • DRUMS • RECORDINGS</div>
+        <button class="btn secondary" id="togglePanelBtn">Hide</button>
+      </div>
+
+      <div class="miniBar" id="miniBar">
+        <div class="row nowrap" style="padding:0;">
+          <button class="pill" id="mRock">Rock</button>
+          <button class="pill" id="mHardRock">Hard Rock</button>
+          <button class="pill" id="mPop">Pop</button>
+          <button class="pill" id="mRap">Rap</button>
+
+          <button class="scrollIconBtn" id="mScrollBtn" title="AutoScroll">⇅</button>
+          <button class="btn rec" id="mRecordBtn">Record</button>
+        </div>
+      </div>
+
+      <div id="panelBody">
+        <div class="row">
+          <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
+          <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95"/></div>
+          <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0"/></div>
+          <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—"/></div>
+        </div>
+
+        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
+          <button class="pill" id="instAcoustic">Acoustic</button>
+          <button class="pill" id="instElectric">Electric</button>
+          <button class="pill" id="instPiano">Piano</button>
+
+          <!-- Note length -->
+          <button class="tinyBtn" id="instDots" title="Note length: fixed 1/8 (… )">...</button>
+          <button class="tinyBtn" id="instTieBar" title="Note length: tie to next note or end of bar ( _ )">_</button>
+
+          <div style="flex:1 1 auto;"></div>
+          <button class="exportBtn" id="exportBtn" title="Export (.txt + printable colored .html)">Export</button>
+        </div>
+
+        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
+          <button class="pill" id="drumRock">Rock</button>
+          <button class="pill" id="drumHardRock">Hard Rock</button>
+          <button class="pill" id="drumPop">Pop</button>
+          <button class="pill" id="drumRap">Rap</button>
+
+          <button class="scrollIconBtn" id="autoPlayBtn" title="AutoScroll">⇅</button>
+          <button class="btn rec" id="recordBtn">Record</button>
+        </div>
+
+        <div class="row" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;border-top:1px solid rgba(0,0,0,.06);">
+          <select id="sortSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;">
+            <option value="az">A–Z</option>
+            <option value="recent">Recent</option>
+          </select>
+
+          <select id="projectSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;flex:1;min-width:0;"></select>
+          <button class="iconCircle" id="newProjectBtn" title="New Project">＋</button>
+          <button class="iconCircle" id="renameProjectBtn" title="Rename Project">✏️</button>
+          <button class="iconCircle" id="deleteProjectBtn" title="Delete Project">Ⓧ</button>
+        </div>
+
+        <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);">
+          <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabs" id="tabs"></div>
+  </header>
+
+  <main>
+    <div class="sheet" id="editorRoot">
+      <div class="sheetHeader">
+        <h2 id="sheetTitle">Full</h2>
+        <div class="sheetActions" id="sheetActions"></div>
+        <div class="hint" id="sheetHint"></div>
+      </div>
+      <div id="sheetBody"></div>
+    </div>
+  </main>
+
+  <div class="rBtn" id="rBtn">R</div>
+  <div class="rhymeDock" id="rhymeDock">
+    <div class="rhymeBox">
+      <div class="rhymeTop">
+        <div id="rhymeTitle">Rhymes</div>
+        <button class="btn secondary" id="hideRhymeBtn">Hide</button>
+      </div>
+      <div class="rhymeWords" id="rhymeWords"></div>
+    </div>
   </div>
 
-  <div class="panel">
-    <div class="panelTop">
-      <div class="left">PROJECTS • CONTROLS • DRUMS • RECORDINGS</div>
-      <button class="btn secondary" id="togglePanelBtn">Hide</button>
-    </div>
-
-    <div class="miniBar" id="miniBar">
-      <div class="row nowrap" style="padding:0;">
-        <button class="pill" id="mRock">Rock</button>
-        <button class="pill" id="mHardRock">Hard Rock</button>
-        <button class="pill" id="mPop">Pop</button>
-        <button class="pill" id="mRap">Rap</button>
-
-        <button class="scrollIconBtn" id="mScrollBtn" title="AutoScroll">⇅</button>
-        <button class="btn rec" id="mRecordBtn">Record</button>
-      </div>
-    </div>
-
-    <div id="panelBody">
-      <div class="row">
-        <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
-        <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95"/></div>
-        <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0"/></div>
-        <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—"/></div>
-      </div>
-
-      <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
-        <button class="pill" id="instAcoustic">Acoustic</button>
-        <button class="pill" id="instElectric">Electric</button>
-        <button class="pill" id="instPiano">Piano</button>
-
-        <!-- ✅ NEW: note-length buttons -->
-        <button class="tinyBtn" id="instDots" title="Note length: fixed 1/8 (… )">...</button>
-        <button class="tinyBtn" id="instTieBar" title="Note length: tie to next note or end of bar ( _ )">_</button>
-
-        <div style="flex:1 1 auto;"></div>
-        <button class="exportBtn" id="exportBtn" title="Export (.txt + printable colored .html)">Export</button>
-      </div>
-
-      <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
-        <button class="pill" id="drumRock">Rock</button>
-        <button class="pill" id="drumHardRock">Hard Rock</button>
-        <button class="pill" id="drumPop">Pop</button>
-        <button class="pill" id="drumRap">Rap</button>
-
-        <button class="scrollIconBtn" id="autoPlayBtn" title="AutoScroll">⇅</button>
-        <button class="btn rec" id="recordBtn">Record</button>
-      </div>
-
-      <div class="row" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;border-top:1px solid rgba(0,0,0,.06);">
-        <select id="sortSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;">
-          <option value="az">A–Z</option>
-          <option value="recent">Recent</option>
-        </select>
-
-        <select id="projectSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;flex:1;min-width:0;"></select>
-        <button class="iconCircle" id="newProjectBtn" title="New Project">＋</button>
-        <button class="iconCircle" id="renameProjectBtn" title="Rename Project">✏️</button>
-        <button class="iconCircle" id="deleteProjectBtn" title="Delete Project">Ⓧ</button>
-      </div>
-
-      <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);">
-        <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="tabs" id="tabs"></div>
-</header>
-
-<main>
-  <div class="sheet" id="editorRoot">
-    <div class="sheetHeader">
-      <h2 id="sheetTitle">Full</h2>
-      <div class="sheetActions" id="sheetActions"></div>
-      <div class="hint" id="sheetHint"></div>
-    </div>
-    <div id="sheetBody"></div>
-  </div>
-</main>
-
-<div class="rBtn" id="rBtn">R</div>
-
-<div class="rhymeDock" id="rhymeDock">
-  <div class="rhymeBox">
-    <div class="rhymeTop">
-      <div id="rhymeTitle">Rhymes</div>
-      <button class="btn secondary" id="hideRhymeBtn">Hide</button>
-    </div>
-    <div class="rhymeWords" id="rhymeWords"></div>
-  </div>
-</div>
-
-<script src="./app.js?v=36"></script>
+  <script src="./app.js?v=37"></script>
 </body>
-  </html>
+</html>
