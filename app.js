@@ -1,4 +1,4 @@
-/* app.js (FULL REPLACE MAIN v37) */
+/* app.js (FULL REPLACE MAIN v38) */
 (() => {
 "use strict";
 
@@ -313,16 +313,13 @@ const state = {
   instrument: "piano",
   instrumentOn: false,
 
-  // ✅ IMPORTANT CHANGE:
-  // default mode now holds to end of BAR if no next note
-  // modes: "bar" (DEFAULT) | "eighth" | "beat"
+  // modes: "bar" (DEFAULT tie-to-next across cards) | "eighth" | "beat"
   noteLenMode: "bar",
 
   drumStyle: "rap",
   drumsOn: false,
 
   autoScrollOn: false,
-  autoScrollTimer: null,
 
   ctx: null,
   masterGain: null,
@@ -338,6 +335,7 @@ const state = {
   recMicStream: null,
   recMicSource: null,
 
+  // clock
   beatTimer: null,
   tick8: 0,
   eighthMs: 315
@@ -432,7 +430,7 @@ function playSustain(freq=440, durMs=180, gain=0.085, type="sine"){
   o.frequency.value = freq;
 
   const atk = 0.01;
-  const rel = Math.min(0.06, dur * 0.35);
+  const rel = Math.min(0.08, dur * 0.35);
 
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(gain, t0 + atk);
@@ -590,21 +588,55 @@ function getNearestVisibleCard(){
 
 function getPlaybackCard(){
   if(state.currentSection === "Full") return null;
+
+  // If autoscroll is on, we follow the visible card nearest to header line.
   if(state.autoScrollOn) return getNearestVisibleCard();
+
+  // Otherwise prefer last active card.
   if(lastActiveCardEl && document.contains(lastActiveCardEl)) return lastActiveCardEl;
+
   return getNearestVisibleCard();
 }
 
-// ✅ duration in eighths based on mode + next note
-function computeNoteDurEighths(cells, nIdx){
+/***********************
+✅ FIX 1: Tie-to-next now looks across cards (not just within one bar)
+***********************/
+function getNoteRawFromCell(cell){
+  if(!cell) return "";
+  return String(cell.dataset?.raw || cell.value || "").trim();
+}
+
+function findNextNoteForwardFrom(cardEl, startCellIndexPlus1){
+  // returns { barsAhead, cellIndex, raw } or null
+  const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
+  if(cards.length === 0) return null;
+  const startCardIdx = cards.indexOf(cardEl);
+  if(startCardIdx < 0) return null;
+
+  const MAX_BARS_SCAN = 6; // don't scan forever
+  for(let barOffset = 0; barOffset <= MAX_BARS_SCAN; barOffset++){
+    const card = cards[startCardIdx + barOffset];
+    if(!card) break;
+    const cells = card.querySelectorAll(".noteCell");
+    const startIdx = (barOffset === 0) ? startCellIndexPlus1 : 0;
+    for(let j = startIdx; j < 8; j++){
+      const raw = getNoteRawFromCell(cells[j]);
+      if(raw) return { barsAhead: barOffset, cellIndex: j, raw };
+    }
+  }
+  return null;
+}
+
+// duration in eighths based on mode + next note (now cross-card in "bar" tie mode)
+function computeNoteDurEighths(cardEl, cells, nIdx){
   const mode = state.noteLenMode; // "bar" | "eighth" | "beat"
 
   if(mode === "eighth") return 1;
 
-  // Find next NON-empty note cell
+  // Find next NON-empty note cell (same card first)
   let next = -1;
   for(let j=nIdx+1;j<8;j++){
-    const raw = String(cells[j]?.dataset?.raw || cells[j]?.value || "").trim();
+    const raw = getNoteRawFromCell(cells[j]);
     if(raw){
       next = j;
       break;
@@ -615,14 +647,24 @@ function computeNoteDurEighths(cells, nIdx){
     return Math.max(1, next - nIdx);
   }
 
-  // ✅ DEFAULT NOW: hold to end of bar
-  if(mode === "bar"){
-    return Math.max(1, 8 - nIdx);
+  // "beat": to end of current beat (each beat = 2 eighths)
+  if(mode === "beat"){
+    const endOfBeat = (Math.floor(nIdx/2) + 1) * 2; // 2,4,6,8
+    return Math.max(1, endOfBeat - nIdx);
   }
 
-  // "beat": to end of current beat (each beat = 2 eighths)
-  const endOfBeat = (Math.floor(nIdx/2) + 1) * 2; // 2,4,6,8
-  return Math.max(1, endOfBeat - nIdx);
+  // ✅ DEFAULT ("bar" tie): hold to next note even across next cards
+  // If no note exists soon, fall back to end-of-bar.
+  const forward = findNextNoteForwardFrom(cardEl, nIdx + 1);
+  if(forward){
+    const toEndThisBar = 8 - nIdx;
+    const fullBarsBetween = Math.max(0, forward.barsAhead - 1) * 8;
+    const intoNextBar = forward.barsAhead >= 1 ? forward.cellIndex : 0;
+    const dur = toEndThisBar + fullBarsBetween + (forward.barsAhead >= 1 ? intoNextBar : 0);
+    return Math.max(1, dur);
+  }
+
+  return Math.max(1, 8 - nIdx);
 }
 
 function playInstrumentStep(){
@@ -636,11 +678,11 @@ function playInstrumentStep(){
   const cells = card.querySelectorAll(".noteCell");
   if(!cells[nIdx]) return;
 
-  const rawNote = String(cells[nIdx].dataset.raw || cells[nIdx].value || "").trim();
+  const rawNote = getNoteRawFromCell(cells[nIdx]);
   const freq = noteCellToFreq(rawNote);
   if(!freq) return;
 
-  const durEighths = computeNoteDurEighths(cells, nIdx);
+  const durEighths = computeNoteDurEighths(card, cells, nIdx);
   const durMs = Math.max(30, durEighths * (state.eighthMs || 300));
 
   const capoShift = Math.pow(2, (state.capo || 0) / 12);
@@ -648,8 +690,22 @@ function playInstrumentStep(){
 }
 
 /***********************
-BAR ADVANCE (autoscroll)
+✅ FIX 2: BPM-locked bar autoscroll (no pixel timer)
 ***********************/
+function scrollCardIntoView(card){
+  if(!card) return;
+  try{
+    const hdr = document.querySelector("header");
+    const hdrH = hdr ? hdr.getBoundingClientRect().height : 90;
+
+    card.scrollIntoView({ behavior:"smooth", block:"start" });
+    // Adjust for sticky header after browser applies scrollIntoView
+    requestAnimationFrame(() => {
+      window.scrollBy({ top: -(hdrH + 10), left: 0, behavior:"auto" });
+    });
+  }catch{}
+}
+
 function autoAdvanceOnBar(){
   if(!state.autoScrollOn) return;
   if(state.currentSection === "Full") return;
@@ -658,17 +714,19 @@ function autoAdvanceOnBar(){
   const cards = Array.from(el.sheetBody.querySelectorAll(".card"));
   if(cards.length === 0) return;
 
-  const active = getNearestVisibleCard() || cards[0];
+  // Use the card we are currently "playing"
+  const active = getPlaybackCard() || cards[0];
   const idx = cards.indexOf(active);
   const next = cards[idx + 1] || cards[0];
 
-  try{
-    next.scrollIntoView({ behavior:"smooth", block:"start" });
-  }catch{}
+  // Keep internal active pointer aligned so we don't "run ahead"
+  lastActiveCardEl = next;
+
+  scrollCardIntoView(next);
 }
 
 /***********************
-DRUMS + CLOCK
+DRUMS + CLOCK (decoupled)
 ***********************/
 function stopBeatClock(){
   if(state.beatTimer){
@@ -676,6 +734,10 @@ function stopBeatClock(){
     state.beatTimer = null;
   }
   clearTick();
+}
+
+function shouldClockRun(){
+  return !!(state.drumsOn || state.instrumentOn || state.autoScrollOn);
 }
 
 function startBeatClock(){
@@ -691,12 +753,28 @@ function startBeatClock(){
     clearTick();
     applyTick();
 
+    // blink on 1/4 notes when drums are on (same behavior as before)
     if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
-    if(state.drumsOn) playInstrumentStep();
-    if(state.drumsOn) autoAdvanceOnBar();
+
+    // instrument follows clock whenever instrumentOn
+    playInstrumentStep();
+
+    // autoscroll follows clock whenever autoScrollOn
+    autoAdvanceOnBar();
 
     state.tick8++;
   }, eighthMs);
+}
+
+function updateClock(){
+  if(shouldClockRun()){
+    if(!state.beatTimer) startBeatClock();
+    else{
+      // if bpm changed while running, restart is handled where bpm is committed
+    }
+  }else{
+    stopBeatClock();
+  }
 }
 
 function stopDrums(){
@@ -705,13 +783,13 @@ function stopDrums(){
     state.drumTimer = null;
   }
   state.drumsOn = false;
-  stopBeatClock();
+  updateClock();
 }
 
 function startDrums(){
   stopDrums();
   state.drumsOn = true;
-  startBeatClock();
+  updateClock();
 
   const bpm = clamp(state.bpm || 95, 40, 220);
 
@@ -745,8 +823,15 @@ function startDrums(){
   }, stepMs);
 }
 
-function stopInstrument(){ state.instrumentOn = false; }
-function startInstrument(){ state.instrumentOn = true; ensureCtx(); }
+function stopInstrument(){
+  state.instrumentOn = false;
+  updateClock();
+}
+function startInstrument(){
+  state.instrumentOn = true;
+  ensureCtx();
+  updateClock();
+}
 
 /***********************
 UI helpers
@@ -761,7 +846,7 @@ function setActive(ids, activeId){
 
 function renderNoteLenUI(){
   if(el.instDots) el.instDots.classList.toggle("active", state.noteLenMode === "eighth");
-  if(el.instTieBar) el.instTieBar.classList.toggle("active", state.noteLenMode === "bar"); // ✅ default highlights "_"
+  if(el.instTieBar) el.instTieBar.classList.toggle("active", state.noteLenMode === "bar"); // default highlights "_"
 }
 
 function renderInstrumentUI(){
@@ -785,15 +870,8 @@ function setAutoScroll(on){
   $("autoPlayBtn")?.classList.toggle("on", state.autoScrollOn);
   $("mScrollBtn")?.classList.toggle("on", state.autoScrollOn);
 
-  if(state.autoScrollTimer){
-    clearInterval(state.autoScrollTimer);
-    state.autoScrollTimer = null;
-  }
-  if(state.autoScrollOn){
-    state.autoScrollTimer = setInterval(() => {
-      window.scrollBy({ top: 1, left: 0, behavior: "auto" });
-    }, 25);
-  }
+  // ✅ BPM-locked scrolling: no pixel timer
+  updateClock();
 }
 
 function setPanelHidden(hidden){
@@ -1129,9 +1207,7 @@ function buildFullPreviewHtmlDoc(title){
   .notes{ color: var(--noteRed); font-weight:900; white-space:pre; }
   .lyrics{ color:#111; white-space:pre; }
   .blank{ white-space:pre; height:10px; }
-  @media print{
-    body{ margin:0.5in; }
-  }
+  @media print{ body{ margin:0.5in; } }
 </style>
 </head>
 <body>
@@ -1901,6 +1977,12 @@ function wire(){
     el.exportBtn.addEventListener("click", exportFullPreview);
   }
 
+  function restartClockIfRunning(){
+    if(shouldClockRun()){
+      startBeatClock();
+    }
+  }
+
   function commitBpm(){
     let n = parseInt(el.bpmInput.value, 10);
     if(!Number.isFinite(n)) n = state.bpm || 95;
@@ -1914,7 +1996,10 @@ function wire(){
       upsertProject(state.project);
     }
 
+    // drums step grid depends on bpm
     if(state.drumsOn) startDrums();
+    // clock depends on bpm too
+    restartClockIfRunning();
   }
 
   el.bpmInput.addEventListener("input", () => {
@@ -1929,6 +2014,7 @@ function wire(){
         upsertProject(state.project);
       }
       if(state.drumsOn) startDrums();
+      restartClockIfRunning();
     }
   });
 
@@ -1990,8 +2076,7 @@ function wire(){
   el.instElectric.addEventListener("click", () => handleInstrument("electric"));
   el.instPiano.addEventListener("click", () => handleInstrument("piano"));
 
-  // ✅ NEW note-length buttons
-  // Dots: toggle eighth <-> DEFAULT (bar)
+  // Dots: toggle eighth <-> DEFAULT (bar tie)
   if(el.instDots){
     el.instDots.addEventListener("click", () => {
       state.noteLenMode = (state.noteLenMode === "eighth") ? "bar" : "eighth";
