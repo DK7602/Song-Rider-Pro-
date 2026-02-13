@@ -1,4 +1,4 @@
-<!-- index.html (FULL REPLACE MAIN v35) -->
+<!-- index.html (FULL REPLACE MAIN v36) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=35"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=36"/>
 
   <style>
     :root{
@@ -147,6 +147,8 @@
       height:34px;
       flex:0 0 auto;
       color:#111;
+      min-width:34px;
+      text-align:center;
     }
     .tinyBtn.active{ background:#111; color:#fff; border-color:#111; }
 
@@ -499,7 +501,7 @@
 
 <body>
   <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=35" alt="Headshot"/>
+    <img id="headshotImg" src="./headshot.png?v=36" alt="Headshot"/>
     <div class="eye left"></div>
     <div class="eye right"></div>
   </div>
@@ -543,6 +545,10 @@
         <button class="pill" id="instAcoustic">Acoustic</button>
         <button class="pill" id="instElectric">Electric</button>
         <button class="pill" id="instPiano">Piano</button>
+
+        <!-- ✅ NEW: note-length buttons -->
+        <button class="tinyBtn" id="instDots" title="Note length: fixed 1/8 (… )">...</button>
+        <button class="tinyBtn" id="instTieBar" title="Note length: tie to next note or end of bar ( _ )">_</button>
 
         <div style="flex:1 1 auto;"></div>
         <button class="exportBtn" id="exportBtn" title="Export (.txt + printable colored .html)">Export</button>
@@ -602,6 +608,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=35"></script>
+<script src="./app.js?v=36"></script>
 </body>
-</html>
+  </html>
