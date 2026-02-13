@@ -795,89 +795,108 @@ function makeWaveshaper(ctx, drive=1.0){
 NEW ACOUSTIC STRING (SAFE)
 Noise-excited resonator (no feedback), filtered + warm body
 ***********************/
+/***********************
+ACOUSTIC STRING (MOBILE-PROOF)
+Karplus–Strong pluck: noise burst -> delay+feedback loop -> damping -> body EQ
+This is extremely reliable on phones (no “silent acoustic”).
+***********************/
 function acousticStringSafe(ctx, freq, durMs, vel=0.9){
   const t0 = ctx.currentTime;
-  const dur = Math.max(0.10, durMs/1000);
+  const dur = Math.max(0.12, durMs/1000);
 
-  // output envelope (LOUDER but still safe)
+  // clamp frequency to stable range
+  const f = clamp(freq, 70, 1200);
+
+  // output envelope
   const out = ctx.createGain();
-  const peak = 0.22 * clamp(vel, 0.15, 1.0); // was ~0.10
+  const peak = 0.22 * clamp(vel, 0.15, 1.0);
 
   out.gain.setValueAtTime(0.0001, t0);
-  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.007);
-  out.gain.setValueAtTime(peak * 0.84, t0 + 0.06);
+  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
+  out.gain.setValueAtTime(peak * 0.82, t0 + 0.06);
 
-  const rel = clamp(0.22 + dur*0.50, 0.55, 2.8);
+  // release tail
+  const rel = clamp(0.25 + dur * 0.55, 0.6, 3.0);
   out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + rel);
 
-  // exciter: short noise burst (a little stronger)
-  const nLen = clamp(0.012 + (1/clamp(freq,100,1200))*1.2, 0.012, 0.026);
+  // --- pluck exciter (short noise burst)
+  const nLen = 0.010; // 10ms
   const bs = Math.max(256, Math.floor(ctx.sampleRate * nLen));
-  const b = ctx.createBuffer(1, bs, ctx.sampleRate);
-  const data = b.getChannelData(0);
+  const buf = ctx.createBuffer(1, bs, ctx.sampleRate);
+  const data = buf.getChannelData(0);
   for(let i=0;i<data.length;i++){
-    const t = 1 - i/data.length;
-    data[i] = (Math.random()*2-1) * t;
+    const fade = 1 - (i / data.length);
+    data[i] = (Math.random()*2 - 1) * fade;
   }
-  const ns = ctx.createBufferSource();
-  ns.buffer = b;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
 
-  const nGain = ctx.createGain();
-  nGain.gain.setValueAtTime(0.0001, t0);
-  nGain.gain.exponentialRampToValueAtTime(0.18 * clamp(vel,0.2,1.0), t0 + 0.002); // was 0.09
-  nGain.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
+  const exc = ctx.createGain();
+  exc.gain.setValueAtTime(0.0001, t0);
+  exc.gain.exponentialRampToValueAtTime(0.35 * clamp(vel,0.2,1.0), t0 + 0.002);
+  exc.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
 
-  // resonator: WIDER bandpass so phones actually “hear” it
-  const bp1 = ctx.createBiquadFilter();
-  bp1.type = "bandpass";
-  bp1.frequency.value = clamp(freq, 70, 1200);
-  bp1.Q.value = 5.5; // was 9.0 (too narrow on many speakers)
+  // --- Karplus–Strong loop
+  const delay = ctx.createDelay(1.0);
+  delay.delayTime.setValueAtTime(1 / f, t0);
 
-  const bp2 = ctx.createBiquadFilter();
-  bp2.type = "bandpass";
-  bp2.frequency.value = clamp(freq*2, 140, 2400);
-  bp2.Q.value = 6.5; // was 10.5
+  const fb = ctx.createGain();
+  fb.gain.setValueAtTime(0.90, t0); // stable feedback
 
-  const mix = ctx.createGain();
-  mix.gain.value = 1.0;
+  // damping inside feedback loop (kills harsh highs)
+  const dampLP = ctx.createBiquadFilter();
+  dampLP.type = "lowpass";
+  dampLP.frequency.setValueAtTime(clamp(1800 + f*1.2, 1800, 4200), t0);
+  dampLP.Q.value = 0.7;
 
-  // warm body + anti-squeal notch + top rolloff
+  // optional “body” shaping (adds warmth)
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
-  body.frequency.value = 220;
+  body.frequency.value = 240;
   body.Q.value = 0.9;
   body.gain.value = 2.6;
 
+  // tame top end
+  const topLP = ctx.createBiquadFilter();
+  topLP.type = "lowpass";
+  topLP.frequency.value = 5600;
+  topLP.Q.value = 0.7;
+
+  // small anti-whistle notch
   const notch = ctx.createBiquadFilter();
   notch.type = "notch";
   notch.frequency.value = 3200;
   notch.Q.value = 2.0;
 
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 5600;
-  lp.Q.value = 0.7;
+  // routing:
+  // exciter into delay
+  src.connect(exc);
+  exc.connect(delay);
 
-  // route
-  ns.connect(nGain);
+  // feedback loop: delay -> damp -> fb -> delay
+  delay.connect(dampLP);
+  dampLP.connect(fb);
+  fb.connect(delay);
 
-  nGain.connect(bp1);
-  nGain.connect(bp2);
-
-  bp1.connect(mix);
-  bp2.connect(mix);
-
-  mix.connect(out);
+  // output tap: delay -> out envelope -> body -> notch -> topLP
+  delay.connect(out);
   out.connect(body);
   body.connect(notch);
-  notch.connect(lp);
+  notch.connect(topLP);
 
-  ns.start(t0);
-  ns.stop(t0 + nLen + 0.01);
+  // start/stop exciter
+  src.start(t0);
+  src.stop(t0 + nLen + 0.01);
 
-  scheduleCleanup([ns,nGain,bp1,bp2,mix,out,body,notch,lp], (durMs + rel*1000 + 1200));
-  return { out: lp, nodes:[ns,nGain,bp1,bp2,mix,out,body,notch,lp] };
+  // cleanup
+  scheduleCleanup(
+    [src, exc, delay, fb, dampLP, out, body, notch, topLP],
+    (durMs + rel*1000 + 1400)
+  );
+
+  return { out: topLP, nodes:[src, exc, delay, fb, dampLP, out, body, notch, topLP] };
 }
+
 
 /***********************
 PIANO NOTE (make "_" ties hold LONGER)
@@ -1140,8 +1159,11 @@ function playAcousticChord(ch, durMs){
       if(!state.instrumentOn) return;
 
       const vel = clamp(0.98 - i*0.10, 0.55, 0.98);
-      const n = acousticStringSafe(ctx, f, durMs, vel);
-      n.out.connect(bus);
+    const n = acousticStringSafe(ctx, f, durMs, vel);
+n.out.connect(bus);
+// ensure nodes are kept alive & cleaned up
+scheduleCleanup(n.nodes, durMs + 3200);
+
     }, delayMs);
   }
 
