@@ -1339,9 +1339,7 @@ function refreshDisplayedNoteCells(){
 /***********************
 ACTIVE CARD selection
 ***********************/
-/***********************
-ACTIVE CARD selection
-***********************/
+
 function getHeaderBottomY(){
   const hdr = document.querySelector("header");
   if(!hdr) return 86;
@@ -1384,13 +1382,11 @@ function getCardAtPlayLine(){
   const yLine = getHeaderBottomY();
   const tol = 24;
 
-  // Prefer card that the play-line passes through (with tolerance)
   for(const c of cards){
     const r = c.getBoundingClientRect();
     if(r.top <= (yLine + tol) && r.bottom > (yLine - tol)) return c;
   }
 
-  // Fallback: nearest visible card
   return getNearestVisibleCard() || cards[0];
 }
 
@@ -1421,39 +1417,6 @@ function getPlaybackCard(){
     return lastActiveCardEl;
   }
 
-  return getNearestVisibleCard() || cards[0];
-}
-
-function getPlaybackCard(){
-  // Full page has no cards playback
-  if(state.currentSection === "Full") return null;
-
-  const cards = getCards();
-  if(cards.length === 0) return null;
-
-  // If auto-scroll is ON, use playCardIndex (locked playback lane)
-  if(state.autoScrollOn){
-    // initialize playCardIndex if needed
-    if(state.playCardIndex === null ||
-       state.playCardIndex < 0 ||
-       state.playCardIndex >= cards.length){
-
-      const cur = getCardAtPlayLine() || cards[0];
-      state.playCardIndex = Math.max(0, cards.indexOf(cur));
-    }
-    return cards[state.playCardIndex] || cards[0];
-  }
-
-  // If auto-scroll is OFF, follow the last active card (typing/clicking)
-  if(lastActiveCardEl && document.contains(lastActiveCardEl)){
-    return lastActiveCardEl;
-  }
-
-  // fallback
-  return getNearestVisibleCard() || cards[0];
-}
-
-  // 2) Fallback: nearest visible card (not "first below", which causes skipping)
   return getNearestVisibleCard() || cards[0];
 }
 
@@ -1693,11 +1656,12 @@ function startBeatClock(){
 
 function updateClock(){
   if(shouldClockRun()){
-    if(!) startBeatClock();
+    if(!state.beatTimer) startBeatClock();
   }else{
     stopBeatClock();
   }
 }
+
 
 function stopDrums(){
   if(state.drumTimer){
