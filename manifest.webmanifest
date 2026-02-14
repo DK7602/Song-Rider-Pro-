@@ -2,7 +2,7 @@
 {
   "name": "Song Rider Pro",
   "short_name": "Song Rider",
-  "start_url": "./index.html?v=55",
+  "start_url": "./index.html?v=56",
   "display": "standalone",
   "background_color": "#e9e9ea",
   "theme_color": "#e9e9ea",
