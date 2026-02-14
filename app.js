@@ -1874,54 +1874,49 @@ async function startAudioSyncFromRec(rec){
   stopBeatClock();
 
   // stop drums/instrument to prevent “double audio chaos”
-  // (you can remove these two lines later if you WANT instruments on top)
   if(state.drumsOn) stopDrums();
   if(state.instrumentOn) stopInstrument();
-  
-if(state.drumsOn) stopDrums();
-if(state.instrumentOn) stopInstrument();
 
-// stop any current audio sync FIRST
-audioSyncStopInternal();
+  // stop any current audio sync FIRST
+  audioSyncStopInternal();
 
-// now enable sync
-state.audioSyncOn = true;
-
- 
+  // now enable sync
+  state.audioSyncOn = true;
   state.audioSyncRecId = rec.id;
   state.audioSyncOffsetSec = Number(rec.offsetSec || 0) || 0;
 
- const url = URL.createObjectURL(rec.blob);
-state.audioSyncUrl = url;
+  const url = URL.createObjectURL(rec.blob);
+  state.audioSyncUrl = url;
 
-const audio = new Audio(url);
-audio.preload = "auto";
-audio.playsInline = true;
-state.audioSyncAudio = audio;
+  const audio = new Audio(url);
+  audio.preload = "auto";
+  audio.playsInline = true;
+  state.audioSyncAudio = audio;
 
-/* ✅ Route MP3 through WebAudio so recording captures it */
-const ctx = ensureCtx();
+  const ctx = ensureCtx();
 
-// prevent double-sound (element speaker + WebAudio)
-// (keep ONE approach — volume=0 is safest)
-// IMPORTANT: keep element volume at 1, otherwise some mobile browsers send SILENCE into WebAudio
-audio.volume = 1;
-audio.muted = true;     // silence the element’s own speaker output
-audio.playsInline = true;
+  // mobile-safe: keep element "internally audible" but silent to speaker
+  audio.volume = 1;
+  audio.muted = true;
 
-try{
-  if(state.audioSyncSource) state.audioSyncSource.disconnect();
-  if(state.audioSyncGain) state.audioSyncGain.disconnect();
-}catch{}
+  // IMPORTANT: must be connected only once per <audio> element
+  try{
+    if(state.audioSyncSource) state.audioSyncSource.disconnect();
+    if(state.audioSyncGain) state.audioSyncGain.disconnect();
+  }catch{}
 
-state.audioSyncSource = ctx.createMediaElementSource(audio);
-state.audioSyncGain = ctx.createGain();
-state.audioSyncGain.gain.value = 1.0;
+  state.audioSyncSource = ctx.createMediaElementSource(audio);
+  state.audioSyncGain = ctx.createGain();
+  state.audioSyncGain.gain.value = 1.0;
 
-// ✅ MP3 -> gain -> master bus (master bus already feeds recorder)
-state.audioSyncSource.connect(state.audioSyncGain);
-state.audioSyncGain.connect(getOutNode());
+  // MP3 -> gain -> master bus
+  state.audioSyncSource.connect(state.audioSyncGain);
+  state.audioSyncGain.connect(getOutNode());
 
+  // HARD GUARANTEE: also feed the recorder destination if it exists
+  if(state.recDest){
+    try{ state.audioSyncGain.connect(state.recDest); }catch{}
+  }
 
   if(el.nowPlaying){
     const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
@@ -1932,7 +1927,6 @@ state.audioSyncGain.connect(getOutNode());
     audioSyncStopInternal();
   };
 
-  // Try to play
   try{
     await audio.play();
   }catch(e){
@@ -1941,12 +1935,10 @@ state.audioSyncGain.connect(getOutNode());
     return;
   }
 
-  // Reset tick baseline so tick = 0 happens at offset time
   state.lastAudioTick8 = -1;
-
-  // Start the RAF loop
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
 }
+
 
 function stopAudioSync(){
   audioSyncStopInternal();
@@ -3021,6 +3013,7 @@ row.appendChild(del);
 Recording bus (taps masterPost)
 ***********************/
 function ensureRecordingBus(){
+    
   const ctx = ensureCtx();
   if(!state.recDest){
     state.recDest = ctx.createMediaStreamDestination();
@@ -3030,6 +3023,10 @@ function ensureRecordingBus(){
       state.masterPost.connect(state.recDest);
       state.recWired = true;
     }catch{}
+  }
+  // ✅ If MP3 sync is already playing, make sure it feeds the recorder too
+  if(state.audioSyncOn && state.audioSyncGain && state.recDest){
+    try{ state.audioSyncGain.connect(state.recDest); }catch{}
   }
 }
 
