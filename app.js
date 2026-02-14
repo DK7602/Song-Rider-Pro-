@@ -1339,6 +1339,9 @@ function refreshDisplayedNoteCells(){
 /***********************
 ACTIVE CARD selection
 ***********************/
+/***********************
+ACTIVE CARD selection
+***********************/
 function getHeaderBottomY(){
   const hdr = document.querySelector("header");
   if(!hdr) return 86;
@@ -1371,22 +1374,56 @@ function getNearestVisibleCard(){
 }
 
 /**
- * ✅ FIX: choose the card the play-line is actually on.
- * Adds tolerance so we DON'T accidentally pick card #2 when card #1 is
- * slightly tucked under the header.
+ * Choose the card the play-line is actually on.
+ * Adds tolerance so we DON'T accidentally pick card #2 when card #1 is slightly under header.
  */
 function getCardAtPlayLine(){
   const cards = getCards();
   if(cards.length === 0) return null;
 
   const yLine = getHeaderBottomY();
-  const tol = 24; // pixels of forgiveness for header overlap / rounding
+  const tol = 24;
 
-  // 1) Prefer the card that the play-line passes through (with tolerance)
+  // Prefer card that the play-line passes through (with tolerance)
   for(const c of cards){
     const r = c.getBoundingClientRect();
     if(r.top <= (yLine + tol) && r.bottom > (yLine - tol)) return c;
   }
+
+  // Fallback: nearest visible card
+  return getNearestVisibleCard() || cards[0];
+}
+
+/**
+ * The card that playback should use.
+ * - If auto-scroll ON: lock to playCardIndex
+ * - If auto-scroll OFF: follow lastActiveCardEl
+ */
+function getPlaybackCard(){
+  if(state.currentSection === "Full") return null;
+
+  const cards = getCards();
+  if(cards.length === 0) return null;
+
+  if(state.autoScrollOn){
+    if(
+      state.playCardIndex === null ||
+      state.playCardIndex < 0 ||
+      state.playCardIndex >= cards.length
+    ){
+      const cur = getCardAtPlayLine() || cards[0];
+      state.playCardIndex = Math.max(0, cards.indexOf(cur));
+    }
+    return cards[state.playCardIndex] || cards[0];
+  }
+
+  if(lastActiveCardEl && document.contains(lastActiveCardEl)){
+    return lastActiveCardEl;
+  }
+
+  return getNearestVisibleCard() || cards[0];
+}
+
 function getPlaybackCard(){
   // Full page has no cards playback
   if(state.currentSection === "Full") return null;
@@ -1632,25 +1669,31 @@ function startBeatClock(){
   clearTick();
 
  state.beatTimer = setInterval(() => {
+  try{
+    // move scroll FIRST at bar boundary so audio+screen match
+    autoAdvanceOnBar();
 
-  // ✅ move scroll FIRST at bar boundary so audio+screen match
-  autoAdvanceOnBar();
+    clearTick();
+    applyTick();
 
-  clearTick();
-  applyTick();
+    if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
 
-  if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
+    playInstrumentStep();
 
-  playInstrumentStep();
-
-  state.tick8++;
+    state.tick8++;
+  }catch(err){
+    console.error("Beat clock error:", err);
+    // keep clock alive even if audio fails
+    state.tick8++;
+  }
 }, eighthMs);
+
 
 }
 
 function updateClock(){
   if(shouldClockRun()){
-    if(!state.beatTimer) startBeatClock();
+    if(!) startBeatClock();
   }else{
     stopBeatClock();
   }
