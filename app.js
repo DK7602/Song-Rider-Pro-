@@ -45,6 +45,10 @@ DOM
 const el = {
   headshotWrap: $("headshotWrap"),
 
+  uploadAudioBtn: $("uploadAudioBtn"),
+  stopAudioBtn: $("stopAudioBtn"),
+  nowPlaying: $("nowPlaying"),
+  
   togglePanelBtn: $("togglePanelBtn"),
   panelBody: $("panelBody"),
   miniBar: $("miniBar"),
@@ -351,8 +355,26 @@ lastAutoBar: -1,
   tick8: 0,
   eighthMs: 315,
 
+  // AUDIO SYNC (mp3/recording drives the clock)
+audioSyncOn: false,
+audioEl: null,
+audioRaf: null,
+audioOffsetSec: 0,     // “Measure 1 starts at X seconds”
+audioLastBar: -1,
+
   // NEW: kills pending strum timeouts instantly when toggling instruments
   audioToken: 0
+
+    // ✅ AUDIO SYNC (MP3 master clock)
+  audioSyncOn: false,
+  audioSyncRaf: null,
+  audioSyncAudio: null,
+  audioSyncUrl: null,
+  audioSyncRecId: null,
+  audioSyncOffsetSec: 0,   // where Beat 1 starts in the audio
+  lastAudioTick8: -1,
+  tapTimes: [],
+
 };
 
 /***********************
@@ -1764,7 +1786,214 @@ function shouldClockRun(){
   return !!(state.drumsOn || state.instrumentOn || state.autoScrollOn);
 }
 
+/***********************
+AUDIO SYNC CLOCK (MP3 is master)
+- Beat position comes from audio.currentTime
+- tick8 = floor( ( (t - offsetSec) * BPM / 60 ) * 2 )
+***********************/
+function audioSyncStopInternal(){
+  state.audioSyncOn = false;
+
+  if(state.audioSyncRaf){
+    cancelAnimationFrame(state.audioSyncRaf);
+    state.audioSyncRaf = null;
+  }
+
+  try{
+    if(state.audioSyncAudio){
+      state.audioSyncAudio.pause();
+      state.audioSyncAudio.currentTime = 0;
+    }
+  }catch{}
+
+  if(state.audioSyncUrl){
+    try{ URL.revokeObjectURL(state.audioSyncUrl); }catch{}
+  }
+
+  state.audioSyncAudio = null;
+  state.audioSyncUrl = null;
+  state.audioSyncRecId = null;
+  state.lastAudioTick8 = -1;
+
+  clearTick();
+  if(el.nowPlaying) el.nowPlaying.textContent = "—";
+
+  // if nothing else running, stop internal clock too
+  updateClock();
+}
+
+function audioTickFromTimeSec(tSec){
+  const bpm = clamp(state.bpm || 95, 40, 220);
+  const rel = (tSec - (state.audioSyncOffsetSec || 0));
+  if(rel < 0) return -1;
+  const beatPos = (rel * bpm) / 60; // quarter-note beats
+  const tick8 = Math.floor(beatPos * 2); // 8th notes
+  return tick8;
+}
+
+function audioSyncFrame(){
+  if(!state.audioSyncOn || !state.audioSyncAudio) return;
+
+  const a = state.audioSyncAudio;
+  const t = a.currentTime || 0;
+
+  const tick8 = audioTickFromTimeSec(t);
+
+  if(tick8 !== state.lastAudioTick8){
+    state.lastAudioTick8 = tick8;
+    state.tick8 = Math.max(0, tick8);
+
+    // ✅ same UI pipeline as your internal clock
+    try{
+      autoAdvanceOnBar();
+      clearTick();
+      applyTick();
+
+      // We do NOT force drums/instrument on here.
+      // If you want them to follow MP3 later, we can add that.
+    }catch(err){
+      console.error("Audio sync frame error:", err);
+    }
+  }
+
+  state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
+}
+
+async function startAudioSyncFromRec(rec){
+  if(!rec || !rec.blob) return;
+
+  // stop internal beat clock (mp3 becomes the clock)
+  stopBeatClock();
+
+  // stop drums/instrument to prevent “double audio chaos”
+  // (you can remove these two lines later if you WANT instruments on top)
+  if(state.drumsOn) stopDrums();
+  if(state.instrumentOn) stopInstrument();
+
+  // stop any current audio sync
+  audioSyncStopInternal();
+
+  state.audioSyncOn = true;
+  state.audioSyncRecId = rec.id;
+  state.audioSyncOffsetSec = Number(rec.offsetSec || 0) || 0;
+
+  const url = URL.createObjectURL(rec.blob);
+  state.audioSyncUrl = url;
+
+  const audio = new Audio(url);
+  audio.preload = "auto";
+  state.audioSyncAudio = audio;
+
+  if(el.nowPlaying){
+    const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
+    el.nowPlaying.textContent = "Now playing: " + label;
+  }
+
+  audio.onended = () => {
+    audioSyncStopInternal();
+  };
+
+  // Try to play
+  try{
+    await audio.play();
+  }catch(e){
+    alert("Couldn't play audio. (Browser blocked playback.) Tap a button again to allow audio.");
+    state.audioSyncOn = false;
+    return;
+  }
+
+  // Reset tick baseline so tick = 0 happens at offset time
+  state.lastAudioTick8 = -1;
+
+  // Start the RAF loop
+  state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
+}
+
+function stopAudioSync(){
+  audioSyncStopInternal();
+  // --- HARD STOP: audio + raf + flags + UI + clock ---
+
+try{
+  if(state.audioEl){
+    state.audioEl.pause();
+    state.audioEl.currentTime = 0;
+  }
+}catch{}
+state.audioEl = null;
+
+// cancel the animation frame loop
+try{
+  if(state.audioRaf){
+    cancelAnimationFrame(state.audioRaf);
+    state.audioRaf = null;
+  }
+}catch{}
+
+// mark sync OFF
+state.audioSyncOn = false;
+state.audioLastBar = -1;
+state.tick8 = 0;
+
+// clear tick highlight
+clearTick();
+
+// now let normal BPM clock resume IF drums/instrument/autoscroll are on
+updateClock();
+
+}
+
+/***********************
+Tap BPM (sets project BPM from taps)
+***********************/
+function tapBpm(){
+  const t = performance.now();
+  state.tapTimes = (state.tapTimes || []).filter(x => (t - x) < 2500);
+  state.tapTimes.push(t);
+
+  if(state.tapTimes.length >= 4){
+    const first = state.tapTimes[0];
+    const last = state.tapTimes[state.tapTimes.length - 1];
+    const beats = state.tapTimes.length - 1;
+    const sec = (last - first) / 1000;
+    if(sec > 0.2){
+      const bpm = clamp(Math.round((beats * 60) / sec), 40, 220);
+      state.bpm = bpm;
+      if(el.bpmInput) el.bpmInput.value = String(bpm);
+      if(state.project){
+        state.project.bpm = bpm;
+        upsertProject(state.project);
+      }
+    }
+    // keep last tap as new start (feels better)
+    state.tapTimes = [state.tapTimes[state.tapTimes.length - 1]];
+  }
+}
+
+/***********************
+Mark Beat 1 at current playback time (offset)
+- While audio playing, hit this exactly on beat 1.
+- Stores offsetSec into the rec in IndexedDB.
+***********************/
+async function markBeat1Now(){
+  if(!state.audioSyncOn || !state.audioSyncAudio || !state.audioSyncRecId) return;
+  const t = state.audioSyncAudio.currentTime || 0;
+  state.audioSyncOffsetSec = t;
+
+  // save into the rec
+  try{
+    const all = await dbGetAll();
+    const rec = all.find(r => r.id === state.audioSyncRecId);
+    if(rec){
+      rec.offsetSec = t;
+      await dbPut(rec);
+      renderRecordings();
+    }
+  }catch{}
+}
+
 function startBeatClock(){
+
+  if(state.audioSyncOn) return;
   stopBeatClock();
   const bpm = clamp(state.bpm || 95, 40, 220);
   const eighthMs = Math.round((60000 / bpm) / 2);
@@ -1798,6 +2027,10 @@ function startBeatClock(){
 }
 
 function updateClock(){
+  if(state.audioSyncOn){
+  stopBeatClock();
+  return;
+}
   if(shouldClockRun()){
     if(!state.beatTimer) startBeatClock();
   }else{
@@ -1812,7 +2045,7 @@ function stopDrums(){
     state.drumTimer = null;
   }
   state.drumsOn = false;
-  updateClock();
+ updateClock();
 }
 
 function startDrums(){
@@ -1853,13 +2086,13 @@ function startDrums(){
 function stopInstrument(){
   state.instrumentOn = false;
   state.audioToken++; // NEW: cancels any pending strum timeouts immediately
-  updateClock();
+  ();
 }
 function startInstrument(){
   state.instrumentOn = true;
   ensureCtx();
   state.audioToken++; // NEW: new generation of playback
-  updateClock();
+  ();
 }
 
 /***********************
@@ -1928,7 +2161,7 @@ function setAutoScroll(on){
     state.playCardIndex = null;
   }
 
-  updateClock();
+  ();
 }
 
 
@@ -2650,13 +2883,25 @@ async function renderRecordings(){
     play.className="btn secondary";
     play.textContent="▶";
     play.title="Play";
+    const stop = document.createElement("button");
+stop.className="btn secondary";
+stop.textContent="⏹";
+stop.title="Stop (and stop sync)";
+stop.addEventListener("click", () => {
+  stopAudioSync();
+});
+
     play.addEventListener("click", () => {
-      if(!rec.blob) return;
-      const url = URL.createObjectURL(rec.blob);
-      const audio = new Audio(url);
-      audio.play().catch(()=>{});
-      audio.onended = () => URL.revokeObjectURL(url);
-    });
+      play.addEventListener("click", () => {
+  if(!rec.blob) return;
+
+  // If something is already driving sync, stop it first
+  if(state.audioSyncOn) stopAudioSync();
+
+  // Start audio + tick/scroll sync from this blob
+  startAudioSyncFromBlob(rec.blob, rec.title || "");
+});
+
 
     const download = document.createElement("button");
     download.className="btn secondary";
@@ -2684,11 +2929,13 @@ async function renderRecordings(){
       renderRecordings();
     });
 
-    row.appendChild(title);
-    row.appendChild(edit);
-    row.appendChild(play);
-    row.appendChild(download);
-    row.appendChild(del);
+  row.appendChild(title);
+row.appendChild(edit);
+row.appendChild(play);
+row.appendChild(stop);
+row.appendChild(download);
+row.appendChild(del);
+
     el.recordingsList.appendChild(row);
   });
 }
@@ -2771,7 +3018,16 @@ async function startRecording(){
     const mime = (mt && mt.includes("ogg")) ? "audio/ogg" : "audio/webm";
     const blob = new Blob(state.recChunks, { type: mime });
 
-    const item = { id: uuid(), createdAt: now(), title: "", blob };
+    const item = {
+      id: uuid(),
+      projectId: state.project?.id || "",
+      kind: "mic",
+      createdAt: now(),
+      title: "",
+      blob,
+      offsetSec: 0
+    };
+
     await dbPut(item);
     await renderRecordings();
 
