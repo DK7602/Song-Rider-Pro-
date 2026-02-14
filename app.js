@@ -1557,6 +1557,86 @@ function playInstrumentStep(){
 /***********************
 AutoScroll
 ***********************/
+  // ---------- AutoScroll: skip blanks + page (section) advance ----------
+
+const AUTO_SECTIONS = SECTIONS.filter(s => s !== "Full");
+
+function nextAutoSectionName(cur){
+  const i = AUTO_SECTIONS.indexOf(cur);
+  if(i === -1) return "VERSE 1";
+  return AUTO_SECTIONS[(i + 1) % AUTO_SECTIONS.length];
+}
+
+// A "blank card" = NO lyrics AND ALL note cells empty
+function cardIsBlank(card){
+  if(!card) return true;
+
+  const lyr = card.querySelector("textarea.lyrics");
+  const hasLyrics = !!(lyr && String(lyr.value || "").trim());
+
+  const noteCells = card.querySelectorAll("input.noteCell");
+  let hasNotes = false;
+  noteCells.forEach(inp => {
+    const raw = String(inp?.dataset?.raw ?? inp?.value ?? "").trim();
+    if(raw) hasNotes = true;
+  });
+
+  return !(hasLyrics || hasNotes);
+}
+
+function firstNonBlankCardIndexInDOM(){
+  const cards = getCards();
+  for(let i=0;i<cards.length;i++){
+    if(!cardIsBlank(cards[i])) return i;
+  }
+  return null;
+}
+
+function nextNonBlankCardIndexAfter(currentIdx){
+  const cards = getCards();
+  for(let i=(currentIdx+1); i<cards.length; i++){
+    if(!cardIsBlank(cards[i])) return i;
+  }
+  return null; // none after in this section
+}
+
+// Check project DATA (not DOM) so we can decide next section without rendering
+function lineHasContent(line){
+  if(!line || typeof line !== "object") return false;
+  const lyr = String(line.lyrics || "").trim();
+  if(lyr) return true;
+
+  const notes = Array.isArray(line.notes) ? line.notes : [];
+  for(const n of notes){
+    if(String(n || "").trim()) return true;
+  }
+  return false;
+}
+
+function firstContentLineIndexInSection(sec){
+  const arr = (state.project && state.project.sections && state.project.sections[sec]) ? state.project.sections[sec] : [];
+  for(let i=0;i<arr.length;i++){
+    if(lineHasContent(arr[i])) return i;
+  }
+  return null;
+}
+
+function switchToSectionForAuto(sec){
+  // switch tab + rerender, but do NOT kill clock
+  state.currentSection = sec;
+  state.playCardIndex = null;
+
+  renderTabs();
+  renderSheet();
+  clearTick();
+  applyTick();
+
+  lastActiveCardEl = null;
+  lastLyricsTextarea = null;
+  refreshRhymesFromActive();
+  refreshDisplayedNoteCells();
+}
+
 function scrollCardIntoView(card){
   if(!card) return;
 
@@ -1587,23 +1667,86 @@ function autoAdvanceOnBar(){
   if(state.tick8 % 8 !== 0) return;
 
   const bar = Math.floor(state.tick8 / 8);
-  if(state.lastAutoBar === bar) return;   // ✅ guard against double-fire
+  if(state.lastAutoBar === bar) return;
   state.lastAutoBar = bar;
 
-  const cards = getCards();
+  // --- 1) Try next non-blank card in CURRENT section (DOM)
+  let cards = getCards();
   if(cards.length === 0) return;
 
+  // Ensure playCardIndex is sane
   if(state.playCardIndex === null || state.playCardIndex < 0 || state.playCardIndex >= cards.length){
-    const near = getNearestVisibleCard() || cards[0];
-    state.playCardIndex = Math.max(0, cards.indexOf(near));
+    const cur = getCardAtPlayLine() || getNearestVisibleCard() || cards[0];
+    state.playCardIndex = Math.max(0, cards.indexOf(cur));
   }
 
-  state.playCardIndex = (state.playCardIndex + 1) % cards.length;
+  // If current card is blank, jump to first non-blank in this section
+  if(cards[state.playCardIndex] && cardIsBlank(cards[state.playCardIndex])){
+    const firstIdx = firstNonBlankCardIndexInDOM();
+    if(firstIdx !== null){
+      state.playCardIndex = firstIdx;
+      const next = cards[state.playCardIndex];
+      lastActiveCardEl = next;
+      scrollCardIntoView(next);
+      return;
+    }
+    // no content in this section at all -> go to next section with content
+  }else{
+    const nextIdx = nextNonBlankCardIndexAfter(state.playCardIndex);
+    if(nextIdx !== null){
+      state.playCardIndex = nextIdx;
+      const next = cards[state.playCardIndex];
+      lastActiveCardEl = next;
+      scrollCardIntoView(next);
+      return;
+    }
+    // else: we've reached the end of content in this section -> advance section
+  }
 
-  const next = cards[state.playCardIndex] || cards[0];
-  lastActiveCardEl = next;
-  scrollCardIntoView(next);
+  // --- 2) Advance to next SECTION ("page to the right"), loop back to VERSE 1
+  // Find next section (cyclic) that has any content
+  let sec = nextAutoSectionName(state.currentSection);
+  const startSec = sec;
+
+  let foundSec = null;
+  let foundIdx = null;
+
+  while(true){
+    const idx = firstContentLineIndexInSection(sec);
+    if(idx !== null){
+      foundSec = sec;
+      foundIdx = idx;
+      break;
+    }
+    sec = nextAutoSectionName(sec);
+    if(sec === startSec) break; // scanned all
+  }
+
+  if(foundSec === null){
+    // nothing anywhere — stay put
+    return;
+  }
+
+  // Switch section + render, then scroll to first content card
+  switchToSectionForAuto(foundSec);
+
+  // after render, select the correct card index
+  cards = getCards();
+  state.playCardIndex = clamp(foundIdx, 0, Math.max(0, cards.length - 1));
+
+  // if for some reason that target card became blank in DOM (rare), fallback to first non-blank
+  if(cards[state.playCardIndex] && cardIsBlank(cards[state.playCardIndex])){
+    const firstIdx = firstNonBlankCardIndexInDOM();
+    if(firstIdx !== null) state.playCardIndex = firstIdx;
+  }
+
+  const next = cards[state.playCardIndex];
+  if(next && !cardIsBlank(next)){
+    lastActiveCardEl = next;
+    scrollCardIntoView(next);
+  }
 }
+
 
 
 /***********************
@@ -1756,20 +1899,38 @@ function setAutoScroll(on){
   $("autoPlayBtn")?.classList.toggle("on", state.autoScrollOn);
   $("mScrollBtn")?.classList.toggle("on", state.autoScrollOn);
 
-    if(state.autoScrollOn){
+  if(state.autoScrollOn){
+    // If user is on Full, start from VERSE 1 automatically
+    if(state.currentSection === "Full"){
+      switchToSectionForAuto("VERSE 1");
+    }
+
+    // Try to anchor to the current playline card
     const cards = getCards();
     if(cards.length){
-      const cur = getCardAtPlayLine() || getNearestVisibleCard() || cards[0];
-      state.playCardIndex = Math.max(0, cards.indexOf(cur));
+      let cur = getCardAtPlayLine() || getNearestVisibleCard() || cards[0];
+      let idx = Math.max(0, cards.indexOf(cur));
+
+      // If current is blank, jump to first non-blank in this section
+      if(cardIsBlank(cards[idx])){
+        const firstIdx = firstNonBlankCardIndexInDOM();
+        if(firstIdx !== null) idx = firstIdx;
+      }
+
+      state.playCardIndex = idx;
+      const tgt = cards[state.playCardIndex];
+      if(tgt && !cardIsBlank(tgt)) scrollCardIntoView(tgt);
     }else{
       state.playCardIndex = null;
     }
+
   }else{
     state.playCardIndex = null;
   }
 
   updateClock();
 }
+
 
 function setPanelHidden(hidden){
   el.panelBody.classList.toggle("hidden", hidden);
