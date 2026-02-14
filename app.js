@@ -43,11 +43,10 @@ function escapeHtml(s){
 DOM
 ***********************/
 const el = {
-  headshotWrap: $("headshotWrap"),
-
-  uploadAudioBtn: $("uploadAudioBtn"),
-  stopAudioBtn: $("stopAudioBtn"),
+   uploadAudioBtn: $("uploadAudioBtn"),
+  beat1Btn: $("beat1Btn"),
   nowPlaying: $("nowPlaying"),
+
   
   togglePanelBtn: $("togglePanelBtn"),
   panelBody: $("panelBody"),
@@ -1944,6 +1943,11 @@ async function markBeat1Now(){
   if(!state.audioSyncOn || !state.audioSyncAudio || !state.audioSyncRecId) return;
   const t = state.audioSyncAudio.currentTime || 0;
   state.audioSyncOffsetSec = t;
+// ✅ Force immediate re-sync visual + tick baseline
+state.tick8 = 0;
+state.lastAudioTick8 = -1;
+clearTick();
+applyTick();
 
   // save into the rec
   try{
@@ -2903,16 +2907,43 @@ stop.addEventListener("click", () => {
     download.textContent="↓";
     download.title="Download";
     download.addEventListener("click", () => {
-      if(!rec.blob) return;
-      const url = URL.createObjectURL(rec.blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = (rec.title && rec.title.trim() ? rec.title.trim() : "recording") + ".webm";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 800);
-    });
+  if(!rec.blob) return;
+
+  const blob = rec.blob;
+  const type = String(blob.type || "").toLowerCase();
+
+  // try extension from uploaded File name first
+  let ext = "";
+  if(blob instanceof File && blob.name){
+    const m = blob.name.match(/\.([a-z0-9]+)$/i);
+    if(m) ext = "." + m[1].toLowerCase();
+  }
+
+  // fallback by mime type
+  if(!ext){
+    if(type.includes("mpeg")) ext = ".mp3";
+    else if(type.includes("mp3")) ext = ".mp3";
+    else if(type.includes("wav")) ext = ".wav";
+    else if(type.includes("mp4") || type.includes("m4a")) ext = ".m4a";
+    else if(type.includes("ogg")) ext = ".ogg";
+    else if(type.includes("webm")) ext = ".webm";
+    else ext = ".audio";
+  }
+
+  const safeBase = (rec.title && rec.title.trim() ? rec.title.trim() : "recording")
+    .replace(/[\\/:*?"<>|]+/g,"")
+    .trim() || "recording";
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = safeBase + ext;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 800);
+});
+
 
     const del = document.createElement("button");
     del.className="btn secondary";
@@ -3452,13 +3483,23 @@ function wire(){
     renderAll();
   });
 if(el.uploadAudioBtn){
-  el.uploadAudioBtn.addEventListener("click", uploadAudioFile);
+  el.uploadAudioBtn.addEventListener("click", async () => {
+    // If audio is currently syncing, this button becomes STOP
+    if(state.audioSyncOn){
+      stopAudioSync();
+      return;
+    }
+    // Otherwise it uploads and can auto-play/sync
+    await uploadAudioFile();
+  });
 }
 
+if(el.beat1Btn){
+  el.beat1Btn.addEventListener("click", () => {
+    markBeat1Now();
+  });
+}
 
-el.stopAudioBtn.addEventListener("click", () => {
-  stopAudioSync();
-});
 
   el.rBtn.addEventListener("click", () => {
     const showing = el.rhymeDock.style.display === "block";
