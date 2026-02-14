@@ -355,15 +355,9 @@ lastAutoBar: -1,
   tick8: 0,
   eighthMs: 315,
 
-  // AUDIO SYNC (mp3/recording drives the clock)
-audioSyncOn: false,
-audioEl: null,
-audioRaf: null,
-audioOffsetSec: 0,     // “Measure 1 starts at X seconds”
-audioLastBar: -1,
 
   // NEW: kills pending strum timeouts instantly when toggling instruments
-  audioToken: 0
+  audioToken: 0,
 
     // ✅ AUDIO SYNC (MP3 master clock)
   audioSyncOn: false,
@@ -1779,8 +1773,9 @@ function stopBeatClock(){
     clearInterval(state.beatTimer);
     state.beatTimer = null;
   }
-  clearTick();
+  if(!state.audioSyncOn) clearTick();
 }
+
 
 function shouldClockRun(){
   return !!(state.drumsOn || state.instrumentOn || state.autoScrollOn);
@@ -1911,35 +1906,6 @@ async function startAudioSyncFromRec(rec){
 
 function stopAudioSync(){
   audioSyncStopInternal();
-  // --- HARD STOP: audio + raf + flags + UI + clock ---
-
-try{
-  if(state.audioEl){
-    state.audioEl.pause();
-    state.audioEl.currentTime = 0;
-  }
-}catch{}
-state.audioEl = null;
-
-// cancel the animation frame loop
-try{
-  if(state.audioRaf){
-    cancelAnimationFrame(state.audioRaf);
-    state.audioRaf = null;
-  }
-}catch{}
-
-// mark sync OFF
-state.audioSyncOn = false;
-state.audioLastBar = -1;
-state.tick8 = 0;
-
-// clear tick highlight
-clearTick();
-
-// now let normal BPM clock resume IF drums/instrument/autoscroll are on
-updateClock();
-
 }
 
 /***********************
@@ -2085,15 +2051,17 @@ function startDrums(){
 
 function stopInstrument(){
   state.instrumentOn = false;
-  state.audioToken++; // NEW: cancels any pending strum timeouts immediately
-  ();
+  state.audioToken++; // cancels pending strum timeouts
+  updateClock();
 }
+
 function startInstrument(){
   state.instrumentOn = true;
   ensureCtx();
-  state.audioToken++; // NEW: new generation of playback
-  ();
+  state.audioToken++; // new generation
+  updateClock();
 }
+
 
 /***********************
 UI helpers
@@ -2891,16 +2859,16 @@ stop.addEventListener("click", () => {
   stopAudioSync();
 });
 
-    play.addEventListener("click", () => {
-      play.addEventListener("click", () => {
+  play.addEventListener("click", async () => {
   if(!rec.blob) return;
 
   // If something is already driving sync, stop it first
   if(state.audioSyncOn) stopAudioSync();
 
-  // Start audio + tick/scroll sync from this blob
-  startAudioSyncFromBlob(rec.blob, rec.title || "");
+  // Start audio + tick/scroll sync from this recording
+  await startAudioSyncFromRec(rec);
 });
+
 
 
     const download = document.createElement("button");
