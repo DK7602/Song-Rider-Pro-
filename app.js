@@ -369,6 +369,9 @@ lastAutoBar: -1,
   audioSyncOffsetSec: 0,   // where Beat 1 starts in the audio
   lastAudioTick8: -1,
   tapTimes: [],
+   audioSyncSource: null,   // ✅ WebAudio node for the MP3
+  audioSyncGain: null,     // ✅ optional gain for MP3 level
+
 
 };
 
@@ -1789,6 +1792,15 @@ AUDIO SYNC CLOCK (MP3 is master)
 ***********************/
 function audioSyncStopInternal(){
   state.audioSyncOn = false;
+  // ✅ disconnect MP3-from-WebAudio routing
+  try{
+    if(state.audioSyncSource) state.audioSyncSource.disconnect();
+  }catch{}
+  try{
+    if(state.audioSyncGain) state.audioSyncGain.disconnect();
+  }catch{}
+  state.audioSyncSource = null;
+  state.audioSyncGain = null;
 
   if(state.audioSyncRaf){
     cancelAnimationFrame(state.audioSyncRaf);
@@ -1865,20 +1877,46 @@ async function startAudioSyncFromRec(rec){
   // (you can remove these two lines later if you WANT instruments on top)
   if(state.drumsOn) stopDrums();
   if(state.instrumentOn) stopInstrument();
-
+  
+ state.audioSyncOn = true;
+  
   // stop any current audio sync
   audioSyncStopInternal();
 
-  state.audioSyncOn = true;
+ 
   state.audioSyncRecId = rec.id;
   state.audioSyncOffsetSec = Number(rec.offsetSec || 0) || 0;
 
-  const url = URL.createObjectURL(rec.blob);
-  state.audioSyncUrl = url;
+ const url = URL.createObjectURL(rec.blob);
+state.audioSyncUrl = url;
 
-  const audio = new Audio(url);
-  audio.preload = "auto";
-  state.audioSyncAudio = audio;
+const audio = new Audio(url);
+audio.preload = "auto";
+audio.playsInline = true;
+state.audioSyncAudio = audio;
+
+/* ✅ Route MP3 through WebAudio so recording captures it */
+const ctx = ensureCtx();
+
+// prevent double-sound (element speaker + WebAudio)
+// (keep ONE approach — volume=0 is safest)
+audio.muted = false;
+audio.volume = 0;
+audio.playsInline = true;
+
+try{
+  if(state.audioSyncSource) state.audioSyncSource.disconnect();
+  if(state.audioSyncGain) state.audioSyncGain.disconnect();
+}catch{}
+
+state.audioSyncSource = ctx.createMediaElementSource(audio);
+state.audioSyncGain = ctx.createGain();
+state.audioSyncGain.gain.value = 1.0;
+
+// ✅ MP3 -> gain -> master bus (master bus already feeds recorder)
+state.audioSyncSource.connect(state.audioSyncGain);
+state.audioSyncGain.connect(getOutNode());
+
 
   if(el.nowPlaying){
     const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
