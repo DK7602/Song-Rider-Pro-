@@ -43,6 +43,8 @@ function escapeHtml(s){
 DOM
 ***********************/
 const el = {
+  headshotWrap: $("headshotWrap"),
+
    uploadAudioBtn: $("uploadAudioBtn"),
   beat1Btn: $("beat1Btn"),
   nowPlaying: $("nowPlaying"),
@@ -2132,8 +2134,6 @@ function setAutoScroll(on){
   }else{
     state.playCardIndex = null;
   }
-
-  ();
 }
 
 
