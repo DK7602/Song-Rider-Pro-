@@ -1878,10 +1878,14 @@ async function startAudioSyncFromRec(rec){
   if(state.drumsOn) stopDrums();
   if(state.instrumentOn) stopInstrument();
   
- state.audioSyncOn = true;
-  
-  // stop any current audio sync
-  audioSyncStopInternal();
+if(state.drumsOn) stopDrums();
+if(state.instrumentOn) stopInstrument();
+
+// stop any current audio sync FIRST
+audioSyncStopInternal();
+
+// now enable sync
+state.audioSyncOn = true;
 
  
   state.audioSyncRecId = rec.id;
@@ -1900,8 +1904,9 @@ const ctx = ensureCtx();
 
 // prevent double-sound (element speaker + WebAudio)
 // (keep ONE approach — volume=0 is safest)
-audio.muted = false;
-audio.volume = 0;
+// IMPORTANT: keep element volume at 1, otherwise some mobile browsers send SILENCE into WebAudio
+audio.volume = 1;
+audio.muted = true;     // silence the element’s own speaker output
 audio.playsInline = true;
 
 try{
