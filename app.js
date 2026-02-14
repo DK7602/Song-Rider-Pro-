@@ -2144,10 +2144,18 @@ function setPanelHidden(hidden){
 }
 
 function setRecordUI(){
-  const label = state.isRecording ? "Stop" : "Record";
-  if(el.recordBtn) el.recordBtn.textContent = label;
-  if(el.mRecordBtn) el.mRecordBtn.textContent = label;
+  // Mini bar stays as text
+  if(el.mRecordBtn) el.mRecordBtn.textContent = state.isRecording ? "Stop" : "Record";
+
+  // Big record button is ICON-ONLY (CSS draws dot/square)
+  if(el.recordBtn){
+  el.recordBtn.classList.toggle("recording", state.isRecording);
+  el.recordBtn.textContent = ""; // ✅ never overwrite icon
+    el.recordBtn.title = state.isRecording ? "Stop Recording" : "Record";
+    el.recordBtn.setAttribute("aria-label", el.recordBtn.title);
+  }
 }
+
 
 /***********************
 Tabs + editor
