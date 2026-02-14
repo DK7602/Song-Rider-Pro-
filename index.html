@@ -238,6 +238,13 @@
       cursor:pointer;
       user-select:none;
     }
+/* ✅ Compact red record circle */
+.iconCircle.recCircle{
+  background: var(--dangerRed);
+  border-color: var(--dangerRed);
+  color:#fff;
+  font-weight:1200;
+}
 
     .tabs{
       display:flex;
@@ -553,15 +560,26 @@
           <button class="exportBtn" id="exportBtn" title="Export (.txt + printable colored .html)">Export</button>
         </div>
 
-        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
-          <button class="pill" id="drumRock">Rock</button>
-          <button class="pill" id="drumHardRock">Hard Rock</button>
-          <button class="pill" id="drumPop">Pop</button>
-          <button class="pill" id="drumRap">Rap</button>
+       <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
+  <button class="pill" id="drumRock">Rock</button>
+  <button class="pill" id="drumHardRock">Hard Rock</button>
+  <button class="pill" id="drumPop">Pop</button>
+  <button class="pill" id="drumRap">Rap</button>
 
-          <button class="scrollIconBtn" id="autoPlayBtn" title="AutoScroll">⇅</button>
-          <button class="btn rec" id="recordBtn">Record</button>
-        </div>
+  <div style="flex:1 1 auto;"></div>
+
+  <button class="scrollIconBtn" id="autoPlayBtn" title="AutoScroll">⇅</button>
+
+  <!-- ✅ Upload/Stop (same button) -->
+  <button class="iconCircle" id="uploadAudioBtn" title="Upload audio (tap). Stop sync (when playing).">⬆️</button>
+
+  <!-- ✅ Mark Beat 1 -->
+  <button class="iconCircle" id="beat1Btn" title="Tap exactly on Beat 1 to sync">①</button>
+
+  <!-- ✅ Record (red circle) -->
+  <button class="iconCircle recCircle" id="recordBtn" title="Record">●</button>
+</div>
+
 
         <div class="row" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;border-top:1px solid rgba(0,0,0,.06);">
           <select id="sortSelect" style="padding:8px 10px;border-radius:12px;border:1px solid rgba(0,0,0,.12);font-weight:900;height:34px;">
@@ -575,18 +593,15 @@
           <button class="iconCircle" id="deleteProjectBtn" title="Delete Project">Ⓧ</button>
         </div>
 
-        <!-- ✅ NEW: Upload MP3 + Stop Audio Sync -->
-        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
-          <button class="btn secondary" id="uploadAudioBtn" title="Upload MP3/WAV to this project">Upload MP3</button>
-          <button class="btn secondary" id="stopAudioBtn" title="Stop synced audio playback">Stop Audio</button>
-          <div id="nowPlaying" style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666;font-weight:900;">
-            —
-          </div>
-        </div>
+       
 
-        <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);">
-          <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
-        </div>
+        <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);flex-direction:column;gap:8px;">
+  <div id="nowPlaying" style="width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666;font-weight:900;">
+    —
+  </div>
+  <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
+</div>
+
       </div>
     </div>
 
