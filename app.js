@@ -2792,6 +2792,33 @@ function renderSheet(){
 
   refreshDisplayedNoteCells();
 }
+async function uploadAudioFile(){
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = "audio/*"; // mp3, wav, m4a (browser dependent)
+  inp.click();
+
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0];
+    if(!file) return;
+
+    const item = {
+      id: uuid(),
+      projectId: state.project?.id || "",
+      kind: "upload",
+      createdAt: now(),
+      title: file.name || "Audio",
+      blob: file,          // File is a Blob
+      offsetSec: 0         // you’ll want a Beat-1 marker button for this
+    };
+
+    await dbPut(item);
+    await renderRecordings();
+
+    // optional: auto-start sync immediately after upload
+    await startAudioSyncFromRec(item);
+  };
+}
 
 /***********************
 Recordings UI
@@ -3424,6 +3451,14 @@ function wire(){
     applyProjectSettingsToUI();
     renderAll();
   });
+if(el.uploadAudioBtn){
+  el.uploadAudioBtn.addEventListener("click", uploadAudioFile);
+}
+
+
+el.stopAudioBtn.addEventListener("click", () => {
+  stopAudioSync();
+});
 
   el.rBtn.addEventListener("click", () => {
     const showing = el.rhymeDock.style.display === "block";
