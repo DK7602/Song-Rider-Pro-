@@ -233,23 +233,30 @@
       color:#fff;
     }
 
-    /* ✅ Record circle: white dot when idle, white stop square when recording */
-    .iconCircle.recCircle{
-      background: var(--dangerRed);
-      border-color: var(--dangerRed);
-      position:relative;
-    }
-    .iconCircle.recCircle::before{
-      content:"";
-      width:10px; height:10px;
-      background:#fff;
-      border-radius:999px;
-      display:block;
-    }
-    .iconCircle.recCircle.recording::before{
-      width:12px; height:12px;
-      border-radius:2px;
-    }
+  /* ✅ Record circle: ● when idle, ■ when recording */
+.iconCircle.recCircle{
+  background: var(--dangerRed);
+  border-color: var(--dangerRed);
+  position:relative;
+
+  /* ✅ kills any leftover text like "Record" */
+  font-size:0;
+  color:transparent;
+  overflow:hidden;
+  text-indent:-9999px;
+}
+.iconCircle.recCircle::before{
+  content:"●";
+  font-size:16px;          /* visible symbol size */
+  color:#fff;
+  line-height:1;
+  text-indent:0;
+}
+.iconCircle.recCircle.recording::before{
+  content:"■";
+  font-size:15px;
+}
+
 
     .tabs{
       display:flex;
@@ -553,7 +560,7 @@
           <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—"/></div>
         </div>
 
-        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
+       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
           <button class="pill" id="instAcoustic">Acoustic</button>
           <button class="pill" id="instElectric">Electric</button>
           <button class="pill" id="instPiano">Piano</button>
@@ -565,7 +572,7 @@
           <button class="exportBtn" id="exportBtn" title="Export (.txt + printable colored .html)">Export</button>
         </div>
 
-        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
+       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
           <button class="pill" id="drumRock">Rock</button>
           <button class="pill" id="drumHardRock">Hard Rock</button>
           <button class="pill" id="drumPop">Pop</button>
