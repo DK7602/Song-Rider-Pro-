@@ -1,4 +1,4 @@
-<!-- index.html (FULL REPLACE MAIN v43) -->
+<!-- index.html (FULL REPLACE MAIN v44 - Audio Upload + Sync Controls) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -511,8 +511,7 @@
     <div class="topRow">
       <div class="brand">
         <h1>Song Rider Pro</h1>
-       <div class="sub">Chords/notes • timing • lyrics • sections</div>
-
+        <div class="sub">Chords/notes • timing • lyrics • sections</div>
       </div>
       <div style="width:56px;height:56px;"></div>
     </div>
@@ -574,6 +573,15 @@
           <button class="iconCircle" id="newProjectBtn" title="New Project">＋</button>
           <button class="iconCircle" id="renameProjectBtn" title="Rename Project">✏️</button>
           <button class="iconCircle" id="deleteProjectBtn" title="Delete Project">Ⓧ</button>
+        </div>
+
+        <!-- ✅ NEW: Upload MP3 + Stop Audio Sync -->
+        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
+          <button class="btn secondary" id="uploadAudioBtn" title="Upload MP3/WAV to this project">Upload MP3</button>
+          <button class="btn secondary" id="stopAudioBtn" title="Stop synced audio playback">Stop Audio</button>
+          <div id="nowPlaying" style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666;font-weight:900;">
+            —
+          </div>
         </div>
 
         <div class="row" style="align-items:flex-start;border-top:1px solid rgba(0,0,0,.06);">
