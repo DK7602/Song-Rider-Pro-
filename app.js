@@ -1895,8 +1895,12 @@ function audioSyncFrame(){
     // ✅ same UI pipeline as your internal clock
     try{
       autoAdvanceOnBar();
-      clearTick();
-      applyTick();
+
+      // only update tick highlight when allowed
+      if(shouldTickRun()){
+        clearTick();
+        applyTick();
+      }
 
       // We do NOT force drums/instrument on here.
       // If you want them to follow MP3 later, we can add that.
