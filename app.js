@@ -385,30 +385,42 @@ function doBlink(){
 }
 
 /***********************
-Tick UI
+Tick UI (FAST: only active card)
 ***********************/
 function clearTick(){
-  const root = el.sheetBody;
-  if(!root) return;
-  root.querySelectorAll(".tick").forEach(x => x.classList.remove("tick"));
+  // remove tick ONLY from what we previously touched
+  (state.lastTickEls || []).forEach(elm => {
+    try{ elm.classList.remove("tick"); }catch{}
+  });
+  state.lastTickEls = [];
 }
 
 function applyTick(){
-  const root = el.sheetBody;
-  if(!root) return;
+  if(!el.sheetBody) return;
   if(state.currentSection === "Full") return;
 
   const nIdx = state.tick8 % 8;
   const bIdx = Math.floor((state.tick8 % 8) / 2);
 
-  root.querySelectorAll(".card").forEach(card => {
-    const notes = card.querySelectorAll(".noteCell");
-    const beats = card.querySelectorAll(".beatCell");
-    if(notes[nIdx]) notes[nIdx].classList.add("tick");
-    if(beats[bIdx]) beats[bIdx].classList.add("tick");
-  });
-}
+  // ONLY tick the playback card (huge perf win)
+  const card = getPlaybackCard() || getCardAtPlayLine() || getNearestVisibleCard();
+  if(!card) return;
 
+  const notes = card.querySelectorAll(".noteCell");
+  const beats = card.querySelectorAll(".beatCell");
+
+  const touched = [];
+  if(notes && notes[nIdx]){
+    notes[nIdx].classList.add("tick");
+    touched.push(notes[nIdx]);
+  }
+  if(beats && beats[bIdx]){
+    beats[bIdx].classList.add("tick");
+    touched.push(beats[bIdx]);
+  }
+
+  state.lastTickEls = touched;
+}
 /***********************
 Audio (routed through master bus)
 ***********************/
