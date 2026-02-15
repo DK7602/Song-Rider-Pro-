@@ -2182,27 +2182,11 @@ function ensureSectionArray(sec){
 }
 
 function renderTabs(){
-  el.tabs.innerHTML = "";
-  SECTIONS.forEach(sec => {
-    const b = document.createElement("button");
-    b.className = "tab";
-    b.textContent = sec;
-    b.classList.toggle("active", sec === state.currentSection);
-    b.addEventListener("click", () => {
-      state.currentSection = sec;
-      state.playCardIndex = null;
-
-      renderTabs();
-      renderSheet();
-      clearTick();
-      applyTick();
-
-      lastActiveCardEl = null;
-      lastLyricsTextarea = null;
-      refreshRhymesFromActive();
-    });
-    el.tabs.appendChild(b);
-  });
+  // ✅ Tabs are removed (Beat Sheet Pro style)
+  if(el.tabs){
+    el.tabs.innerHTML = "";
+    el.tabs.classList.add("hidden");
+  }
 }
 
 function countSyllablesInline(text){
@@ -3410,6 +3394,140 @@ function renderAll(){
   refreshRhymesFromActive();
   refreshDisplayedNoteCells();
 }
+/***********************
+SECTION paging (swipe left/right)
+Order loops back to Full after CHORUS 3
+***********************/
+const SECTION_PAGES = SECTIONS.slice(); // includes "Full" first
+
+function isEditableEl(target){
+  if(!target) return false;
+  const tag = (target.tagName || "").toUpperCase();
+  if(tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return true;
+  if(target.isContentEditable) return true;
+  return false;
+}
+
+function goToSection(sec){
+  if(!sec || sec === state.currentSection) return;
+
+  state.currentSection = sec;
+  state.playCardIndex = null;
+  state.lastAutoBar = -1;
+
+  renderTabs();     // now no-op but keeps code consistent
+  renderSheet();
+  clearTick();
+  applyTick();
+
+  lastActiveCardEl = null;
+  lastLyricsTextarea = null;
+  refreshRhymesFromActive();
+  refreshDisplayedNoteCells();
+  updateFullIfVisible();
+
+  // Optional: snap view so the sheet header is visible (feels like “page change”)
+  try{
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }catch{
+    window.scrollTo(0, 0);
+  }
+}
+
+function nextSection(){
+  const i = SECTION_PAGES.indexOf(state.currentSection);
+  const next = SECTION_PAGES[(i + 1) % SECTION_PAGES.length];
+  goToSection(next);
+}
+
+function prevSection(){
+  const i = SECTION_PAGES.indexOf(state.currentSection);
+  const prev = SECTION_PAGES[(i - 1 + SECTION_PAGES.length) % SECTION_PAGES.length];
+  goToSection(prev);
+}
+
+/***********************
+Swipe detection (horizontal)
+***********************/
+function installSectionSwipe(){
+  let sx=0, sy=0, t0=0, tracking=false, locked=false;
+  let lastFire = 0;
+
+  const MIN_X = 60;          // min horizontal travel
+  const MAX_MS = 800;        // ignore super slow drags
+  const DOMINANCE = 1.35;    // dx must dominate dy
+
+  function onStart(e){
+    if(state.rhymeDock && el.rhymeDock && el.rhymeDock.style.display === "block") return;
+
+    const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
+    const target = e.target;
+
+    // ✅ don’t page-switch when gesture starts in a control (typing/editing safety)
+    if(isEditableEl(target) || (target && target.closest && target.closest("#panelBody"))) return;
+
+    sx = pt.clientX; sy = pt.clientY; t0 = performance.now();
+    tracking = true;
+    locked = false;
+  }
+
+  function onMove(e){
+    if(!tracking) return;
+    const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
+
+    const dx = pt.clientX - sx;
+    const dy = pt.clientY - sy;
+
+    // Once we see a clear horizontal intention, lock it
+    if(!locked){
+      if(Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * DOMINANCE){
+        locked = true;
+      }else if(Math.abs(dy) > 18 && Math.abs(dy) > Math.abs(dx)){
+        // Vertical scroll intent → abort
+        tracking = false;
+        return;
+      }
+    }
+  }
+
+  function onEnd(e){
+    if(!tracking) return;
+    tracking = false;
+
+    const pt = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
+    const dx = pt.clientX - sx;
+    const dy = pt.clientY - sy;
+    const dt = performance.now() - t0;
+
+    if(dt > MAX_MS) return;
+    if(Math.abs(dx) < MIN_X) return;
+    if(Math.abs(dx) < Math.abs(dy) * DOMINANCE) return;
+
+    // Cooldown so one swipe doesn’t fire twice
+    const nowMs = performance.now();
+    if(nowMs - lastFire < 250) return;
+    lastFire = nowMs;
+
+    if(dx < 0) nextSection();  // swipe left → next page
+    else prevSection();        // swipe right → previous page
+  }
+
+  // Touch + pointer (covers most devices)
+  document.addEventListener("touchstart", onStart, { passive:true });
+  document.addEventListener("touchmove", onMove, { passive:true });
+  document.addEventListener("touchend", onEnd, { passive:true });
+
+  document.addEventListener("pointerdown", onStart, { passive:true });
+  document.addEventListener("pointermove", onMove, { passive:true });
+  document.addEventListener("pointerup", onEnd, { passive:true });
+
+  // Desktop convenience: arrow keys (when not typing)
+  document.addEventListener("keydown", (e)=>{
+    if(isEditableEl(document.activeElement)) return;
+    if(e.key === "ArrowLeft"){ prevSection(); }
+    if(e.key === "ArrowRight"){ nextSection(); }
+  });
+}
 
 /***********************
 Wiring
@@ -3648,6 +3766,7 @@ function init(){
   setRecordUI();
   wire();
   renderAll();
+  installSectionSwipe();
 
   stopBeatClock();
 }
