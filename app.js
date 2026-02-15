@@ -1867,7 +1867,7 @@ function audioSyncFrame(){
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
 }
 
-  async function startAudioSyncFromRec(rec){
+async function startAudioSyncFromRec(rec){
   if(!rec || !rec.blob) return;
 
   // stop internal beat clock (mp3 becomes the clock)
@@ -1891,24 +1891,18 @@ function audioSyncFrame(){
   const audio = new Audio(url);
   audio.preload = "auto";
   audio.playsInline = true;
-
-  // ✅ IMPORTANT: do NOT mute on Android (muted can kill WebAudio feed too)
   audio.muted = false;
   audio.volume = 1;
 
   state.audioSyncAudio = audio;
 
-  // make sure ctx exists (and resume on user gesture)
   const ctx = ensureCtx();
 
-  // clear any old routing nodes
   try{ if(state.audioSyncSource) state.audioSyncSource.disconnect(); }catch{}
   try{ if(state.audioSyncGain) state.audioSyncGain.disconnect(); }catch{}
   state.audioSyncSource = null;
   state.audioSyncGain = null;
 
-  // ✅ ONLY create WebAudio routing if we actually have a recorder destination
-  // (prevents “double audio” while still allowing MP3 to be recorded)
   if(state.recDest){
     try{
       state.audioSyncSource = ctx.createMediaElementSource(audio);
@@ -1944,7 +1938,6 @@ function audioSyncFrame(){
 
   state.lastAudioTick8 = -1;
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
-  }
 }
 
 function stopAudioSync(){
