@@ -1881,30 +1881,7 @@ function audioSyncFrame(){
 }
 
   }catch(e){
-    console.warn("MP3->WebAudio routing failed:", e);
-    // Fallback: let audio element play normally (still hear it, may not record it)
-  }
-
-  if(el.nowPlaying){
-    const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
-    el.nowPlaying.textContent = "Now playing: " + label;
-  }
-
-  audio.onended = () => {
-    audioSyncStopInternal();
-  };
-
-  try{
-    await audio.play();
-  }catch(e){
-    alert("Couldn't play audio. (Browser blocked playback.) Tap a button again to allow audio.");
-    state.audioSyncOn = false;
-    return;
-  }
-
-  state.lastAudioTick8 = -1;
-  state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
-}
+  
 
   if(el.nowPlaying){
     const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
