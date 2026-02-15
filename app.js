@@ -1867,7 +1867,7 @@ function audioSyncFrame(){
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
 }
 
-async function startAudioSyncFromRec(rec){
+  async function startAudioSyncFromRec(rec){
   if(!rec || !rec.blob) return;
 
   // stop internal beat clock (mp3 becomes the clock)
@@ -1891,31 +1891,38 @@ async function startAudioSyncFromRec(rec){
   const audio = new Audio(url);
   audio.preload = "auto";
   audio.playsInline = true;
+
+  // ✅ IMPORTANT: do NOT mute on Android (muted can kill WebAudio feed too)
+  audio.muted = false;
+  audio.volume = 1;
+
   state.audioSyncAudio = audio;
 
+  // make sure ctx exists (and resume on user gesture)
   const ctx = ensureCtx();
 
-  // mobile-safe: keep element "internally audible" but silent to speaker
-  audio.volume = 1;
-  audio.muted = true;
+  // clear any old routing nodes
+  try{ if(state.audioSyncSource) state.audioSyncSource.disconnect(); }catch{}
+  try{ if(state.audioSyncGain) state.audioSyncGain.disconnect(); }catch{}
+  state.audioSyncSource = null;
+  state.audioSyncGain = null;
 
-  // IMPORTANT: must be connected only once per <audio> element
-  try{
-    if(state.audioSyncSource) state.audioSyncSource.disconnect();
-    if(state.audioSyncGain) state.audioSyncGain.disconnect();
-  }catch{}
-
-  state.audioSyncSource = ctx.createMediaElementSource(audio);
-  state.audioSyncGain = ctx.createGain();
-  state.audioSyncGain.gain.value = 1.0;
-
-  // MP3 -> gain -> master bus
-  state.audioSyncSource.connect(state.audioSyncGain);
-  state.audioSyncGain.connect(getOutNode());
-
-  // HARD GUARANTEE: also feed the recorder destination if it exists
+  // ✅ ONLY create WebAudio routing if we actually have a recorder destination
+  // (prevents “double audio” while still allowing MP3 to be recorded)
   if(state.recDest){
-    try{ state.audioSyncGain.connect(state.recDest); }catch{}
+    try{
+      state.audioSyncSource = ctx.createMediaElementSource(audio);
+      state.audioSyncGain = ctx.createGain();
+      state.audioSyncGain.gain.value = 1.0;
+
+      // feed recorder (NOT speakers)
+      state.audioSyncSource.connect(state.audioSyncGain);
+      state.audioSyncGain.connect(state.recDest);
+    }catch(e){
+      console.warn("MP3->rec routing failed:", e);
+      state.audioSyncSource = null;
+      state.audioSyncGain = null;
+    }
   }
 
   if(el.nowPlaying){
@@ -1937,8 +1944,8 @@ async function startAudioSyncFromRec(rec){
 
   state.lastAudioTick8 = -1;
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
+  }
 }
-
 
 function stopAudioSync(){
   audioSyncStopInternal();
