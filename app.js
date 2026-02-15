@@ -371,8 +371,9 @@ lastAutoBar: -1,
   tapTimes: [],
    audioSyncSource: null,   // ✅ WebAudio node for the MP3
   audioSyncGain: null,     // ✅ optional gain for MP3 level
-
-
+  recMix: null,
+  recMixWired: false,
+  recKeepAlive: null,
 };
 
 /***********************
@@ -1910,26 +1911,51 @@ async function startAudioSyncFromRec(rec){
 
   const ctx = ensureCtx();
 
+  // ALWAYS route MP3 through WebAudio so it can be recorded (and so levels are consistent)
   try{ if(state.audioSyncSource) state.audioSyncSource.disconnect(); }catch{}
   try{ if(state.audioSyncGain) state.audioSyncGain.disconnect(); }catch{}
   state.audioSyncSource = null;
   state.audioSyncGain = null;
 
-  if(state.recDest){
-    try{
-      state.audioSyncSource = ctx.createMediaElementSource(audio);
-      state.audioSyncGain = ctx.createGain();
-      state.audioSyncGain.gain.value = 1.0;
+  try{
+    state.audioSyncSource = ctx.createMediaElementSource(audio);
+    state.audioSyncGain = ctx.createGain();
+    state.audioSyncGain.gain.value = 1.0;
 
-      // feed recorder (NOT speakers)
-      state.audioSyncSource.connect(state.audioSyncGain);
-      state.audioSyncGain.connect(state.recDest);
-    }catch(e){
-      console.warn("MP3->rec routing failed:", e);
-      state.audioSyncSource = null;
-      state.audioSyncGain = null;
+    // To speakers via your master chain
+    state.audioSyncSource.connect(state.audioSyncGain);
+    state.audioSyncGain.connect(getOutNode());
+
+    // If recorder bus exists (or once created), also feed into recorder mix
+    if(state.recDest || state.recMix){
+      ensureRecordingBus();
+      try{ state.audioSyncGain.connect(state.recMix); }catch{}
     }
+  }catch(e){
+    console.warn("MP3->WebAudio routing failed:", e);
+    // Fallback: let audio element play normally (still hear it, may not record it)
   }
+
+  if(el.nowPlaying){
+    const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
+    el.nowPlaying.textContent = "Now playing: " + label;
+  }
+
+  audio.onended = () => {
+    audioSyncStopInternal();
+  };
+
+  try{
+    await audio.play();
+  }catch(e){
+    alert("Couldn't play audio. (Browser blocked playback.) Tap a button again to allow audio.");
+    state.audioSyncOn = false;
+    return;
+  }
+
+  state.lastAudioTick8 = -1;
+  state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
+}
 
   if(el.nowPlaying){
     const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
@@ -3024,23 +3050,83 @@ row.appendChild(del);
 /***********************
 Recording bus (taps masterPost)
 ***********************/
-function ensureRecordingBus(){
-    
+async function startAudioSyncFromRec(rec){
+  if(!rec || !rec.blob) return;
+
+  // stop internal beat clock (mp3 becomes the clock)
+  stopBeatClock();
+
+  // stop drums/instrument to prevent “double audio chaos”
+  if(state.drumsOn) stopDrums();
+  if(state.instrumentOn) stopInstrument();
+
+  // stop any current audio sync FIRST
+  audioSyncStopInternal();
+
+  // now enable sync
+  state.audioSyncOn = true;
+  state.audioSyncRecId = rec.id;
+  state.audioSyncOffsetSec = Number(rec.offsetSec || 0) || 0;
+
+  const url = URL.createObjectURL(rec.blob);
+  state.audioSyncUrl = url;
+
+  const audio = new Audio(url);
+  audio.preload = "auto";
+  audio.playsInline = true;
+  audio.muted = false;
+  audio.volume = 1;
+
+  state.audioSyncAudio = audio;
+
   const ctx = ensureCtx();
-  if(!state.recDest){
-    state.recDest = ctx.createMediaStreamDestination();
+
+  // ALWAYS route MP3 through WebAudio so it can be recorded (and so levels are consistent)
+  try{ if(state.audioSyncSource) state.audioSyncSource.disconnect(); }catch{}
+  try{ if(state.audioSyncGain) state.audioSyncGain.disconnect(); }catch{}
+  state.audioSyncSource = null;
+  state.audioSyncGain = null;
+
+  try{
+    state.audioSyncSource = ctx.createMediaElementSource(audio);
+    state.audioSyncGain = ctx.createGain();
+    state.audioSyncGain.gain.value = 1.0;
+
+    // To speakers via your master chain
+    state.audioSyncSource.connect(state.audioSyncGain);
+    state.audioSyncGain.connect(getOutNode());
+
+    // If recorder bus exists (or once created), also feed into recorder mix
+    if(state.recDest || state.recMix){
+      ensureRecordingBus();
+      try{ state.audioSyncGain.connect(state.recMix); }catch{}
+    }
+  }catch(e){
+    console.warn("MP3->WebAudio routing failed:", e);
+    // Fallback: let audio element play normally (still hear it, may not record it)
   }
-  if(!state.recWired && state.masterPost){
-    try{
-      state.masterPost.connect(state.recDest);
-      state.recWired = true;
-    }catch{}
+
+  if(el.nowPlaying){
+    const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
+    el.nowPlaying.textContent = "Now playing: " + label;
   }
-  // ✅ If MP3 sync is already playing, make sure it feeds the recorder too
-  if(state.audioSyncOn && state.audioSyncGain && state.recDest){
-    try{ state.audioSyncGain.connect(state.recDest); }catch{}
+
+  audio.onended = () => {
+    audioSyncStopInternal();
+  };
+
+  try{
+    await audio.play();
+  }catch(e){
+    alert("Couldn't play audio. (Browser blocked playback.) Tap a button again to allow audio.");
+    state.audioSyncOn = false;
+    return;
   }
+
+  state.lastAudioTick8 = -1;
+  state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
 }
+
 
 function pickBestMimeType(){
   const types = [
@@ -3061,6 +3147,7 @@ async function startRecording(){
   ensureCtx();
   ensureRecordingBus();
 
+  // Get mic
   const micStream = await navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: true,
@@ -3074,10 +3161,15 @@ async function startRecording(){
 
   const ctx = ensureCtx();
 
+  // Mic -> recorder mix (NOT directly to recDest)
   const micSource = ctx.createMediaStreamSource(micStream);
   state.recMicSource = micSource;
 
-  micSource.connect(state.recDest);
+  const micGain = ctx.createGain();
+  micGain.gain.value = 1.0;
+
+  micSource.connect(micGain);
+  micGain.connect(state.recMix);
 
   const options = {};
   const mt = pickBestMimeType();
@@ -3086,14 +3178,14 @@ async function startRecording(){
   const rec = new MediaRecorder(state.recDest.stream, options);
   state.rec = rec;
 
-  rec.ondataavailable = (e) => { if(e.data && e.data.size) state.recChunks.push(e.data); };
+  rec.ondataavailable = (e) => {
+    if(e.data && e.data.size) state.recChunks.push(e.data);
+  };
 
   rec.onstop = async () => {
-    try{
-      if(state.recMicSource){
-        try{ state.recMicSource.disconnect(); }catch{}
-      }
-    }catch{}
+    // cleanup mic nodes
+    try{ micSource.disconnect(); }catch{}
+    try{ micGain.disconnect(); }catch{}
 
     try{
       if(state.recMicStream){
@@ -3107,7 +3199,7 @@ async function startRecording(){
     const item = {
       id: uuid(),
       projectId: state.project?.id || "",
-      kind: "mic",
+      kind: "mix",
       createdAt: now(),
       title: "",
       blob,
@@ -3123,10 +3215,11 @@ async function startRecording(){
     state.recMicSource = null;
   };
 
-  rec.start();
+  rec.start(250); // small timeslice helps some Android devices
   state.isRecording = true;
   setRecordUI();
 }
+
 
 async function stopRecording(){
   if(!state.rec) return;
