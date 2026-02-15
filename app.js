@@ -2136,7 +2136,11 @@ function setAutoScroll(on){
       const tgt = cards[state.playCardIndex];
       if(tgt && !cardIsBlank(tgt)) scrollCardIntoView(tgt);
     }else{
-      state.playCardIndex = null;
+    state.playCardIndex = null;
+    state.lastAutoBar = -1;
+
+    // If MP3 sync is playing, stop the highlight immediately when AutoScroll OFF
+    clearTick();
     }
 
   }else{
