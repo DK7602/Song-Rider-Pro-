@@ -1880,29 +1880,6 @@ function audioSyncFrame(){
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
 }
 
-  }catch(e){
-  
-
-  if(el.nowPlaying){
-    const label = (rec.title && rec.title.trim()) ? rec.title.trim() : "Audio";
-    el.nowPlaying.textContent = "Now playing: " + label;
-  }
-
-  audio.onended = () => {
-    audioSyncStopInternal();
-  };
-
-  try{
-    await audio.play();
-  }catch(e){
-    alert("Couldn't play audio. (Browser blocked playback.) Tap a button again to allow audio.");
-    state.audioSyncOn = false;
-    return;
-  }
-
-  state.lastAudioTick8 = -1;
-  state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
-}
 
 function stopAudioSync(){
   audioSyncStopInternal();
