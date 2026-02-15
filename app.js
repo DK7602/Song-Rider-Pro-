@@ -386,38 +386,66 @@ function doBlink(){
 }
 
 /***********************
-Tick UI (FAST: only active card)
+Tick UI (stable + can tick all visible cards)
 ***********************/
 function clearTick(){
-  // remove tick ONLY from what we previously touched
   (state.lastTickEls || []).forEach(elm => {
     try{ elm.classList.remove("tick"); }catch{}
   });
   state.lastTickEls = [];
 }
 
+// During MP3 sync: only show tick when AutoScroll is ON
+function shouldTickRun(){
+  if(state.audioSyncOn) return !!state.autoScrollOn;
+  return !!(state.drumsOn || state.instrumentOn || state.autoScrollOn);
+}
+
+function getVisibleCards(){
+  const cards = getCards();
+  if(cards.length === 0) return [];
+
+  const topLine = getHeaderBottomY() - 18;
+  const bottomLine = window.innerHeight + 18;
+
+  const vis = [];
+  for(const c of cards){
+    const r = c.getBoundingClientRect();
+    if(r.bottom < topLine) continue;
+    if(r.top > bottomLine) continue;
+    vis.push(c);
+  }
+  return vis.length ? vis : [cards[0]];
+}
+
 function applyTick(){
   if(!el.sheetBody) return;
   if(state.currentSection === "Full") return;
+  if(!shouldTickRun()) return;
 
-  const nIdx = state.tick8 % 8;
-  const bIdx = Math.floor((state.tick8 % 8) / 2);
-
-  // ONLY tick the playback card (huge perf win)
-  const card = getPlaybackCard() || getCardAtPlayLine() || getNearestVisibleCard();
-  if(!card) return;
-
-  const notes = card.querySelectorAll(".noteCell");
-  const beats = card.querySelectorAll(".beatCell");
+  const nIdx = ((state.tick8 % 8) + 8) % 8;
+  const bIdx = Math.floor(nIdx / 2);
 
   const touched = [];
-  if(notes && notes[nIdx]){
-    notes[nIdx].classList.add("tick");
-    touched.push(notes[nIdx]);
-  }
-  if(beats && beats[bIdx]){
-    beats[bIdx].classList.add("tick");
-    touched.push(beats[bIdx]);
+
+  // If AutoScroll ON: tick only the playback card (keeps perf good)
+  // If AutoScroll OFF: tick ALL visible cards (fixes “only one line” complaint)
+  const cards = state.autoScrollOn
+    ? [getPlaybackCard() || getCardAtPlayLine() || getNearestVisibleCard()].filter(Boolean)
+    : getVisibleCards();
+
+  for(const card of cards){
+    const notes = card.querySelectorAll(".noteCell");
+    const beats = card.querySelectorAll(".beatCell");
+
+    if(notes && notes[nIdx]){
+      notes[nIdx].classList.add("tick");
+      touched.push(notes[nIdx]);
+    }
+    if(beats && beats[bIdx]){
+      beats[bIdx].classList.add("tick");
+      touched.push(beats[bIdx]);
+    }
   }
 
   state.lastTickEls = touched;
