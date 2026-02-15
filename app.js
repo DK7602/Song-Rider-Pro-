@@ -1880,57 +1880,6 @@ function audioSyncFrame(){
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
 }
 
-async function startAudioSyncFromRec(rec){
-  if(!rec || !rec.blob) return;
-
-  // stop internal beat clock (mp3 becomes the clock)
-  stopBeatClock();
-
-  // stop drums/instrument to prevent “double audio chaos”
-  if(state.drumsOn) stopDrums();
-  if(state.instrumentOn) stopInstrument();
-
-  // stop any current audio sync FIRST
-  audioSyncStopInternal();
-
-  // now enable sync
-  state.audioSyncOn = true;
-  state.audioSyncRecId = rec.id;
-  state.audioSyncOffsetSec = Number(rec.offsetSec || 0) || 0;
-
-  const url = URL.createObjectURL(rec.blob);
-  state.audioSyncUrl = url;
-
-  const audio = new Audio(url);
-  audio.preload = "auto";
-  audio.playsInline = true;
-  audio.muted = false;
-  audio.volume = 1;
-
-  state.audioSyncAudio = audio;
-
-  const ctx = ensureCtx();
-
-  // ALWAYS route MP3 through WebAudio so it can be recorded (and so levels are consistent)
-  try{ if(state.audioSyncSource) state.audioSyncSource.disconnect(); }catch{}
-  try{ if(state.audioSyncGain) state.audioSyncGain.disconnect(); }catch{}
-  state.audioSyncSource = null;
-  state.audioSyncGain = null;
-
-  try{
-    state.audioSyncSource = ctx.createMediaElementSource(audio);
-    state.audioSyncGain = ctx.createGain();
-    state.audioSyncGain.gain.value = 1.0;
-
-    // To speakers via your master chain
-    state.audioSyncSource.connect(state.audioSyncGain);
-    state.audioSyncGain.connect(getOutNode());
-
-    // If recorder bus exists (or once created), also feed into recorder mix
-    if(state.recDest || state.recMix){
-      ensureRecordingBus();
-      try{ state.audioSyncGain.connect(state.recMix); }catch{}
-    }
   }catch(e){
     console.warn("MP3->WebAudio routing failed:", e);
     // Fallback: let audio element play normally (still hear it, may not record it)
@@ -3050,6 +2999,33 @@ row.appendChild(del);
 /***********************
 Recording bus (taps masterPost)
 ***********************/
+function ensureRecordingBus(){
+  const ctx = ensureCtx();
+
+  if(!state.recDest){
+    state.recDest = ctx.createMediaStreamDestination();
+  }
+
+  if(!state.recMix){
+    state.recMix = ctx.createGain();
+    state.recMix.gain.value = 1.0;
+    state.recMix.connect(state.recDest);
+  }
+
+  if(!state.recWired && state.masterPost){
+    try{
+      state.masterPost.connect(state.recMix);
+      state.recWired = true;
+    }catch{}
+  }
+
+  if(state.audioSyncOn && state.audioSyncGain){
+    try{
+      state.audioSyncGain.connect(state.recMix);
+    }catch{}
+  }
+}
+
 async function startAudioSyncFromRec(rec){
   if(!rec || !rec.blob) return;
 
