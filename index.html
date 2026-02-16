@@ -381,13 +381,34 @@
 
 
     .card{
-      border:1px solid rgba(0,0,0,.10);
-      border-radius:14px;
-      background:#fff;
-      padding:10px;
-      scroll-margin-top: 210px;
+  position:relative; /* ✅ for top-right X */
+  border:1px solid rgba(0,0,0,.10);
+  border-radius:14px;
+  background:#fff;
+  padding:10px;
+  scroll-margin-top: 210px;
     }
-
+.cardDel{
+  position:absolute;
+  top:8px;
+  right:8px;
+  width:28px;
+  height:28px;
+  border-radius:10px;
+  border:1px solid rgba(0,0,0,.14);
+  background:#fff;
+  font-size:18px;
+  font-weight:1100;
+  line-height:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  user-select:none;
+}
+.cardDel:active{
+  transform:scale(0.98);
+}
     .cardTop{
       display:flex; align-items:center; gap:10px;
       flex-wrap:wrap;
