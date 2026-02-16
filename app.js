@@ -1988,7 +1988,12 @@ function playInstrumentStep(){
   if(!state.instrumentOn) return;
   if(state.currentSection === "Full") return;
 
-  const card = getPlaybackCard();
+  // ✅ AutoScroll ON: follow playCardIndex
+  // ✅ AutoScroll OFF: play the card currently in view (play-line / nearest visible)
+  const card = state.autoScrollOn
+    ? (getPlaybackCard() || getCardAtPlayLine() || getNearestVisibleCard())
+    : (getCardAtPlayLine() || getNearestVisibleCard());
+
   if(!card) return;
 
   const nIdx = state.tick8 % 8;
@@ -2026,6 +2031,7 @@ function playInstrumentStep(){
 
   playChordForInstrument(raw, durMs);
 }
+
 
 
 /***********************
