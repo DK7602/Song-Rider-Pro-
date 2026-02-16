@@ -610,58 +610,262 @@ function scheduleCleanup(nodes, ms){
 }
 
 /***********************
-Basic drum building blocks
+REALISTIC DRUM SYNTH (NO SAMPLES)
+- Kick: pitch drop + click
+- Snare: filtered noise + body tone
+- Hat: bright filtered noise + metallic partials
 ***********************/
-function pluck(freq=440, ms=180, gain=0.08, type="sine"){
+
+function drumBus(){
+  // Optional: a tiny bit of shaping just for drums
+  const ctx = ensureCtx();
+  if(state._drumBus) return state._drumBus;
+
+  const g = ctx.createGain();
+  g.gain.value = 0.95;
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 28; // remove sub-rumble
+
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -18;
+  comp.knee.value = 14;
+  comp.ratio.value = 3.2;
+  comp.attack.value = 0.004;
+  comp.release.value = 0.12;
+
+  g.connect(hp);
+  hp.connect(comp);
+  comp.connect(getOutNode()); // into your master chain
+
+  state._drumBus = { in: g, nodes:[g,hp,comp] };
+  return state._drumBus;
+}
+
+function drumKick(vel=1){
   const ctx = ensureCtx();
   const t0 = ctx.currentTime;
+  const v = clamp(vel, 0.15, 1.0);
 
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.exponentialRampToValueAtTime(0.95 * v, t0 + 0.004);
+  out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+
+  // punch EQ
+  const body = ctx.createBiquadFilter();
+  body.type = "peaking";
+  body.frequency.value = 85;
+  body.Q.value = 0.9;
+  body.gain.value = 3.5;
+
+  // lowpass to keep it round
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 900;
+  lp.Q.value = 0.7;
+
+  // main sine with pitch drop
   const o = ctx.createOscillator();
-  const g = ctx.createGain();
+  o.type = "sine";
+  o.frequency.setValueAtTime(140, t0);
+  o.frequency.exponentialRampToValueAtTime(52, t0 + 0.06);
+  o.frequency.exponentialRampToValueAtTime(45, t0 + 0.16);
 
-  o.type = type;
-  o.frequency.value = freq;
+  // tiny click (short filtered noise)
+  const nLen = 0.010;
+  const bs = Math.max(256, Math.floor(ctx.sampleRate * nLen));
+  const buf = ctx.createBuffer(1, bs, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++){
+    data[i] = (Math.random()*2-1) * (1 - i/data.length);
+  }
+  const ns = ctx.createBufferSource();
+  ns.buffer = buf;
 
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
+  const clickHP = ctx.createBiquadFilter();
+  clickHP.type = "highpass";
+  clickHP.frequency.value = 1800;
+  clickHP.Q.value = 0.8;
 
-  o.connect(g);
-  g.connect(getOutNode());
+  const clickG = ctx.createGain();
+  clickG.gain.setValueAtTime(0.0001, t0);
+  clickG.gain.exponentialRampToValueAtTime(0.18 * v, t0 + 0.0015);
+  clickG.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
+
+  // route
+  o.connect(out);
+  ns.connect(clickHP);
+  clickHP.connect(clickG);
+  clickG.connect(out);
+
+  out.connect(body);
+  body.connect(lp);
+
+  lp.connect(drumBus().in);
 
   o.start(t0);
-  o.stop(t0 + ms/1000 + 0.02);
+  o.stop(t0 + 0.24);
 
-  scheduleCleanup([o,g], ms + 80);
+  ns.start(t0);
+  ns.stop(t0 + nLen + 0.02);
+
+  scheduleCleanup([o,out,body,lp,ns,clickHP,clickG], 420);
 }
 
-function noise(ms=40, gain=0.08){
+function drumSnare(vel=1){
   const ctx = ensureCtx();
-  const bufferSize = Math.max(256, Math.floor(ctx.sampleRate * (ms/1000)));
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for(let i=0;i<data.length;i++) data[i] = (Math.random()*2-1);
-
-  const src = ctx.createBufferSource();
-  src.buffer = buffer;
-
-  const g = ctx.createGain();
   const t0 = ctx.currentTime;
-  g.gain.setValueAtTime(gain, t0);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
+  const v = clamp(vel, 0.15, 1.0);
 
-  src.connect(g);
-  g.connect(getOutNode());
-  src.start();
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.exponentialRampToValueAtTime(0.55 * v, t0 + 0.003);
+  out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
 
-  scheduleCleanup([src,g], ms + 120);
+  // noise burst
+  const nLen = 0.11;
+  const bs = Math.max(256, Math.floor(ctx.sampleRate * nLen));
+  const buf = ctx.createBuffer(1, bs, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++){
+    const fade = 1 - (i/data.length);
+    data[i] = (Math.random()*2-1) * fade;
+  }
+  const ns = ctx.createBufferSource();
+  ns.buffer = buf;
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 900;
+  hp.Q.value = 0.7;
+
+  const bp = ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = 2100;
+  bp.Q.value = 0.9;
+
+  const noiseG = ctx.createGain();
+  noiseG.gain.setValueAtTime(0.0001, t0);
+  noiseG.gain.exponentialRampToValueAtTime(0.60 * v, t0 + 0.003);
+  noiseG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+
+  // body tone
+  const bodyO = ctx.createOscillator();
+  bodyO.type = "triangle";
+  bodyO.frequency.setValueAtTime(190, t0);
+  bodyO.frequency.exponentialRampToValueAtTime(155, t0 + 0.06);
+
+  const bodyG = ctx.createGain();
+  bodyG.gain.setValueAtTime(0.0001, t0);
+  bodyG.gain.exponentialRampToValueAtTime(0.18 * v, t0 + 0.003);
+  bodyG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+
+  // snap EQ
+  const snap = ctx.createBiquadFilter();
+  snap.type = "peaking";
+  snap.frequency.value = 3400;
+  snap.Q.value = 0.8;
+  snap.gain.value = 3.0;
+
+  // route
+  ns.connect(hp);
+  hp.connect(bp);
+  bp.connect(noiseG);
+  noiseG.connect(out);
+
+  bodyO.connect(bodyG);
+  bodyG.connect(out);
+
+  out.connect(snap);
+  snap.connect(drumBus().in);
+
+  ns.start(t0);
+  ns.stop(t0 + nLen + 0.02);
+
+  bodyO.start(t0);
+  bodyO.stop(t0 + 0.16);
+
+  scheduleCleanup([out,ns,hp,bp,noiseG,bodyO,bodyG,snap], 520);
 }
 
-function drumHit(kind){
-  if(kind === "kick") pluck(70, 120, 0.16, "sine");
-  if(kind === "snare"){ noise(60, 0.10); pluck(180, 70, 0.05, "square"); }
-  if(kind === "hat"){ noise(25, 0.05); }
+function drumHatClosed(vel=1){
+  const ctx = ensureCtx();
+  const t0 = ctx.currentTime;
+  const v = clamp(vel, 0.12, 1.0);
+
+  const out = ctx.createGain();
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.exponentialRampToValueAtTime(0.22 * v, t0 + 0.0018);
+  out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.045);
+
+  // noise
+  const nLen = 0.040;
+  const bs = Math.max(256, Math.floor(ctx.sampleRate * nLen));
+  const buf = ctx.createBuffer(1, bs, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++){
+    data[i] = (Math.random()*2-1) * (1 - i/data.length);
+  }
+  const ns = ctx.createBufferSource();
+  ns.buffer = buf;
+
+  // metallic partials (6 square oscillators)
+  const freqs = [4100, 5200, 6300, 7400, 8600, 9800];
+  const oscMix = ctx.createGain();
+  oscMix.gain.value = 0.06 * v;
+
+  const oscs = [];
+  for(const f of freqs){
+    const o = ctx.createOscillator();
+    o.type = "square";
+    o.frequency.setValueAtTime(f * (1 + (Math.random()*2-1)*0.002), t0);
+    oscs.push(o);
+    o.connect(oscMix);
+    o.start(t0);
+    o.stop(t0 + 0.05);
+  }
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 6500;
+  hp.Q.value = 0.7;
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 12000;
+  lp.Q.value = 0.7;
+
+  const nG = ctx.createGain();
+  nG.gain.setValueAtTime(0.0001, t0);
+  nG.gain.exponentialRampToValueAtTime(0.20 * v, t0 + 0.0018);
+  nG.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
+
+  ns.connect(hp);
+  hp.connect(nG);
+  nG.connect(out);
+
+  oscMix.connect(out);
+
+  out.connect(lp);
+  lp.connect(drumBus().in);
+
+  ns.start(t0);
+  ns.stop(t0 + nLen + 0.02);
+
+  scheduleCleanup([out,ns,hp,lp,nG,oscMix, ...oscs], 260);
 }
+
+function drumHit(kind, vel=1){
+  // small humanization (keeps it from sounding like a video game grid)
+  const v = clamp(vel * (0.92 + Math.random()*0.16), 0.12, 1.0);
+
+  if(kind === "kick") return drumKick(v);
+  if(kind === "snare") return drumSnare(v);
+  if(kind === "hat") return drumHatClosed(v);
+}
+
 
 /***********************
 NOTE / CHORD PARSERS
