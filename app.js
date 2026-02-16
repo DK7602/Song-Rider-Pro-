@@ -151,14 +151,11 @@ document.addEventListener("selectionchange", () => {
 Sections (ORDER LOCKED)
 ***********************/
 const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
-const DEFAULT_LINES_PER_SECTION = 20;
+const MIN_LINES_PER_SECTION = 1;
 
 /***********************
 Project storage (MAIN)
 ***********************/
-const LS_KEY = "songrider_v25_projects";
-const LS_CUR = "songrider_v25_currentProjectId";
-
 function newLine(){
   return {
     id: uuid(),
@@ -167,11 +164,32 @@ function newLine(){
     beats: Array(4).fill("")
   };
 }
+  const LS_KEY = "songrider_v25_projects";
+const LS_CUR = "songrider_v25_currentProjectId";
+
+function lineHasContent(line){
+  if(!line || typeof line !== "object") return false;
+
+  const lyr = String(line.lyrics || "").trim();
+  if(lyr) return true;
+
+  const notes = Array.isArray(line.notes) ? line.notes : [];
+  for(const n of notes){
+    if(String(n || "").trim()) return true;
+  }
+
+  const beats = Array.isArray(line.beats) ? line.beats : [];
+  for(const b of beats){
+    if(String(b || "").trim()) return true;
+  }
+
+  return false;
+}
 
 function defaultProject(name="New Song"){
   const sections = {};
   SECTIONS.filter(s=>s!=="Full").forEach(sec => {
-    sections[sec] = Array.from({length: DEFAULT_LINES_PER_SECTION}, () => newLine());
+    sections[sec] = [ newLine() ]; // ✅ start with ONE card
   });
   return {
     id: uuid(),
@@ -238,7 +256,13 @@ function normalizeProject(p){
       return L;
     });
 
-    while(p.sections[sec].length < DEFAULT_LINES_PER_SECTION){
+    // ✅ trim trailing blank cards, but keep at least 1
+    while(p.sections[sec].length > 1 && !lineHasContent(p.sections[sec][p.sections[sec].length - 1])){
+      p.sections[sec].pop();
+    }
+
+    // ✅ ensure minimum 1 card
+    if(p.sections[sec].length < MIN_LINES_PER_SECTION){
       p.sections[sec].push(newLine());
     }
   });
@@ -1847,8 +1871,9 @@ function nextNonBlankCardIndexAfter(currentIdx){
 }
 
 // Check project DATA (not DOM) so we can decide next section without rendering
-function lineHasContent(line){
+function lineHasContentData(line){
   if(!line || typeof line !== "object") return false;
+
   const lyr = String(line.lyrics || "").trim();
   if(lyr) return true;
 
@@ -1856,13 +1881,19 @@ function lineHasContent(line){
   for(const n of notes){
     if(String(n || "").trim()) return true;
   }
+
+  const beats = Array.isArray(line.beats) ? line.beats : [];
+  for(const b of beats){
+    if(String(b || "").trim()) return true;
+  }
+
   return false;
 }
 
 function firstContentLineIndexInSection(sec){
   const arr = (state.project && state.project.sections && state.project.sections[sec]) ? state.project.sections[sec] : [];
   for(let i=0;i<arr.length;i++){
-    if(lineHasContent(arr[i])) return i;
+    if(lineHasContentData(arr[i])) return i;
   }
   return null;
 }
@@ -2378,7 +2409,9 @@ Tabs + editor
 function ensureSectionArray(sec){
   if(sec === "Full") return [];
   if(!state.project.sections[sec]) state.project.sections[sec] = [];
-  while(state.project.sections[sec].length < DEFAULT_LINES_PER_SECTION){
+
+  // ✅ keep at least 1 card
+  while(state.project.sections[sec].length < MIN_LINES_PER_SECTION){
     state.project.sections[sec].push(newLine());
   }
   return state.project.sections[sec];
@@ -2822,6 +2855,37 @@ wrap.appendChild(previewBlock);
 
     const card = document.createElement("div");
     card.className = "card";
+    
+    // ✅ Delete button (top-right)
+    const delBtn = document.createElement("button");
+    delBtn.className = "cardDel";
+    delBtn.type = "button";
+    delBtn.textContent = "×";
+    delBtn.title = "Delete this card";
+
+    delBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // If it's the only card, clear it instead of deleting
+      if(arr.length <= 1){
+        if(!confirm("Clear this card?")) return;
+        arr[0] = newLine();
+      }else{
+        if(!confirm(`Delete card ${idx+1} from ${state.currentSection}?`)) return;
+        arr.splice(idx, 1);
+      }
+
+      upsertProject(state.project);
+      renderSheet();
+      updateFullIfVisible();
+      updateKeyFromAllNotes();
+      clearTick(); applyTick();
+      refreshDisplayedNoteCells();
+      refreshRhymesFromActive();
+    });
+
+    card.appendChild(delBtn);
 
     const top = document.createElement("div");
     top.className = "cardTop";
@@ -2829,32 +2893,7 @@ wrap.appendChild(previewBlock);
     const num = document.createElement("div");
     num.className = "cardNum";
     num.textContent = String(idx + 1);
-    num.title = "Long-press to delete this line";
-
-    let pressTimer = null;
-    const startPress = () => {
-      clearTimeout(pressTimer);
-      pressTimer = setTimeout(() => {
-        if(!confirm(`Delete line ${idx+1} from ${state.currentSection}?`)) return;
-        arr.splice(idx, 1);
-        while(arr.length < DEFAULT_LINES_PER_SECTION) arr.push(newLine());
-        upsertProject(state.project);
-        renderSheet();
-        updateFullIfVisible();
-        updateKeyFromAllNotes();
-        clearTick(); applyTick();
-        refreshDisplayedNoteCells();
-        refreshRhymesFromActive();
-      }, 650);
-    };
-    const endPress = () => clearTimeout(pressTimer);
-
-    num.addEventListener("touchstart", startPress, {passive:true});
-    num.addEventListener("touchend", endPress);
-    num.addEventListener("touchcancel", endPress);
-    num.addEventListener("mousedown", startPress);
-    num.addEventListener("mouseup", endPress);
-    num.addEventListener("mouseleave", endPress);
+    
 
     const syll = document.createElement("div");
     syll.className = "syllPill";
@@ -2980,8 +3019,7 @@ wrap.appendChild(previewBlock);
           arr.splice(idx+1, 0, nl);
         }
 
-        while(arr.length < DEFAULT_LINES_PER_SECTION) arr.push(newLine());
-
+        
         upsertProject(state.project);
         renderSheet();
         updateFullIfVisible();
