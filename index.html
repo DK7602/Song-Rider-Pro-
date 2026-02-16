@@ -1,4 +1,4 @@
-<!-- index.html (FULL REPLACE MAIN v45 - AutoScroll circle + Record circle fixed) -->
+<!-- index.html (FULL REPLACE MAIN v49 - parked horse size + Full Preview fills grey space) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -6,10 +6,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=59"/>
+  <link rel="manifest" href="./manifest.webmanifest?v=61"/>
 
   <style>
     :root{
+    --horseRunH: 74px;   /* running GIF size */
+--horseParkH: 120px;  /* parked horse size */
+
+
       --bg:#e9e9ea;
       --card:#ffffff;
       --ink:#151515;
@@ -28,13 +32,29 @@
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
 
-      --eyeX1: 18px;
-      --eyeX2: 30px;
-      --eyeY: 14px;
+      /* ✅ OFFLINE title font (no internet needed) */
+      --titleFont: Impact, Haettenschweiler, "Arial Black", "Franklin Gothic Heavy", var(--sans);
+
+      /* ✅ ONE source of truth for horse height (GIF + parked horse) */
+      --horseH: 130px;
+
+      /* ✅ gets set by the tiny script below */
+      --headerH: 160px;
     }
 
-    *{ box-sizing:border-box; }
-    body{ margin:0; font-family:var(--sans); background:var(--bg); color:var(--ink); }
+    *, *::before, *::after{ box-sizing:border-box; }
+
+    /* ✅ IMPORTANT: flex page so main can fill screen */
+    html, body{ height:100%; }
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background:var(--bg);
+      color:var(--ink);
+      display:flex;
+      flex-direction:column;
+      min-height:100vh;
+    }
 
     header{
       position:sticky; top:0; z-index:51;
@@ -42,43 +62,51 @@
       border-bottom:1px solid rgba(0,0,0,.08);
       padding:10px 12px 10px;
     }
-    .topRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .brand h1{ margin:0; font-size:20px; letter-spacing:.2px; }
-    .brand .sub{ margin-top:2px; font-size:12px; color:var(--muted); font-weight:900; }
 
-    .headshotFloat{
-      position:fixed; top:10px; right:10px;
-      width:56px; height:56px;
-      z-index:999;
+    /* ✅ HORSE RUNNER LAYER (fixed, pointer-events none) */
+    .horseWrap{
+      position:fixed;
+      left:0; right:0;
+      top:6px;
+     height:var(--horseRunH);
+      z-index:120;
       pointer-events:none;
+      overflow:visible;
     }
-    .headshotFloat img{
-      width:100%; height:100%;
-      object-fit:contain;
-      border-radius:999px;
-      opacity:.98;
-      filter: drop-shadow(0 10px 18px rgba(0,0,0,.20));
-      background:transparent;
-    }
-    .eye{
+    .horseWrap img{
       position:absolute;
-      width:10px; height:10px;
-      border-radius:999px;
-      background:rgba(255,0,0,.05);
-      opacity:0;
-      transition:opacity 60ms linear, box-shadow 60ms linear;
-      top: var(--eyeY);
+      top:0;
+     height:var(--horseRunH);
+      width:auto;
+      display:none;
+      will-change:transform;
+      filter: drop-shadow(0 10px 18px rgba(0,0,0,.18));
     }
-    .eye.left{ left: var(--eyeX1); }
-    .eye.right{ left: var(--eyeX2); }
-    .headshotFloat.blink .eye{
-      opacity:1;
-      background:rgba(255,0,0,.90);
-      box-shadow: 0 0 14px rgba(255,0,0,.85);
+
+    @keyframes horseRunRight{
+      from{ transform: translateX(-180px); }
+      to{ transform: translateX(calc(100vw + 180px)); }
+    }
+    @keyframes horseRunLeft{
+      from{ transform: translateX(calc(100vw + 180px)); }
+      to{ transform: translateX(-180px); }
+    }
+
+    .horseRunRight{
+      left:0;
+      animation-name: horseRunRight;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+    }
+    .horseRunLeft{
+      left:0;
+      animation-name: horseRunLeft;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
     }
 
     .panel{
-      margin-top:10px;
+      margin-top:0;
       background:var(--card);
       border-radius:var(--radius);
       box-shadow:var(--shadow);
@@ -86,14 +114,50 @@
       overflow:hidden;
     }
     .panelTop{
+       position:relative;
       padding:10px 12px;
       border-bottom:1px solid rgba(0,0,0,.06);
       display:flex; align-items:center; justify-content:space-between; gap:10px;
     }
+
+    /* ✅ OFFLINE TITLE STYLE + MULTI-COLOR OUTLINE */
     .panelTop .left{
-      font-weight:1100; font-size:12px; letter-spacing:.3px;
-      color:#111;
+      font-family: var(--titleFont);
+      font-weight: 900;
+      font-size: 24px;
+      letter-spacing: 1.0px;
+      line-height: 1;
+      display:flex;
+      align-items:baseline;
+      gap:6px;
+      text-transform: uppercase;
     }
+
+    .panelTop .left span{
+      text-shadow:
+        -1px  0   var(--noteBlue),
+         1px  0   var(--lyricPink),
+         0    1px var(--backbeatGreen),
+         0   -1px var(--backbeatGreen),
+         0    2px rgba(0,0,0,.10);
+    }
+
+    .srp-pink{ color: var(--lyricPink); }
+    .srp-blue{ color: var(--noteBlue); }
+    .srp-green{ color: var(--backbeatGreen); }
+
+    /* ✅ Parked horse: same height as GIF horse */
+ #horseParked{
+  position:absolute;
+  right:90px;
+  top:-15px;              /* stays in title row */
+  height:var(--horseParkH);
+  width:auto;
+  display:block;
+  pointer-events:none;
+  filter:drop-shadow(0 6px 12px rgba(0,0,0,.10));
+}
+
 
     .miniBar{ display:none; padding:10px 12px; border-bottom:1px solid rgba(0,0,0,.06); }
     .miniBar.show{ display:block; }
@@ -112,7 +176,7 @@
     .row.nowrap{
       flex-wrap:nowrap;
       overflow-x:hidden;
-      gap:6px; /* ✅ tighter so right-side buttons fit */
+      gap:6px;
     }
 
     .pill{
@@ -219,7 +283,6 @@
       line-height:1;
     }
 
-    /* ✅ AutoScroll is now a circle (same behavior as before) */
     .iconCircle.scrollCircle{
       background:#111;
       border-color:#111;
@@ -233,65 +296,54 @@
       color:#fff;
     }
 
-  /* ✅ Record circle: ● when idle, ■ when recording */
-.iconCircle.recCircle{
-  background: var(--dangerRed);
-  border-color: var(--dangerRed);
-  position:relative;
+    .iconCircle.recCircle{
+      background: var(--dangerRed);
+      border-color: var(--dangerRed);
+      position:relative;
+      font-size:0;
+      color:transparent;
+      overflow:hidden;
+      text-indent:-9999px;
+    }
+    .iconCircle.recCircle::before{
+      content:"●";
+      font-size:16px;
+      color:#fff;
+      line-height:1;
+      text-indent:0;
+    }
+    .iconCircle.recCircle.recording::before{
+      content:"■";
+      font-size:15px;
+    }
 
-  /* ✅ kills any leftover text like "Record" */
-  font-size:0;
-  color:transparent;
-  overflow:hidden;
-  text-indent:-9999px;
-}
-.iconCircle.recCircle::before{
-  content:"●";
-  font-size:16px;          /* visible symbol size */
-  color:#fff;
-  line-height:1;
-  text-indent:0;
-}
-.iconCircle.recCircle.recording::before{
-  content:"■";
-  font-size:15px;
-}
+    .tabs{ display:none; }
 
-
-    .tabs{
+    /* ✅ main MUST be flex:1 so it fills below header */
+    main{
+      padding:12px 12px 110px;
+      max-width:1100px;
+      margin:0 auto;
+      width:100%;
+      flex:1;
       display:flex;
-      gap:8px;
-      flex-wrap:nowrap;
-      overflow-x:auto;
-      -webkit-overflow-scrolling: touch;
-      margin:12px 0 10px;
-      padding-bottom:2px;
+      min-height:0;
     }
-    .tabs.hidden{ display:none; }
-    .tab{
-      padding:10px 12px;
-      border-radius:999px;
-      border:1px solid rgba(0,0,0,.12);
-      background:#fff;
-      cursor:pointer;
-      user-select:none;
-      font-weight:1100;
-      font-size:13px;
-      flex:0 0 auto;
-      white-space:nowrap;
-    }
-    .tab.active{ background:#111; color:#fff; border-color:#111; }
 
-    main{ padding:12px 12px 110px; max-width:1100px; margin:0 auto; }
-
+    /* ✅ sheet fills remaining viewport height */
     .sheet{
       background:var(--card);
       border-radius:var(--radius);
       box-shadow:var(--shadow);
       border:1px solid rgba(0,0,0,.06);
       overflow:hidden;
-      min-height:220px;
+
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      min-height:calc(100vh - var(--headerH) - 24px);
     }
+
     .sheetHeader{
       padding:10px 12px;
       border-bottom:1px solid rgba(0,0,0,.06);
@@ -308,12 +360,21 @@
       flex-wrap:wrap;
     }
 
+    /* ✅ sheetBody must stretch for Full view */
+    #sheetBody{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+
     .cards{
       padding:0 12px 14px;
       display:flex;
       flex-direction:column;
       gap:12px;
     }
+
     .card{
       border:1px solid rgba(0,0,0,.10);
       border-radius:14px;
@@ -418,15 +479,28 @@
       outline: none;
     }
 
-    .fullBoxWrap{ padding:12px; display:flex; flex-direction:column; gap:10px; }
-    .fullLabel{
-      font-size:12px;
-      font-weight:1000;
-      color:#333;
+    /* ✅ FULL PAGE layout: make Preview eat remaining space */
+    .fullBoxWrap{
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      flex:1;
+      min-height:0;
     }
+
+    .fullPreviewBlock{
+      margin-top:auto;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      flex:1;
+      min-height:0;
+    }
+
     textarea.fullBox{
       width:100%;
-      min-height:22vh;
+      min-height:18vh;  /* still usable */
       padding:12px;
       border-radius:14px;
       border:1px solid rgba(0,0,0,.12);
@@ -439,9 +513,11 @@
       word-break:break-word;
       overflow-wrap:anywhere;
     }
+
     textarea.fullPreview{
       width:100%;
-      min-height:22vh;
+      flex:1;          /* ✅ THIS is the “fill the grey space” part */
+      min-height:0;    /* ✅ REQUIRED for flex children */
       padding:12px;
       border-radius:14px;
       border:1px solid rgba(0,0,0,.12);
@@ -520,24 +596,26 @@
 </head>
 
 <body>
-  <div class="headshotFloat" id="headshotWrap">
-    <img id="headshotImg" src="./headshot.png?v=59" alt="Headshot"/>
-    <div class="eye left"></div>
-    <div class="eye right"></div>
+  <!-- ✅ Horse GIFs -->
+  <div class="horseWrap" id="horseWrap" aria-hidden="true">
+    <img id="horseRight" src="./Horserunsright.gif?v=61" alt="Horse runs right"/>
+    <img id="horseLeft"  src="./Horserunsleft.gif?v=61"  alt="Horse runs left"/>
   </div>
 
   <header>
-    <div class="topRow">
-      <div class="brand">
-        <h1>Song Rider Pro</h1>
-        <div class="sub">Chords/notes • timing • lyrics • sections</div>
-      </div>
-      <div style="width:56px;height:56px;"></div>
-    </div>
-
     <div class="panel">
       <div class="panelTop">
-        <div class="left">PROJECTS • CONTROLS • DRUMS • RECORDINGS</div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="left" aria-label="Song Rider Pro">
+            <span class="srp-pink">Song</span>
+            <span class="srp-blue">Rider</span>
+            <span class="srp-green">Pro</span>
+          </div>
+
+          <!-- ✅ Parked horse (size controlled by #horseParked CSS) -->
+          <img id="horseParked" src="./horse-parked.png" alt="Horse"/>
+        </div>
+
         <button class="btn secondary" id="togglePanelBtn">Hide</button>
       </div>
 
@@ -560,7 +638,7 @@
           <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—"/></div>
         </div>
 
-       <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
+        <div class="row" style="border-top:1px solid rgba(0,0,0,.06);">
           <button class="pill" id="instAcoustic">Acoustic</button>
           <button class="pill" id="instElectric">Electric</button>
           <button class="pill" id="instPiano">Piano</button>
@@ -572,21 +650,16 @@
           <button class="exportBtn" id="exportBtn" title="Export (.txt + printable colored .html)">Export</button>
         </div>
 
-      <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
+        <div class="row nowrap" style="border-top:1px solid rgba(0,0,0,.06);">
           <button class="pill" id="drumRock">Rock</button>
           <button class="pill" id="drumHardRock">Hard Rock</button>
           <button class="pill" id="drumPop">Pop</button>
           <button class="pill" id="drumRap">Rap</button>
 
-          <!-- ✅ AutoScroll circle -->
           <button class="iconCircle scrollCircle" id="autoPlayBtn" title="AutoScroll">⇅</button>
-
-          <!-- ✅ Record (moved LEFT so it never gets clipped) -->
           <button class="iconCircle recCircle" id="recordBtn" title="Record"></button>
-
-          <!-- ✅ Upload/Stop (same button) -->
           <button class="iconCircle" id="uploadAudioBtn" title="Upload audio (tap). Stop sync (when playing).">⬆️</button>
-
+          <button class="iconCircle" id="beat1Btn" title="Mark Beat 1 now (while MP3 plays)">1</button>
         </div>
 
         <div class="row" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;border-top:1px solid rgba(0,0,0,.06);">
@@ -607,7 +680,6 @@
           </div>
           <div id="recordingsList" style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;width:100%;"></div>
         </div>
-
       </div>
     </div>
 
@@ -636,6 +708,23 @@
     </div>
   </div>
 
-  <script src="./app.js?v=59"></script>
+  <!-- ✅ tiny helper: measure sticky header height into CSS var -->
+  <script>
+    (function(){
+      function syncHeaderH(){
+        var h = document.querySelector("header");
+        if(!h) return;
+        var r = h.getBoundingClientRect();
+        var px = Math.ceil(r.height || 0);
+        document.documentElement.style.setProperty("--headerH", px + "px");
+      }
+      window.addEventListener("load", syncHeaderH);
+      window.addEventListener("resize", syncHeaderH);
+      setTimeout(syncHeaderH, 60);
+      setTimeout(syncHeaderH, 300);
+    })();
+  </script>
+
+  <script src="./app.js?v=61"></script>
 </body>
-</html>
+  </html>
