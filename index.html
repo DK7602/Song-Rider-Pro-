@@ -360,20 +360,25 @@
       flex-wrap:wrap;
     }
 
-    /* ✅ sheetBody must stretch for Full view */
-    #sheetBody{
-      flex:1;
-      display:flex;
-      flex-direction:column;
-      min-height:0;
-    }
+   /* ✅ sheetBody must stretch AND SCROLL */
+#sheetBody{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+
+  overflow:auto;                 /* ✅ THIS fixes “frozen cards” */
+  -webkit-overflow-scrolling:touch;
+}
+
 
     .cards{
-      padding:0 12px 14px;
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-    }
+  padding:0 12px 140px;  /* ✅ more room at bottom */
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
 
     .card{
       border:1px solid rgba(0,0,0,.10);
@@ -727,4 +732,4 @@
 
   <script src="./app.js?v=61"></script>
 </body>
-  </html>
+</html>
