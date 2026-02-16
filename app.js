@@ -43,7 +43,9 @@ function escapeHtml(s){
 DOM
 ***********************/
 const el = {
-  headshotWrap: $("headshotWrap"),
+horseWrap: $("horseWrap"),
+horseRight: $("horseRight"),
+horseLeft: $("horseLeft"),
 
    uploadAudioBtn: $("uploadAudioBtn"),
   beat1Btn: $("beat1Btn"),
@@ -377,12 +379,79 @@ lastAutoBar: -1,
 };
 
 /***********************
-Headshot blink
+HORSE RUNNER (BPM-synced)
+- Runs across screen once per BAR (every 8 eighth-notes)
+- Alternates direction each bar
+- Triggers for: drums, instrument, MP3 sync
 ***********************/
-function doBlink(){
-  if(!el.headshotWrap) return;
-  el.headshotWrap.classList.add("blink");
-  setTimeout(() => el.headshotWrap.classList.remove("blink"), 80);
+state.horseDir = 1;        // 1 = right, -1 = left
+state.lastHorseBar = -1;   // prevents double-fires
+
+function stopHorse(){
+  if(!el.horseRight || !el.horseLeft) return;
+  [el.horseRight, el.horseLeft].forEach(img => {
+    try{
+      img.style.display = "none";
+      img.classList.remove("horseRunRight","horseRunLeft");
+      img.style.animationDuration = "";
+      img.style.animation = "none";
+      // force reset
+      void img.offsetHeight;
+      img.style.animation = "";
+    }catch{}
+  });
+  const parked = document.getElementById("horseParked");
+if(parked) parked.style.visibility = "visible";
+}
+
+function horseShouldRun(){
+  // “as the mp3 / instrument / drums play…”
+  return !!(state.drumsOn || state.instrumentOn || state.audioSyncOn);
+}
+
+function triggerHorseRun(){
+  const parked = document.getElementById("horseParked");
+if(parked) parked.style.visibility = "hidden";
+
+  if(!horseShouldRun()) return;
+  if(!el.horseRight || !el.horseLeft) return;
+
+  const bpm = clamp(state.bpm || 95, 40, 220);
+  const barMs = Math.round((240000 / bpm)); // 4 beats per bar
+
+  // alternate direction each bar
+  state.horseDir = (state.horseDir === 1) ? -1 : 1;
+
+  const img = (state.horseDir === 1) ? el.horseRight : el.horseLeft;
+  const cls = (state.horseDir === 1) ? "horseRunRight" : "horseRunLeft";
+
+  // hide the other one
+  const other = (img === el.horseRight) ? el.horseLeft : el.horseRight;
+  try{
+    other.style.display = "none";
+    other.classList.remove("horseRunRight","horseRunLeft");
+    other.style.animationDuration = "";
+  }catch{}
+
+  // restart animation cleanly
+  try{
+    img.style.display = "block";
+    img.classList.remove("horseRunRight","horseRunLeft");
+    img.style.animationDuration = "0ms";
+    img.style.animation = "none";
+    void img.offsetHeight; // reflow
+    img.style.animation = "";
+    img.style.animationDuration = barMs + "ms";
+    img.classList.add(cls);
+
+    img.onanimationend = () => {
+      try{
+        img.style.display = "none";
+        img.classList.remove("horseRunRight","horseRunLeft");
+        img.style.animationDuration = "";
+      }catch{}
+    };
+  }catch{}
 }
 
 /***********************
@@ -1818,6 +1887,9 @@ function stopBeatClock(){
     clearInterval(state.beatTimer);
     state.beatTimer = null;
   }
+if(!state.audioSyncOn) stopHorse();
+
+
   if(!state.audioSyncOn) clearTick();
 }
 
@@ -1833,6 +1905,8 @@ AUDIO SYNC CLOCK (MP3 is master)
 ***********************/
 function audioSyncStopInternal(){
   state.audioSyncOn = false;
+  stopHorse();
+
   // ✅ disconnect MP3-from-WebAudio routing
   try{
     if(state.audioSyncSource) state.audioSyncSource.disconnect();
@@ -1866,6 +1940,7 @@ function audioSyncStopInternal(){
 
   clearTick();
   if(el.nowPlaying) el.nowPlaying.textContent = "—";
+updateAudioButtonsUI();
 
   // if nothing else running, stop internal clock too
   updateClock();
@@ -1891,6 +1966,14 @@ function audioSyncFrame(){
   if(tick8 !== state.lastAudioTick8){
     state.lastAudioTick8 = tick8;
     state.tick8 = Math.max(0, tick8);
+// Horse runs once per BAR during MP3 sync
+if(state.tick8 % 8 === 0){
+  const bar = Math.floor(state.tick8 / 8);
+  if(bar !== state.lastHorseBar){
+    state.lastHorseBar = bar;
+    triggerHorseRun();
+  }
+}
 
     // ✅ same UI pipeline as your internal clock
     try{
@@ -1991,7 +2074,14 @@ function startBeatClock(){
     clearTick();
     applyTick();
 
-    if(state.drumsOn && state.tick8 % 2 === 0) doBlink();
+    // Horse runs once per BAR
+if(state.tick8 % 8 === 0){
+  const bar = Math.floor(state.tick8 / 8);
+  if(bar !== state.lastHorseBar){
+    state.lastHorseBar = bar;
+    triggerHorseRun();
+  }
+}
 
     playInstrumentStep();
 
@@ -2594,8 +2684,12 @@ function renderSheet(){
 
     wrap.appendChild(label1);
     wrap.appendChild(ta);
-    wrap.appendChild(label2);
-    wrap.appendChild(preview);
+   const previewBlock = document.createElement("div");
+previewBlock.className = "fullPreviewBlock";
+previewBlock.appendChild(label2);
+previewBlock.appendChild(preview);
+
+wrap.appendChild(previewBlock);
 
     el.sheetBody.appendChild(wrap);
     return;
@@ -3017,6 +3111,7 @@ async function startAudioSyncFromRec(rec){
   state.audioSyncOn = true;
   state.audioSyncRecId = rec.id;
   state.audioSyncOffsetSec = Number(rec.offsetSec || 0) || 0;
+updateAudioButtonsUI();
 
   const url = URL.createObjectURL(rec.blob);
   state.audioSyncUrl = url;
@@ -3379,7 +3474,21 @@ function toggleRhymeDock(show){
 /***********************
 Render all
 ***********************/
-function renderAll(){
+function updateAudioButtonsUI(){
+  // ✅ Beat 1 button should ONLY show while MP3 sync is active
+  if(el.beat1Btn){
+    el.beat1Btn.style.display = state.audioSyncOn ? "inline-flex" : "none";
+    // optional: change label so it’s not a confusing “1”
+    if(state.audioSyncOn) el.beat1Btn.textContent = "Beat 1";
+  }
+
+  // ✅ Upload button becomes STOP while syncing
+  if(el.uploadAudioBtn){
+   el.uploadAudioBtn.textContent = state.audioSyncOn ? "⏹" : "⬆️";
+
+  }
+}
+  function renderAll(){
   renderProjectsDropdown();
   renderTabs();
   renderSheet();
@@ -3388,11 +3497,14 @@ function renderAll(){
   renderDrumUI();
   updateKeyFromAllNotes();
   setRecordUI();
+  
   clearTick();
   applyTick();
   updateFullIfVisible();
   refreshRhymesFromActive();
   refreshDisplayedNoteCells();
+  
+  updateAudioButtonsUI();
 }
 /***********************
 SECTION paging (swipe left/right)
@@ -3415,7 +3527,7 @@ function goToSection(sec){
   state.playCardIndex = null;
   state.lastAutoBar = -1;
 
-  renderTabs();     // now no-op but keeps code consistent
+  renderTabs();
   renderSheet();
   clearTick();
   applyTick();
@@ -3426,12 +3538,8 @@ function goToSection(sec){
   refreshDisplayedNoteCells();
   updateFullIfVisible();
 
-  // Optional: snap view so the sheet header is visible (feels like “page change”)
-  try{
-    window.scrollTo({ top: 0, behavior: "auto" });
-  }catch{
-    window.scrollTo(0, 0);
-  }
+  try{ window.scrollTo({ top: 0, behavior: "auto" }); }
+  catch{ window.scrollTo(0, 0); }
 }
 
 function nextSection(){
@@ -3453,17 +3561,17 @@ function installSectionSwipe(){
   let sx=0, sy=0, t0=0, tracking=false, locked=false;
   let lastFire = 0;
 
-  const MIN_X = 60;          // min horizontal travel
-  const MAX_MS = 800;        // ignore super slow drags
-  const DOMINANCE = 1.35;    // dx must dominate dy
+  const MIN_X = 60;
+  const MAX_MS = 800;
+  const DOMINANCE = 1.35;
 
   function onStart(e){
-    if(state.rhymeDock && el.rhymeDock && el.rhymeDock.style.display === "block") return;
+    if(el.rhymeDock && el.rhymeDock.style.display === "block") return;
 
     const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
     const target = e.target;
 
-    // ✅ don’t page-switch when gesture starts in a control (typing/editing safety)
+    // don’t page-switch when starting on controls or inside the panel
     if(isEditableEl(target) || (target && target.closest && target.closest("#panelBody"))) return;
 
     sx = pt.clientX; sy = pt.clientY; t0 = performance.now();
@@ -3478,12 +3586,10 @@ function installSectionSwipe(){
     const dx = pt.clientX - sx;
     const dy = pt.clientY - sy;
 
-    // Once we see a clear horizontal intention, lock it
     if(!locked){
       if(Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * DOMINANCE){
         locked = true;
       }else if(Math.abs(dy) > 18 && Math.abs(dy) > Math.abs(dx)){
-        // Vertical scroll intent → abort
         tracking = false;
         return;
       }
@@ -3503,16 +3609,14 @@ function installSectionSwipe(){
     if(Math.abs(dx) < MIN_X) return;
     if(Math.abs(dx) < Math.abs(dy) * DOMINANCE) return;
 
-    // Cooldown so one swipe doesn’t fire twice
     const nowMs = performance.now();
     if(nowMs - lastFire < 250) return;
     lastFire = nowMs;
 
-    if(dx < 0) nextSection();  // swipe left → next page
-    else prevSection();        // swipe right → previous page
+    if(dx < 0) nextSection();
+    else prevSection();
   }
 
-  // Touch + pointer (covers most devices)
   document.addEventListener("touchstart", onStart, { passive:true });
   document.addEventListener("touchmove", onMove, { passive:true });
   document.addEventListener("touchend", onEnd, { passive:true });
@@ -3521,11 +3625,11 @@ function installSectionSwipe(){
   document.addEventListener("pointermove", onMove, { passive:true });
   document.addEventListener("pointerup", onEnd, { passive:true });
 
-  // Desktop convenience: arrow keys (when not typing)
+  // Desktop arrow keys (when not typing)
   document.addEventListener("keydown", (e)=>{
     if(isEditableEl(document.activeElement)) return;
-    if(e.key === "ArrowLeft"){ prevSection(); }
-    if(e.key === "ArrowRight"){ nextSection(); }
+    if(e.key === "ArrowLeft") prevSection();
+    if(e.key === "ArrowRight") nextSection();
   });
 }
 
