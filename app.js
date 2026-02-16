@@ -466,9 +466,10 @@ function clearTick(){
 
 // During MP3 sync: only show tick when AutoScroll is ON
 function shouldTickRun(){
-  if(state.audioSyncOn) return !!state.autoScrollOn;
+  if(state.audioSyncOn) return true; // ✅ show tick during MP3 sync too
   return !!(state.drumsOn || state.instrumentOn || state.autoScrollOn);
 }
+
 
 function getVisibleCards(){
   const cards = getCards();
@@ -497,11 +498,19 @@ function applyTick(){
 
   const touched = [];
 
-  // If AutoScroll ON: tick only the playback card (keeps perf good)
-  // If AutoScroll OFF: tick ALL visible cards (fixes “only one line” complaint)
-  const cards = state.autoScrollOn
-    ? [getPlaybackCard() || getCardAtPlayLine() || getNearestVisibleCard()].filter(Boolean)
-    : getVisibleCards();
+  // ✅ Always guarantee at least 1 card to tick
+  let cards = [];
+  if(state.autoScrollOn){
+    const one = getPlaybackCard() || getCardAtPlayLine() || getNearestVisibleCard();
+    if(one) cards = [one];
+  }
+  if(!cards.length){
+    cards = getVisibleCards();
+  }
+  if(!cards.length){
+    const all = getCards();
+    if(all.length) cards = [all[0]];
+  }
 
   for(const card of cards){
     const notes = card.querySelectorAll(".noteCell");
@@ -519,6 +528,7 @@ function applyTick(){
 
   state.lastTickEls = touched;
 }
+
 /***********************
 Audio (routed through master bus)
 ***********************/
@@ -1467,10 +1477,67 @@ function refreshDisplayedNoteCells(){
 }
 
 /***********************
-ACTIVE CARD selection
+ACTIVE CARD selection (scroll-container aware)
 ***********************/
+// ✅ Scroll container support (sheetBody scrolls, not window)
+function getScrollContainer(){
+  return el.sheetBody || document.scrollingElement || document.documentElement;
+}
 
+// “play line” = top of the scrollable sheet area (not the sticky header)
+function getPlayLineY(){
+  const sb = el.sheetBody;
+  if(!sb) return getHeaderBottomY();
+  const r = sb.getBoundingClientRect();
+  return r.top + 12; // a little padding inside the sheet
+}
+
+function scrollToTopOfSheet(){
+  const sb = el.sheetBody;
+  if(sb){
+    sb.scrollTop = 0;
+    return;
+  }
+  try{ window.scrollTo({ top:0, behavior:"auto" }); }
+  catch{ window.scrollTo(0,0); }
+}
+/***********************
+Playback card helper (used by AutoScroll + tick + instrument)
+***********************/
+function getPlaybackCard(){
+  const cards = getCards();
+  if(!cards.length) return null;
+
+  if(state.playCardIndex === null || state.playCardIndex === undefined) return null;
+
+  const i = clamp(state.playCardIndex|0, 0, cards.length - 1);
+  return cards[i] || null;
+}
+
+// Returns the scrolling viewport element for cards (your #sheetBody)
+function getScrollViewport(){
+  // #sheetBody is now the scroll container (overflow:auto)
+  if(el.sheetBody){
+    try{
+      const cs = getComputedStyle(el.sheetBody);
+      if(cs && cs.overflowY && cs.overflowY !== "visible") return el.sheetBody;
+    }catch{}
+    // even if computedStyle fails, still use it
+    return el.sheetBody;
+  }
+  return null;
+}
+
+// Where the "play line" should be (top of the card viewport)
 function getHeaderBottomY(){
+  const vp = getScrollViewport();
+  if(vp){
+    const r = vp.getBoundingClientRect();
+    // play line = just inside the card scroller (not the sticky header)
+    return Math.round(r.top + 10);
+  }
+
+  // fallback: old behavior (window scroll)
   const hdr = document.querySelector("header");
   if(!hdr) return 86;
   const r = hdr.getBoundingClientRect();
@@ -1481,17 +1548,63 @@ function getCards(){
   return Array.from(el.sheetBody.querySelectorAll(".card"));
 }
 
+function getVisibleCards(){
+  const cards = getCards();
+  if(cards.length === 0) return [];
+
+  const vp = getScrollViewport();
+  if(!vp){
+    // fallback: window-based visibility
+    const topLine = getHeaderBottomY() - 18;
+    const bottomLine = window.innerHeight + 18;
+
+    const vis = [];
+    for(const c of cards){
+      const r = c.getBoundingClientRect();
+      if(r.bottom < topLine) continue;
+      if(r.top > bottomLine) continue;
+      vis.push(c);
+    }
+    return vis.length ? vis : [cards[0]];
+  }
+
+  // container-based visibility
+  const vpr = vp.getBoundingClientRect();
+  const topLine = vpr.top - 6;
+  const bottomLine = vpr.bottom + 6;
+
+  const vis = [];
+  for(const c of cards){
+    const r = c.getBoundingClientRect();
+    if(r.bottom < topLine) continue;
+    if(r.top > bottomLine) continue;
+    vis.push(c);
+  }
+  return vis.length ? vis : [cards[0]];
+}
+
 function getNearestVisibleCard(){
   const cards = getCards();
   if(cards.length === 0) return null;
 
-  const yLine = getHeaderBottomY();
+  const yLine = getPlayLineY();
+  const sb = el.sheetBody;
+  const sbRect = sb ? sb.getBoundingClientRect() : null;
+
   let best = null;
   let bestDist = Infinity;
 
   for(const c of cards){
     const r = c.getBoundingClientRect();
-    if(r.bottom < yLine || r.top > window.innerHeight) continue;
+
+    // only consider cards visible inside the sheetBody viewport
+    if(sbRect){
+      if(r.bottom < sbRect.top) continue;
+      if(r.top > sbRect.bottom) continue;
+    }else{
+      if(r.bottom < yLine || r.top > window.innerHeight) continue;
+    }
+
     const dist = Math.abs(r.top - yLine);
     if(dist < bestDist){
       bestDist = dist;
@@ -1501,15 +1614,15 @@ function getNearestVisibleCard(){
   return best || cards[0];
 }
 
+
 /**
  * Choose the card the play-line is actually on.
- * Adds tolerance so we DON'T accidentally pick card #2 when card #1 is slightly under header.
  */
 function getCardAtPlayLine(){
   const cards = getCards();
   if(cards.length === 0) return null;
 
-  const yLine = getHeaderBottomY();
+  const yLine = getPlayLineY();
   const tol = 24;
 
   for(const c of cards){
@@ -1520,35 +1633,38 @@ function getCardAtPlayLine(){
   return getNearestVisibleCard() || cards[0];
 }
 
-/**
- * The card that playback should use.
- * - If auto-scroll ON: lock to playCardIndex
- * - If auto-scroll OFF: follow lastActiveCardEl
- */
-function getPlaybackCard(){
-  if(state.currentSection === "Full") return null;
 
-  const cards = getCards();
-  if(cards.length === 0) return null;
+function scrollCardIntoView(card){
+  if(!card) return;
 
-  if(state.autoScrollOn){
-    if(
-      state.playCardIndex === null ||
-      state.playCardIndex < 0 ||
-      state.playCardIndex >= cards.length
-    ){
-      const cur = getCardAtPlayLine() || cards[0];
-      state.playCardIndex = Math.max(0, cards.indexOf(cur));
-    }
-    return cards[state.playCardIndex] || cards[0];
+  const sb = el.sheetBody;
+
+  // If sheetBody is the scroller, scroll inside it (NOT window)
+  if(sb){
+    const sbRect = sb.getBoundingClientRect();
+    const r = card.getBoundingClientRect();
+
+    // how far the card is from the top of the scroll viewport
+    const delta = (r.top - sbRect.top);
+
+    // target = current scrollTop + delta - padding
+    const pad = 12;
+    const target = Math.max(0, Math.round(sb.scrollTop + delta - pad));
+
+    sb.scrollTop = target;
+    return;
   }
 
-  if(lastActiveCardEl && document.contains(lastActiveCardEl)){
-    return lastActiveCardEl;
-  }
-
-  return getNearestVisibleCard() || cards[0];
+  // fallback
+  const yLine = getHeaderBottomY();
+  const r = card.getBoundingClientRect();
+  const cardTopDoc = r.top + window.scrollY;
+  const targetY = Math.max(0, Math.round(cardTopDoc - yLine));
+  try{ window.scrollTo({ top: targetY, behavior:"auto" }); }
+  catch{ window.scrollTo(0, targetY); }
 }
+
+
 
 /***********************
 Tie utilities (across cards)
@@ -1767,26 +1883,6 @@ function switchToSectionForAuto(sec){
   refreshDisplayedNoteCells();
 }
 
-function scrollCardIntoView(card){
-  if(!card) return;
-
-  // scroll so the card sits just UNDER the header, not behind it
-  const yLine = getHeaderBottomY(); // already includes +8 padding
-  const r = card.getBoundingClientRect();
-
-  // where the card's top currently is in document space
-  const cardTopDoc = r.top + window.scrollY;
-
-  // target top = cardTopDoc - headerBottom
-  const targetY = Math.max(0, Math.round(cardTopDoc - yLine));
-
-  try{
-    window.scrollTo({ top: targetY, behavior: "auto" });
-  }catch{
-    window.scrollTo(0, targetY);
-  }
-}
-
 
 function autoAdvanceOnBar(){
   if(!state.autoScrollOn) return;
@@ -1993,6 +2089,7 @@ if(state.tick8 % 8 === 0){
   }
 
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
+
 }
 
 
@@ -2039,6 +2136,7 @@ async function markBeat1Now(){
 // ✅ Force immediate re-sync visual + tick baseline
 state.tick8 = 0;
 state.lastAudioTick8 = -1;
+state.lastHorseBar = -1; // ✅ reset horse bar lock
 clearTick();
 applyTick();
 
@@ -2062,9 +2160,11 @@ function startBeatClock(){
   const eighthMs = Math.round((60000 / bpm) / 2);
   state.eighthMs = eighthMs;
 
-  state.tick8 = 0;
-  state.lastAutoBar = -1;
-  clearTick();
+state.tick8 = 0;
+state.lastAutoBar = -1;
+state.lastHorseBar = -1; // ✅ reset so horse runs again
+clearTick();
+
 
  state.beatTimer = setInterval(() => {
   try{
@@ -2201,6 +2301,7 @@ function renderDrumUI(){
 
 function setAutoScroll(on){
   state.autoScrollOn = !!on;
+
   $("autoPlayBtn")?.classList.toggle("on", state.autoScrollOn);
   $("mScrollBtn")?.classList.toggle("on", state.autoScrollOn);
 
@@ -2209,6 +2310,9 @@ function setAutoScroll(on){
     if(state.currentSection === "Full"){
       switchToSectionForAuto("VERSE 1");
     }
+
+    // reset section-advance guard so the first bar advance is clean
+    state.lastAutoBar = -1;
 
     // Try to anchor to the current playline card
     const cards = getCards();
@@ -2226,17 +2330,26 @@ function setAutoScroll(on){
       const tgt = cards[state.playCardIndex];
       if(tgt && !cardIsBlank(tgt)) scrollCardIntoView(tgt);
     }else{
-    state.playCardIndex = null;
-    state.lastAutoBar = -1;
-
-    // If MP3 sync is playing, stop the highlight immediately when AutoScroll OFF
-    clearTick();
+      state.playCardIndex = null;
     }
+
+    // show an immediate tick (then the clock keeps it moving)
+    clearTick();
+    applyTick();
 
   }else{
     state.playCardIndex = null;
+
+    // If MP3 sync is playing, stop the highlight immediately when AutoScroll OFF
+    if(state.audioSyncOn){
+      clearTick();
+    }
   }
+
+  // ✅ THIS IS THE MISSING PIECE: start/stop the beat clock based on AutoScroll
+  updateClock();
 }
+
 
 
 function setPanelHidden(hidden){
@@ -3111,7 +3224,7 @@ async function startAudioSyncFromRec(rec){
   state.audioSyncOn = true;
   state.audioSyncRecId = rec.id;
   state.audioSyncOffsetSec = Number(rec.offsetSec || 0) || 0;
-updateAudioButtonsUI();
+  updateAudioButtonsUI();
 
   const url = URL.createObjectURL(rec.blob);
   state.audioSyncUrl = url;
@@ -3165,13 +3278,15 @@ updateAudioButtonsUI();
   }catch(e){
     alert("Couldn't play audio. (Browser blocked playback.) Tap a button again to allow audio.");
     state.audioSyncOn = false;
+    updateAudioButtonsUI();
     return;
   }
 
   state.lastAudioTick8 = -1;
+  state.lastHorseBar = -1; // ✅ reset for MP3 sync too
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
-}
 
+} // ✅ CLOSE startAudioSyncFromRec
 
 function pickBestMimeType(){
   const types = [
@@ -3265,7 +3380,6 @@ async function startRecording(){
   setRecordUI();
 }
 
-
 async function stopRecording(){
   if(!state.rec) return;
   try{ state.rec.stop(); }catch{}
@@ -3283,6 +3397,7 @@ async function toggleRecording(){
     alert("Recording failed. Make sure mic permission is allowed for this site.");
   }
 }
+
 
 /***********************
 Projects dropdown
@@ -3538,8 +3653,7 @@ function goToSection(sec){
   refreshDisplayedNoteCells();
   updateFullIfVisible();
 
-  try{ window.scrollTo({ top: 0, behavior: "auto" }); }
-  catch{ window.scrollTo(0, 0); }
+scrollToTopOfSheet();
 }
 
 function nextSection(){
