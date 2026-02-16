@@ -2770,26 +2770,9 @@ async function exportFullPreview(){
 Sheet rendering
 ***********************/
 function renderSheetActions(){
+  // ✅ no "+ Line" in the header anymore
   el.sheetActions.innerHTML = "";
   if(state.currentSection === "Full") return;
-
-  const addBtn = document.createElement("button");
-  addBtn.className = "btn secondary";
-  addBtn.textContent = "+ Line";
-  addBtn.title = "Add another card (line)";
-  addBtn.addEventListener("click", () => {
-    const arr = ensureSectionArray(state.currentSection);
-    arr.push(newLine());
-    upsertProject(state.project);
-    renderSheet();
-    updateFullIfVisible();
-    updateKeyFromAllNotes();
-    clearTick(); applyTick();
-    refreshDisplayedNoteCells();
-    refreshRhymesFromActive();
-  });
-
-  el.sheetActions.appendChild(addBtn);
 }
 
 function renderSheet(){
@@ -2853,39 +2836,73 @@ wrap.appendChild(previewBlock);
     line.notes = Array.from({length:8}, (_,i)=> String(line.notes[i] ?? "").trim());
     line.beats = Array.from({length:4}, (_,i)=> String(line.beats[i] ?? "").trim());
 
-    const card = document.createElement("div");
-    card.className = "card";
-    
-    // ✅ Delete button (top-right)
-    const delBtn = document.createElement("button");
-    delBtn.className = "cardDel";
-    delBtn.type = "button";
-    delBtn.textContent = "×";
-    delBtn.title = "Delete this card";
+const card = document.createElement("div");
+card.className = "card";
 
-    delBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+/* ✅ Add button (top-right, left of X) */
+const addBtn = document.createElement("button");
+addBtn.className = "cardAdd";
+addBtn.type = "button";
+addBtn.textContent = "+";
+addBtn.title = "Add a new card below";
 
-      // If it's the only card, clear it instead of deleting
-      if(arr.length <= 1){
-        if(!confirm("Clear this card?")) return;
-        arr[0] = newLine();
-      }else{
-        if(!confirm(`Delete card ${idx+1} from ${state.currentSection}?`)) return;
-        arr.splice(idx, 1);
-      }
+addBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
 
-      upsertProject(state.project);
-      renderSheet();
-      updateFullIfVisible();
-      updateKeyFromAllNotes();
-      clearTick(); applyTick();
-      refreshDisplayedNoteCells();
-      refreshRhymesFromActive();
-    });
+  const insertAt = idx + 1;
+  const nl = newLine();
+  arr.splice(insertAt, 0, nl);
 
-    card.appendChild(delBtn);
+  upsertProject(state.project);
+  renderSheet();
+  updateFullIfVisible();
+  updateKeyFromAllNotes();
+  clearTick(); applyTick();
+  refreshDisplayedNoteCells();
+  refreshRhymesFromActive();
+
+  // ✅ after re-render, scroll to the new card
+  setTimeout(() => {
+    const cards = getCards();
+    const target = cards[insertAt] || cards[cards.length - 1];
+    if(target) scrollCardIntoView(target);
+  }, 0);
+});
+
+card.appendChild(addBtn);
+
+/* ✅ Delete button (top-right) */
+const delBtn = document.createElement("button");
+delBtn.className = "cardDel";
+delBtn.type = "button";
+delBtn.textContent = "×";
+delBtn.title = "Delete this card";
+
+delBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  // If it's the only card, clear it instead of deleting
+  if(arr.length <= 1){
+    if(!confirm("Clear this card?")) return;
+    arr[0] = newLine();
+  }else{
+    if(!confirm(`Delete card ${idx+1} from ${state.currentSection}?`)) return;
+    arr.splice(idx, 1);
+  }
+
+  upsertProject(state.project);
+  renderSheet();
+  updateFullIfVisible();
+  updateKeyFromAllNotes();
+  clearTick(); applyTick();
+  refreshDisplayedNoteCells();
+  refreshRhymesFromActive();
+});
+
+card.appendChild(delBtn);
+
 
     const top = document.createElement("div");
     top.className = "cardTop";
