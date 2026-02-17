@@ -3552,6 +3552,114 @@ async function startAudioSyncFromRec(rec){
   state.audioSyncRaf = requestAnimationFrame(audioSyncFrame);
 
 } // ✅ CLOSE startAudioSyncFromRec
+/***********************
+MP3 AUTO-CONVERT (WebM/Opus -> MP3 using lamejs)
+- converts immediately after recording stops
+- stores MP3 blob into IndexedDB so in-app playback + download are MP3
+***********************/
+function hasLame(){
+  return !!(window.lamejs && window.lamejs.Mp3Encoder);
+}
+
+function blobToArrayBuffer(blob){
+  if(blob.arrayBuffer) return blob.arrayBuffer();
+  return new Response(blob).arrayBuffer();
+}
+
+// Decode audio blob (webm/ogg/wav/etc) -> { sampleRate, channels:[Float32Array,...] }
+async function decodeToPCM(blob){
+  const ctx = ensureCtx();
+  const ab = await blobToArrayBuffer(blob);
+
+  // Some browsers need a copy for decodeAudioData
+  const abCopy = ab.slice(0);
+
+  const audioBuf = await new Promise((resolve, reject) => {
+    try{
+      ctx.decodeAudioData(
+        abCopy,
+        (buf)=>resolve(buf),
+        (err)=>reject(err || new Error("decodeAudioData failed"))
+      );
+    }catch(e){
+      reject(e);
+    }
+  });
+
+  const ch = audioBuf.numberOfChannels || 1;
+  const channels = [];
+  for(let i=0;i<ch;i++){
+    channels.push(audioBuf.getChannelData(i));
+  }
+  return { sampleRate: audioBuf.sampleRate, channels };
+}
+
+function floatTo16BitPCM(float32){
+  const out = new Int16Array(float32.length);
+  for(let i=0;i<float32.length;i++){
+    let s = float32[i];
+    s = Math.max(-1, Math.min(1, s));
+    out[i] = (s < 0) ? (s * 0x8000) : (s * 0x7FFF);
+  }
+  return out;
+}
+
+// Encode PCM -> MP3 Blob
+async function encodeMp3FromBlob(inputBlob, opts={}){
+  const kbps = opts.kbps || 128; // good default
+  const { sampleRate, channels } = await decodeToPCM(inputBlob);
+
+  const numCh = Math.min(2, channels.length || 1);
+  const left = channels[0];
+  const right = (numCh > 1) ? channels[1] : null;
+
+  // If sampleRate is weird, lamejs still works fine
+  const enc = new window.lamejs.Mp3Encoder(numCh, sampleRate, kbps);
+
+  const mp3Chunks = [];
+  const blockSize = 1152;
+
+  let i = 0;
+  while(i < left.length){
+    const l = floatTo16BitPCM(left.subarray(i, i + blockSize));
+    let mp3buf;
+
+    if(numCh === 2 && right){
+      const r = floatTo16BitPCM(right.subarray(i, i + blockSize));
+      mp3buf = enc.encodeBuffer(l, r);
+    }else{
+      mp3buf = enc.encodeBuffer(l);
+    }
+
+    if(mp3buf && mp3buf.length){
+      mp3Chunks.push(new Uint8Array(mp3buf));
+    }
+    i += blockSize;
+  }
+
+  const end = enc.flush();
+  if(end && end.length){
+    mp3Chunks.push(new Uint8Array(end));
+  }
+
+  return new Blob(mp3Chunks, { type: "audio/mpeg" });
+}
+
+// High-level: try convert -> if fails, return original blob
+async function convertRecordingBlobToMp3(blob){
+  // If lame isn't loaded, we cannot encode
+  if(!hasLame()) return blob;
+
+  try{
+    const mp3 = await encodeMp3FromBlob(blob, { kbps: 160 });
+    // sanity check (tiny files can happen if decode fails)
+    if(mp3 && mp3.size > 800) return mp3;
+    return blob;
+  }catch(e){
+    console.warn("MP3 convert failed, keeping original:", e);
+    return blob;
+  }
+}
 
 function pickBestMimeType(){
   const types = [
@@ -3591,10 +3699,18 @@ async function startRecording(){
   state.recMicSource = micSource;
 
   const micGain = ctx.createGain();
-  micGain.gain.value = 1.0;
+  micGain.gain.value = 0.62;
+const micCompressor = ctx.createDynamicsCompressor();
+micCompressor.threshold.value = -20;  // start compressing earlier
+micCompressor.knee.value = 20;
+micCompressor.ratio.value = 4.5;
+micCompressor.attack.value = 0.003;
+micCompressor.release.value = 0.25;
 
-  micSource.connect(micGain);
-  micGain.connect(state.recMix);
+ micSource.connect(micGain);
+micGain.connect(micCompressor);
+micCompressor.connect(state.recMix);
+
 
   const options = {};
   const mt = pickBestMimeType();
@@ -3618,21 +3734,28 @@ async function startRecording(){
       }
     }catch{}
 
-    const mime = (mt && mt.includes("ogg")) ? "audio/ogg" : "audio/webm";
-    const blob = new Blob(state.recChunks, { type: mime });
+  const mime = (mt && mt.includes("ogg")) ? "audio/ogg" : "audio/webm";
+const rawBlob = new Blob(state.recChunks, { type: mime });
 
-    const item = {
-      id: uuid(),
-      projectId: state.project?.id || "",
-      kind: "mix",
-      createdAt: now(),
-      title: "",
-      blob,
-      offsetSec: 0
-    };
+// ✅ auto convert to MP3 immediately (and store/play MP3)
+const finalBlob = await convertRecordingBlobToMp3(rawBlob);
 
-    await dbPut(item);
-    await renderRecordings();
+// Optional: make it obvious if conversion failed
+const convertedOk = (finalBlob && String(finalBlob.type).includes("mpeg"));
+
+const item = {
+  id: uuid(),
+  projectId: state.project?.id || "",
+  kind: "mix",
+  createdAt: now(),
+  title: convertedOk ? "" : "(webm)",
+  blob: finalBlob,
+  offsetSec: 0
+};
+
+await dbPut(item);
+await renderRecordings();
+
 
     state.rec = null;
     state.recChunks = [];
