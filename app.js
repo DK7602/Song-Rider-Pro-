@@ -1476,7 +1476,7 @@ function electricGuitarSafe(ctx, freq, durMs, vel=0.85){
 
   // envelope at the end
   const env = ctx.createGain();
-  const peak = 0.18 * clamp(vel, 0.2, 1.0);
+  const peak = 0.08 * clamp(vel, 0.2, 1.0);
 
   env.gain.setValueAtTime(0.0001, t0);
   env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
@@ -1498,7 +1498,12 @@ function electricGuitarSafe(ctx, freq, durMs, vel=0.85){
   lp1.connect(sh);
   sh.connect(cab.in);
   cab.out.connect(notch);
-  notch.connect(env);
+notch.connect(env);
+
+// ✅ FINAL VOLUME TRIM (guaranteed)
+const outTrim = ctx.createGain();
+outTrim.gain.value = 0.22;   // try 0.15 if still loud
+env.connect(outTrim);
 
   o1.start(t0);
   o2.start(t0);
@@ -1510,10 +1515,9 @@ function electricGuitarSafe(ctx, freq, durMs, vel=0.85){
   o1.stop(stopAt);
   o2.stop(stopAt);
 
-  scheduleCleanup([pre,o1,o2,g1,g2,pick,pickBP,pickG,lp1,sh,notch,env, ...cab.nodes], durMs + 1200);
-  return { out: env, nodes:[pre,o1,o2,g1,g2,pick,pickBP,pickG,lp1,sh,notch,env, ...cab.nodes] };
+  scheduleCleanup([pre,o1,o2,g1,g2,pick,pickBP,pickG,lp1,sh,notch,env,outTrim, ...cab.nodes], durMs + 1200);
+return { out: outTrim, nodes:[pre,o1,o2,g1,g2,pick,pickBP,pickG,lp1,sh,notch,env,outTrim, ...cab.nodes] };
 }
-
 /***********************
 CHORD PLAYERS
 ***********************/
@@ -1610,7 +1614,7 @@ function playElectricChord(ch, durMs){
   wet.connect(getOutNode());
 
   const dryBus = ctx.createGain();
-  dryBus.gain.value = 0.92;
+  dryBus.gain.value = 0.4;
   dryBus.connect(getOutNode());
   dryBus.connect(room.in);
 
@@ -3651,7 +3655,7 @@ async function convertRecordingBlobToMp3(blob){
   if(!hasLame()) return blob;
 
   try{
-    const mp3 = await encodeMp3FromBlob(blob, { kbps: 160 });
+    const mp3 = await encodeMp3FromBlob(blob, { kbps: 192 });
     // sanity check (tiny files can happen if decode fails)
     if(mp3 && mp3.size > 800) return mp3;
     return blob;
@@ -3675,21 +3679,51 @@ function pickBestMimeType(){
   }
   return "";
 }
+/***********************
+MIC "MUSIC MODE" (Android fix)
+- disables phone-call processing (AEC/NS/AGC)
+***********************/
+const MUSIC_MODE_CONSTRAINTS = {
+  audio: {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+
+    // optional but helpful requests:
+    channelCount: 2,
+    sampleRate: 48000,
+    sampleSize: 16,
+
+    // legacy Chrome/Android flags (still often honored)
+    googEchoCancellation: false,
+    googNoiseSuppression: false,
+    googAutoGainControl: false,
+    googHighpassFilter: false,
+    googTypingNoiseDetection: false
+  }
+};
+
+// Keep 1 mic stream at a time (prevents Android getting "stuck" in call mode)
+async function getMicStreamMusicMode(){
+  try{
+    if(state.recMicStream){
+      state.recMicStream.getTracks().forEach(t => t.stop());
+    }
+  }catch{}
+  state.recMicStream = null;
+
+  const s = await navigator.mediaDevices.getUserMedia(MUSIC_MODE_CONSTRAINTS);
+  state.recMicStream = s;
+  return s;
+}
 
 async function startRecording(){
   ensureCtx();
   ensureRecordingBus();
 
-  // Get mic
-  const micStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    }
-  });
+  // Get mic (✅ MUSIC MODE: avoids phone-call processing on Android)
+  const micStream = await getMicStreamMusicMode();
 
-  state.recMicStream = micStream;
   state.recChunks = [];
 
   const ctx = ensureCtx();
