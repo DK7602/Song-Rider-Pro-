@@ -3699,13 +3699,13 @@ async function startRecording(){
   state.recMicSource = micSource;
 
   const micGain = ctx.createGain();
-  micGain.gain.value = 0.62;
+  micGain.gain.value = 0.55;
 const micCompressor = ctx.createDynamicsCompressor();
-micCompressor.threshold.value = -20;  // start compressing earlier
-micCompressor.knee.value = 20;
-micCompressor.ratio.value = 4.5;
-micCompressor.attack.value = 0.003;
-micCompressor.release.value = 0.25;
+micCompressor.threshold.value = -24;  // start compressing earlier
+micCompressor.knee.value = 30;
+micCompressor.ratio.value = 5.5;
+micCompressor.attack.value = 0.01;
+micCompressor.release.value = 0.3;
 
  micSource.connect(micGain);
 micGain.connect(micCompressor);
