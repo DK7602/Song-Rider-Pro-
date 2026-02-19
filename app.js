@@ -3798,7 +3798,12 @@ function fmtDate(ms){
 
 async function renderRecordings(){
   const all = await dbGetAll();
-  const mine = all.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+
+  const pid = state.project?.id || "";
+  const mine = all
+    .filter(r => String(r.projectId || "") === pid)   // ✅ ONLY this project
+    .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+
   el.recordingsList.innerHTML = "";
 
   if(mine.length === 0){
@@ -4348,6 +4353,8 @@ function applyProjectSettingsToUI(){
 }
 
 function loadProjectById(id){
+   // ✅ prevent “wrong project audio” weirdness
+  if(state.audioSyncOn) stopAudioSync();
   const all = loadAllProjects().map(normalizeProject).filter(Boolean);
   const p = all.find(x => x.id === id);
   if(!p) return;
