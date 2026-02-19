@@ -152,6 +152,121 @@ Sections (ORDER LOCKED)
 ***********************/
 const SECTIONS = ["Full","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
 const MIN_LINES_PER_SECTION = 1;
+/***********************
+FULL PAGE (Beat Sheet Pro style)
+- User types under headings in one big textarea (Full)
+- Blank line = new card
+- Auto-fills cards in each section
+- DOES NOT change export format (export still prints from cards)
+***********************/
+const FULL_EDIT_SECTIONS = SECTIONS.filter(s => s !== "Full");
+
+// match headings like "VERSE 1" or "VERSE 1:" (case-insensitive)
+function normalizeLineBreaks(s){
+  return String(s || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function isSectionHeadingLine(line){
+  const t = String(line || "").trim().replace(/:$/, "").toUpperCase();
+  return FULL_EDIT_SECTIONS.includes(t) ? t : null;
+}
+
+// Parse fullText -> { sections: { "VERSE 1":[lyrics1, lyrics2...], ... } }
+function parseFullTextToSectionCards(fullText){
+  const text = normalizeLineBreaks(fullText);
+  const lines = text.split("\n");
+
+  // default start section if user types without heading
+  let cur = "VERSE 1";
+
+  const buckets = {};
+  FULL_EDIT_SECTIONS.forEach(s => buckets[s] = []);
+
+  let acc = []; // lines accumulating for current card block
+
+  function flushCard(){
+    // blank-line ends a card
+    const blockLines = acc
+  .map(x => String(x || "").trim())
+  .filter(Boolean); // ✅ trims whitespace-only lines so they never become “blank cards”
+    acc = [];
+    if(!blockLines.length) return;
+
+    // IMPORTANT: join with SPACE so we don’t create "\n" inside a card
+    // (your card textarea treats "\n" as “split into new card”)
+    const lyric = blockLines.join(" ").trim();
+    if(lyric) buckets[cur].push(lyric);
+  }
+
+  for(const rawLine of lines){
+    const line = String(rawLine ?? "");
+
+    const heading = isSectionHeadingLine(line);
+    if(heading){
+      // finish any pending card in previous section
+      flushCard();
+      cur = heading;
+      continue;
+    }
+
+    if(line.trim() === ""){
+      flushCard();
+      continue;
+    }
+
+    acc.push(line);
+  }
+  flushCard();
+
+  return buckets;
+}
+
+// Merge parsed lyrics into existing project.sections
+// - preserves existing notes when possible (by index)
+// - updates lyrics
+// - (optional) auto-splits beats from lyrics when AutoSplit is ON
+function applyFullTextToProjectSections(fullText){
+  if(!state.project || !state.project.sections) return;
+
+  const parsed = parseFullTextToSectionCards(fullText);
+
+  FULL_EDIT_SECTIONS.forEach(sec => {
+    const want = parsed[sec] || [];
+    const have = Array.isArray(state.project.sections[sec]) ? state.project.sections[sec] : [];
+
+    const next = [];
+
+    // Build up to want.length cards, reusing existing card objects to preserve notes
+    for(let i=0; i<want.length; i++){
+      const base = have[i] && typeof have[i] === "object" ? have[i] : newLine();
+      base.lyrics = want[i] || "";
+
+      // keep notes; update beats if autosplit is on
+      if(state.autoSplit){
+        base.beats = autosplitBeatsFromLyrics(base.lyrics);
+      }
+
+      next.push(base);
+    }
+
+    // SAFETY: if user typed fewer lines than existing, keep any extra cards
+    // that contain NOTES/BEATS so we don’t accidentally wipe chords.
+    for(let i=want.length; i<have.length; i++){
+      const L = have[i];
+      if(lineHasContent(L)){ // your existing “has notes or beats or lyrics” check
+        next.push(L);
+      }
+    }
+
+    // ensure at least 1 card
+    if(next.length < MIN_LINES_PER_SECTION) next.push(newLine());
+
+    // also trim trailing fully blank cards (but keep 1)
+    while(next.length > 1 && !lineHasContent(next[next.length - 1])) next.pop();
+
+    state.project.sections[sec] = next;
+  });
+}
 
 /***********************
 Project storage (MAIN)
@@ -191,16 +306,17 @@ function defaultProject(name="New Song"){
   SECTIONS.filter(s=>s!=="Full").forEach(sec => {
     sections[sec] = [ newLine() ]; // ✅ start with ONE card
   });
-  return {
-    id: uuid(),
-    name,
-    createdAt: now(),
-    updatedAt: now(),
-    bpm: 95,
-    capo: 0,
-    fullText: "",
-    sections
-  };
+ return {
+  id: uuid(),
+  name,
+  createdAt: now(),
+  updatedAt: now(),
+  bpm: 95,
+  capo: 0,
+  fullText: "",
+  fullSeeded: false,   // ✅ NEW
+  sections
+};
 }
 
 function loadAllProjects(){
@@ -237,6 +353,7 @@ function normalizeProject(p){
   if(!p || typeof p !== "object") return null;
 
   if(typeof p.fullText !== "string") p.fullText = "";
+  if(typeof p.fullSeeded !== "boolean") p.fullSeeded = false; // ✅ NEW
   if(!p.sections || typeof p.sections !== "object") p.sections = {};
   if(!Number.isFinite(p.bpm)) p.bpm = 95;
   if(!Number.isFinite(p.capo)) p.capo = 0;
@@ -2934,9 +3051,9 @@ ${bodyHtml}
 }
 
 function updateFullIfVisible(){
-  if(state.currentSection !== "Full") return;
-  const preview = el.sheetBody.querySelector("textarea.fullPreview");
-  if(preview) preview.value = buildFullPreviewText();
+  // Full Preview UI removed by design.
+  // Export still works from cards, so nothing to update here.
+  return;
 }
 
 /***********************
@@ -2988,55 +3105,88 @@ function renderSheetActions(){
   el.sheetActions.innerHTML = "";
   if(state.currentSection === "Full") return;
 }
+function buildFullTemplate(){
+  return `VERSE 1
+Type your lyrics here (line 1)
+Type your lyrics here (line 2)
 
+CHORUS 1
+Type your chorus here
+
+VERSE 2
+
+CHORUS 2
+
+VERSE 3
+
+BRIDGE
+
+CHORUS 3
+`;
+}
 function renderSheet(){
   el.sheetTitle.textContent = state.currentSection;
   renderSheetActions();
 
   state.playCardIndex = null;
 
-  if(state.currentSection === "Full"){
-    el.sheetHint.textContent = "Full Page (editable) + Preview (auto):";
-    el.sheetBody.innerHTML = "";
+if(state.currentSection === "Full"){
+  el.sheetHint.textContent = 'Paste + edit. Use headings: VERSE 1, CHORUS 1, VERSE 2, CHORUS 2, VERSE 3, BRIDGE, CHORUS 3. Blank line = next card.';
+  el.sheetBody.innerHTML = "";
 
-    const wrap = document.createElement("div");
-    wrap.className = "fullBoxWrap";
+  const wrap = document.createElement("div");
+  wrap.className = "fullBoxWrap";
 
-    const label1 = document.createElement("div");
-    label1.className = "fullLabel";
-    label1.textContent = "FULL PAGE (type anything here):";
+  const ta = document.createElement("textarea");
+  ta.className = "fullBox";
+  ta.readOnly = false;
+  ta.placeholder =
+`VERSE 1
+Line 1
+Line 2
 
-    const ta = document.createElement("textarea");
-    ta.className = "fullBox";
-    ta.readOnly = false;
-    ta.placeholder = "Type your full lyrics / notes here…";
-    ta.value = state.project.fullText || "";
-    ta.addEventListener("input", () => {
-      state.project.fullText = ta.value;
+(blank line = new card)
+
+CHORUS 1
+...`;
+
+  // ✅ Auto-seed the template only ONCE per project when empty
+if(!String(state.project.fullText || "").trim() && !state.project.fullSeeded){
+  state.project.fullText = buildFullTemplate();
+  state.project.fullSeeded = true;
+  upsertProject(state.project);
+}
+
+ta.value = state.project.fullText || "";
+
+
+  // Fill the available space better (no index.html edits required)
+  ta.style.width = "100%";
+  ta.style.minHeight = "calc(100vh - 220px)";
+  ta.style.resize = "none";
+
+  let tmr = null;
+  ta.addEventListener("input", () => {
+    state.project.fullText = ta.value;
+
+    // debounce so it doesn’t lag while typing
+    if(tmr) clearTimeout(tmr);
+    tmr = setTimeout(() => {
+      applyFullTextToProjectSections(state.project.fullText || "");
       upsertProject(state.project);
-    });
+      updateKeyFromAllNotes();
+      // don’t renderSheet() here (would move cursor)
+    }, 180);
+  });
 
-    const label2 = document.createElement("div");
-    label2.className = "fullLabel";
-    label2.textContent = "FULL PREVIEW (auto from cards):";
+  // On first open, make sure cards match the full text once
+  applyFullTextToProjectSections(state.project.fullText || "");
+  upsertProject(state.project);
 
-    const preview = document.createElement("textarea");
-    preview.className = "fullPreview";
-    preview.readOnly = true;
-    preview.value = buildFullPreviewText();
-
-    wrap.appendChild(label1);
-    wrap.appendChild(ta);
-   const previewBlock = document.createElement("div");
-previewBlock.className = "fullPreviewBlock";
-previewBlock.appendChild(label2);
-previewBlock.appendChild(preview);
-
-wrap.appendChild(previewBlock);
-
-    el.sheetBody.appendChild(wrap);
-    return;
-  }
+  wrap.appendChild(ta);
+  el.sheetBody.appendChild(wrap);
+  return;
+}
 
   el.sheetHint.textContent = "";
   const cardsWrap = document.createElement("div");
