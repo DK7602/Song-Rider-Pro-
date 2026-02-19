@@ -107,6 +107,112 @@ horseLeft: $("horseLeft"),
   rhymeWords: $("rhymeWords"),
   rhymeTitle: $("rhymeTitle")
 };
+/***********************
+SRP -> BSP CARD SIZE + FONT MATCH (CSS OVERRIDES)
+- Bigger cards like Beat Sheet Pro
+- Bigger + bolder lyric + beat fonts
+- Keeps your existing colors
+***********************/
+function injectBspCardLook(){
+  // prevent duplicates on hot reload
+  const old = document.getElementById("srpBspCardLook");
+  if(old) old.remove();
+
+  const style = document.createElement("style");
+  style.id = "srpBspCardLook";
+  style.textContent = `
+    /* ===== REEL-IN CARD LOOK (2 cards visible, smaller text) ===== */
+
+    .cards{
+      padding-bottom: 18px;
+    }
+
+    .card{
+      position: relative !important;      /* needed for + / × positioning */
+      margin: 10px 0 !important;          /* tighter so 2 cards fit */
+      padding: 12px !important;
+      border-radius: 16px !important;
+      padding-top: 44px !important;       /* room for + / × */
+    }
+
+    /* Top row (number + syllables pill) smaller */
+    .cardTop{
+      gap: 10px !important;
+      margin-bottom: 8px !important;
+      align-items: center !important;
+    }
+    .cardNum{
+      width: 34px !important;
+      height: 34px !important;
+      font-size: 16px !important;
+      font-weight: 800 !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+    }
+    .syllPill{
+      font-size: 14px !important;
+      font-weight: 700 !important;
+      padding: 7px 10px !important;
+      border-radius: 14px !important;
+    }
+
+    /* Notes row tighter + smaller */
+    .notesRow{
+      gap: 8px !important;
+      margin-bottom: 10px !important;
+    }
+    input.noteCell{
+      height: 40px !important;
+      min-height: 40px !important;
+      font-size: 14px !important;
+      font-weight: 700 !important;
+      border-radius: 12px !important;
+      text-align: center !important;
+    }
+
+    /* LYRICS: smaller + shorter so 2 cards show */
+    textarea.lyrics{
+      font-size: 17px !important;
+      font-weight: 600 !important;
+      line-height: 1.18 !important;
+      padding: 9px !important;
+      border-radius: 12px !important;
+      min-height: 70px !important;
+    }
+
+    /* Beat boxes: smaller + shorter */
+    textarea.beatCell{
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      line-height: 1.15 !important;
+      padding: 7px !important;
+      border-radius: 12px !important;
+      min-height: 44px !important;
+    }
+
+    /* ===== FIX: + and × spacing ===== */
+    .cardAdd, .cardDel{
+      position: absolute !important;
+      top: 10px !important;
+      width: 34px !important;
+      height: 34px !important;
+      font-size: 18px !important;
+      border-radius: 12px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 0 !important;
+      line-height: 1 !important;
+    }
+
+    .cardDel{ right: 10px !important; }
+    .cardAdd{ right: 52px !important; }
+  `;
+
+  document.head.appendChild(style);
+}
+
 
 /***********************
 Active card + active lyrics
@@ -4540,6 +4646,8 @@ Init
 ***********************/
 function init(){
   state.project = getCurrentProject();
+
+    injectBspCardLook(); // ✅ ADD THIS LINE
 
   applyProjectSettingsToUI();
 
