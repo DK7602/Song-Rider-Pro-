@@ -56,7 +56,9 @@ horseLeft: $("horseLeft"),
   panelBody: $("panelBody"),
   miniBar: $("miniBar"),
 
-  autoSplitBtn: $("autoSplitBtn"),
+ undoBtn: $("undoBtn"),
+redoBtn: $("redoBtn"),
+saveBtn: $("saveBtn"),
   bpmInput: $("bpmInput"),
   capoInput: $("capoInput"),
   keyOutput: $("keyOutput"),
@@ -210,6 +212,42 @@ function injectBspCardLook(){
     .cardAdd{ right: 52px !important; }
   `;
 
+  document.head.appendChild(style);
+}
+function injectHeaderMiniIconBtnStyle(){
+  const old = document.getElementById("srpMiniIconBtnStyle");
+  if(old) old.remove();
+
+  const style = document.createElement("style");
+  style.id = "srpMiniIconBtnStyle";
+  style.textContent = `
+    .miniIconBtn{
+      width:34px;
+      height:34px;
+      border-radius:999px;
+      border:1px solid rgba(0,0,0,.18);
+      background:#fff;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:900;
+      line-height:1;
+      cursor:pointer;
+      box-shadow: 0 6px 14px rgba(0,0,0,.08);
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .miniIconBtn:active{ transform: translateY(1px); }
+    .miniIconBtn[disabled]{
+      opacity:.35;
+      cursor:default;
+      transform:none;
+    }
+    .miniIconBtn.savedFlash{
+      outline: 3px solid rgba(34,197,94,.40);
+      box-shadow: 0 0 0 6px rgba(34,197,94,.18);
+    }
+  `;
   document.head.appendChild(style);
 }
 
@@ -624,6 +662,99 @@ lastAutoBar: -1,
   recMixWired: false,
   recKeepAlive: null,
 };
+/***********************
+UNDO / REDO (Project History)
+- Tracks meaningful edits to the current project
+- Ctrl/Cmd+Z = undo
+- Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z = redo
+***********************/
+const history = {
+  past: [],
+  future: [],
+  lastSig: "",
+  lock: false,
+  max: 80
+};
+
+function deepClone(o){
+  try{ return structuredClone(o); }catch{
+    return JSON.parse(JSON.stringify(o));
+  }
+}
+
+function projectSignature(p){
+  // small + stable: prevents pushing duplicates constantly
+  try{
+    return JSON.stringify({
+      id: p?.id || "",
+      name: p?.name || "",
+      bpm: p?.bpm || 0,
+      capo: p?.capo || 0,
+      fullText: p?.fullText || "",
+      sections: p?.sections || {}
+    });
+  }catch{
+    return String(Math.random());
+  }
+}
+
+function pushHistory(reason=""){
+  if(history.lock) return;
+  if(!state.project) return;
+
+  const sig = projectSignature(state.project);
+  if(sig === history.lastSig) return;
+
+  history.past.push(deepClone(state.project));
+  if(history.past.length > history.max) history.past.shift();
+
+  history.future = [];
+  history.lastSig = sig;
+
+  updateUndoRedoUI();
+}
+
+function applySnapshot(snapshot){
+  if(!snapshot) return;
+
+  history.lock = true;
+  try{
+    state.project = normalizeProject(deepClone(snapshot));
+    upsertProject(state.project);
+
+    // keep UI in sync
+    applyProjectSettingsToUI();
+    renderAll();
+  }finally{
+    history.lock = false;
+  }
+
+  history.lastSig = projectSignature(state.project);
+  updateUndoRedoUI();
+}
+
+function undo(){
+  if(history.lock) return;
+  if(history.past.length === 0) return;
+
+  history.future.push(deepClone(state.project));
+  const prev = history.past.pop();
+  applySnapshot(prev);
+}
+
+function redo(){
+  if(history.lock) return;
+  if(history.future.length === 0) return;
+
+  history.past.push(deepClone(state.project));
+  const next = history.future.pop();
+  applySnapshot(next);
+}
+
+function updateUndoRedoUI(){
+  if(el.undoBtn) el.undoBtn.disabled = history.past.length === 0;
+  if(el.redoBtn) el.redoBtn.disabled = history.future.length === 0;
+}
 
 /***********************
 HORSE RUNNER (BPM-synced)
@@ -3343,6 +3474,7 @@ ta.value = state.project.fullText || "";
   let tmr = null;
   ta.addEventListener("input", () => {
     state.project.fullText = ta.value;
+pushHistory("fullText");
 
     // debounce so it doesn’t lag while typing
     if(tmr) clearTimeout(tmr);
@@ -3394,6 +3526,7 @@ addBtn.addEventListener("click", (e) => {
   arr.splice(insertAt, 0, nl);
 
   upsertProject(state.project);
+  pushHistory("addCard");
   renderSheet();
   updateFullIfVisible();
   updateKeyFromAllNotes();
@@ -3432,6 +3565,7 @@ delBtn.addEventListener("click", (e) => {
   }
 
   upsertProject(state.project);
+  pushHistory("deleteCard");
   renderSheet();
   updateFullIfVisible();
   updateKeyFromAllNotes();
@@ -3487,6 +3621,7 @@ card.appendChild(delBtn);
         const rawNow = String(inp.value || "").trim();
         inp.dataset.raw = rawNow;
         line.notes[i] = rawNow;
+pushHistory("note");
 
         upsertProject(state.project);
         updateKeyFromAllNotes();
@@ -3537,6 +3672,7 @@ card.appendChild(delBtn);
 
       inp.addEventListener("input", () => {
         line.beats[i] = String(inp.value || "").trim();
+        pushHistory("beat");
         upsertProject(state.project);
         updateFullIfVisible();
       });
@@ -3547,6 +3683,7 @@ card.appendChild(delBtn);
 
     lyr.addEventListener("input", () => {
      line.lyrics = lyr.value;
+pushHistory("lyrics");
 
 // ✅ syll pill text + glow band
 updateSyllPill(syll, line.lyrics || "");
@@ -4526,11 +4663,55 @@ function wire(){
     setPanelHidden(hidden);
   });
 
-  el.autoSplitBtn.addEventListener("click", () => {
-    state.autoSplit = !state.autoSplit;
-    el.autoSplitBtn.classList.toggle("active", state.autoSplit);
-    el.autoSplitBtn.textContent = "AutoSplit: " + (state.autoSplit ? "ON" : "OFF");
+  // ✅ AutoSplit is always ON (manual "/" overrides per-line)
+  // If the old button still exists in HTML, hide it.
+  const oldAuto = $("autoSplitBtn");
+  if(oldAuto) oldAuto.style.display = "none";
+
+  if(el.undoBtn) el.undoBtn.addEventListener("click", () => undo());
+  if(el.redoBtn) el.redoBtn.addEventListener("click", () => redo());
+
+  if(el.saveBtn) el.saveBtn.addEventListener("click", () => {
+    if(!state.project) return;
+    // force commit + visual feedback
+    upsertProject(state.project);
+    updateUndoRedoUI();
+
+    try{
+      el.saveBtn.classList.add("savedFlash");
+      setTimeout(()=> el.saveBtn && el.saveBtn.classList.remove("savedFlash"), 220);
+    }catch{}
   });
+
+  // Keyboard shortcuts (don’t trigger while typing in inputs/textareas)
+  document.addEventListener("keydown", (e) => {
+    const a = document.activeElement;
+    const tag = (a && a.tagName) ? a.tagName.toUpperCase() : "";
+    const typing = (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON" || (a && a.isContentEditable));
+    if(typing) return;
+
+    const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+
+    if(!mod) return;
+
+    const k = (e.key || "").toLowerCase();
+
+    // Undo: Ctrl/Cmd+Z
+    if(k === "z" && !e.shiftKey){
+      e.preventDefault();
+      undo();
+      return;
+    }
+
+    // Redo: Ctrl/Cmd+Y OR Ctrl/Cmd+Shift+Z
+    if(k === "y" || (k === "z" && e.shiftKey)){
+      e.preventDefault();
+      redo();
+      return;
+    }
+  }, { capture:true });
+
 
   if(el.exportBtn){
     el.exportBtn.addEventListener("click", exportFullPreview);
@@ -4740,11 +4921,9 @@ function init(){
   state.project = getCurrentProject();
 
     injectBspCardLook(); // ✅ ADD THIS LINE
+injectHeaderMiniIconBtnStyle();
 
   applyProjectSettingsToUI();
-
-  el.autoSplitBtn.textContent = "AutoSplit: ON";
-  el.autoSplitBtn.classList.add("active");
 
   setPanelHidden(false);
   setAutoScroll(false);
@@ -4756,6 +4935,8 @@ function init(){
   setRecordUI();
   wire();
   renderAll();
+  pushHistory("init"); // seed the first snapshot
+updateUndoRedoUI();
   installSectionSwipe();
 
   stopBeatClock();
