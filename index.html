@@ -242,11 +242,15 @@
       height:34px;
       text-align:center;
     }
-    .tinyField.key input{
-      width:92px;
-      text-align:center;
-      padding-left:0;
-    }
+   .tinyField.key input{
+  width:64px;              /* ✅ smaller so it fits beside Capo */
+  text-align:center;
+  padding-left:0;
+}
+@media (min-width: 420px){
+  .tinyField.key input{ width:78px; }  /* ✅ a little bigger on wider phones */
+}
+
     .tinyField input[readonly]{ background:#f6f6f7; }
 
     .btn{
@@ -701,8 +705,11 @@
       </div>
 
       <div id="panelBody">
-        <div class="row">
-          <button class="tinyBtn" id="autoSplitBtn">AutoSplit</button>
+        <div class="row nowrap">
+
+          <button id="undoBtn" class="miniIconBtn" type="button" title="Undo (Ctrl/Cmd+Z)">↶</button>
+<button id="redoBtn" class="miniIconBtn" type="button" title="Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)">↷</button>
+<button id="saveBtn" class="miniIconBtn" type="button" title="Save">💾</button>
           <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95"/></div>
           <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0"/></div>
           <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—"/></div>
