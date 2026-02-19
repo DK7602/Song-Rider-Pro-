@@ -2877,6 +2877,75 @@ function countSyllablesInline(text){
   }
   return total;
 }
+/***********************
+MANUAL SPLIT OVERRIDE ("/")
+- If the lyrics contains "/", that line uses manual split into 4 beat boxes.
+- AutoSplit stays active, but manual overrides that one line.
+Examples:
+  "I was / made for / more than / this"
+  "/ intro / hook /"  (leading/trailing slashes OK)
+***********************/
+function manualBeatsFromSlashes(lyrics){
+  const s = String(lyrics || "");
+  if(!s.includes("/")) return null;
+
+  // split by "/" and trim; keep meaningful parts
+  let parts = s.split("/").map(x => String(x || "").trim());
+
+  // If user does "a / b / c / d" you get 4 parts.
+  // If they do "a/b/c/d" also fine.
+  // Remove empty chunks at ends (from leading/trailing slashes)
+  while(parts.length && !parts[0]) parts.shift();
+  while(parts.length && !parts[parts.length-1]) parts.pop();
+
+  // If nothing meaningful, treat as "no manual"
+  if(!parts.length) return null;
+
+  // Force exactly 4 boxes
+  if(parts.length > 4){
+    // join extras into box 4
+    const head = parts.slice(0, 3);
+    const tail = parts.slice(3).join(" ").trim();
+    parts = [...head, tail];
+  }else if(parts.length < 4){
+    while(parts.length < 4) parts.push("");
+  }
+
+  return parts.map(x => String(x || "").trim());
+}
+
+function syllToneClass(n){
+  n = n|0;
+
+  // Red: 1–5 & 16+
+  if(n >= 16 || (n >= 1 && n <= 5)) return "sylRed";
+
+  // Yellow: 6–7 & 14–15
+  if((n >= 6 && n <= 7) || (n >= 14 && n <= 15)) return "sylYellow";
+
+  // Green: 8–13 (also covers 0 gracefully)
+  return "sylGreen";
+}
+
+function updateSyllPill(pillEl, lyrics){
+  if(!pillEl) return;
+  const n = countSyllablesInline(lyrics || "");
+  pillEl.textContent = "Syllables: " + n;
+
+  pillEl.classList.remove("sylRed","sylYellow","sylGreen");
+  pillEl.classList.add(syllToneClass(n));
+}
+
+function applyBeatsFromLyrics(lineObj){
+  if(!lineObj) return;
+  if(!state.autoSplit) return;
+
+  const lyric = String(lineObj.lyrics || "");
+  const manual = manualBeatsFromSlashes(lyric);
+
+  // Manual override if "/" is present, otherwise normal autosplit
+  lineObj.beats = manual ? manual : autosplitBeatsFromLyrics(lyric);
+}
 
 /***********************
 AutoSplit
@@ -3384,7 +3453,8 @@ card.appendChild(delBtn);
 
     const syll = document.createElement("div");
     syll.className = "syllPill";
-    syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
+ updateSyllPill(syll, line.lyrics || "");
+
 
     top.appendChild(num);
     top.appendChild(syll);
@@ -3476,35 +3546,57 @@ card.appendChild(delBtn);
     }
 
     lyr.addEventListener("input", () => {
-      line.lyrics = lyr.value;
-      syll.textContent = "Syllables: " + countSyllablesInline(line.lyrics || "");
-      upsertProject(state.project);
-      updateFullIfVisible();
+     line.lyrics = lyr.value;
 
-      refreshRhymesFromActive();
+// ✅ syll pill text + glow band
+updateSyllPill(syll, line.lyrics || "");
 
-      if(state.autoSplit){
-        const boxes = autosplitBeatsFromLyrics(line.lyrics);
-        line.beats = boxes;
-        for(let k=0;k<4;k++){
-          beatInputs[k].value = line.beats[k] || "";
-        }
-        upsertProject(state.project);
-        updateFullIfVisible();
-      }
+upsertProject(state.project);
+updateFullIfVisible();
 
-      if(state.autoSplit && lyr.value.includes("\n")){
-        const parts = lyr.value.split("\n");
-        const first = parts.shift();
-        line.lyrics = first;
-        const rest = parts.join("\n").trim();
+refreshRhymesFromActive();
 
-        if(rest){
-          const nl = newLine();
-          nl.lyrics = rest;
-          nl.beats = autosplitBeatsFromLyrics(rest);
-          arr.splice(idx+1, 0, nl);
-        }
+// ✅ AutoSplit stays ON, but "/" overrides this one line
+if(state.autoSplit){
+  applyBeatsFromLyrics(line);
+
+  for(let k=0;k<4;k++){
+    beatInputs[k].value = line.beats[k] || "";
+  }
+
+  upsertProject(state.project);
+  updateFullIfVisible();
+}
+
+
+    if(state.autoSplit && lyr.value.includes("\n")){
+  const parts = lyr.value.split("\n");
+  const first = parts.shift();
+  line.lyrics = first;
+
+  // ✅ update current card beats & pill after trimming to first line
+  updateSyllPill(syll, line.lyrics || "");
+  applyBeatsFromLyrics(line);
+
+  // refresh the visible beat boxes for the current card
+  for(let k=0;k<4;k++){
+    beatInputs[k].value = line.beats[k] || "";
+  }
+
+  const rest = parts.join("\n").trim();
+
+  if(rest){
+    const nl = newLine();
+    nl.lyrics = rest;
+
+    // ✅ new card also respects "/" manual override if present
+    if(state.autoSplit){
+      applyBeatsFromLyrics(nl);
+    }
+
+    arr.splice(idx+1, 0, nl);
+  }
+ 
 
         
         upsertProject(state.project);
