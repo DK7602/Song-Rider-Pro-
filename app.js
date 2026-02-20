@@ -755,7 +755,44 @@ function updateUndoRedoUI(){
   if(el.undoBtn) el.undoBtn.disabled = history.past.length === 0;
   if(el.redoBtn) el.redoBtn.disabled = history.future.length === 0;
 }
+/***********************
+✅ HISTORY COMMIT HELPERS (correct “before” snapshots)
+- editProject(reason, fn) snapshots BEFORE fn runs
+- commits snapshot only if project actually changed
+***********************/
+function historyCommitBeforeSnapshot(beforeSnap){
+  if(history.lock) return;
+  if(!beforeSnap) return;
 
+  history.past.push(deepClone(beforeSnap));
+  if(history.past.length > history.max) history.past.shift();
+
+  history.future = [];
+  history.lastSig = projectSignature(state.project);
+  updateUndoRedoUI();
+}
+
+// Use this whenever you want Undo/Redo to work reliably
+function editProject(reason, mutatorFn){
+  if(!state.project) return;
+  if(history.lock){
+    // while applying undo/redo snapshots, do not create history
+    mutatorFn();
+    return;
+  }
+
+  const before = deepClone(state.project);
+  const beforeSig = projectSignature(before);
+
+  mutatorFn();
+
+  const afterSig = projectSignature(state.project);
+  if(afterSig !== beforeSig){
+    historyCommitBeforeSnapshot(before);
+  }
+
+  upsertProject(state.project);
+}
 /***********************
 HORSE RUNNER (BPM-synced)
 - Runs across screen once per BAR (every 8 eighth-notes)
@@ -3449,9 +3486,72 @@ function ensureFullHeadingsPresent(fullText){
   const missing = FULL_EDIT_SECTIONS.filter(h => !present.has(h));
   if(!missing.length) return text;
 
-  const suffix = (text.trim().length ? "\n\n" : "") + missing.map(h => `${h}\n`).join("\n");
+  const suffix =
+    (text.trim().length ? "\n\n" : "") +
+    missing.map(h => `${h}\n`).join("\n");
+
   return text.replace(/\s*$/, "") + suffix;
 }
+  /***********************
+Cards -> FullText sync
+- Rebuild fullText from current section card lyrics
+- Used when cards are added/deleted/split so Full stays accurate
+***********************/
+let _fullSyncLock = false;
+
+function syncFullTextFromSections(){
+  if(_fullSyncLock) return;
+  if(!state.project) return;
+
+  _fullSyncLock = true;
+  try{
+    const out = [];
+
+    // Build headings + lyrics (blank line between cards)
+    FULL_EDIT_SECTIONS.forEach(sec => {
+      out.push(sec);
+
+      const arr = (state.project.sections && state.project.sections[sec]) ? state.project.sections[sec] : [];
+
+      let wroteAny = false;
+      for(const line of arr){
+        const lyr = String(line?.lyrics || "").trim();
+        if(!lyr) continue;
+        wroteAny = true;
+        out.push(lyr);
+        out.push(""); // blank line = next card
+      }
+
+      // Keep at least one empty line under heading so user can type later
+      if(!wroteAny) out.push("");
+
+      // Extra spacing between sections
+      out.push("");
+    });
+
+    // Clean trailing blank lines (keep file neat)
+    while(out.length && out[out.length - 1] === "") out.pop();
+
+    let text = out.join("\n") + "\n";
+    text = ensureFullHeadingsPresent(text);
+
+    state.project.fullText = text;
+// ✅ do NOT save here — caller decides when to save/commit history
+
+    // If Full page is currently open, update the textarea too
+    if(state.currentSection === "Full"){
+      const ta = document.querySelector("textarea.fullBox");
+      if(ta){
+        const s = ta.selectionStart, e = ta.selectionEnd;
+        ta.value = state.project.fullText || "";
+        try{ ta.selectionStart = s; ta.selectionEnd = e; }catch{}
+      }
+    }
+  } finally {
+    _fullSyncLock = false;
+  }
+}
+
 function renderSheet(){
   el.sheetTitle.textContent = state.currentSection;
   renderSheetActions();
@@ -3507,22 +3607,26 @@ ta.value = state.project.fullText || "";
 
   let tmr = null;
   ta.addEventListener("input", () => {
-    state.project.fullText = ta.value;
-pushHistory("fullText");
+  // keep live text in memory immediately (no history yet)
+  state.project.fullText = ta.value;
 
-    // debounce so it doesn’t lag while typing
-    if(tmr) clearTimeout(tmr);
-    tmr = setTimeout(() => {
+  // debounce so it doesn’t lag while typing
+  if(tmr) clearTimeout(tmr);
+  tmr = setTimeout(() => {
+    // ✅ snapshot BEFORE changes (Undo works)
+    editProject("fullText", () => {
+      state.project.fullText = ta.value;
       applyFullTextToProjectSections(state.project.fullText || "");
-      upsertProject(state.project);
-      updateKeyFromAllNotes();
-      // don’t renderSheet() here (would move cursor)
-    }, 180);
-  });
+    });
+
+    updateKeyFromAllNotes();
+    // don’t renderSheet() here (would move cursor)
+  }, 180);
+});
 
   // On first open, make sure cards match the full text once
   applyFullTextToProjectSections(state.project.fullText || "");
-  upsertProject(state.project);
+upsertProject(state.project); // ok to keep (no history needed on first open)
 
   wrap.appendChild(ta);
   el.sheetBody.appendChild(wrap);
@@ -3557,10 +3661,11 @@ addBtn.addEventListener("click", (e) => {
 
   const insertAt = idx + 1;
   const nl = newLine();
+  editProject("addCard", () => {
   arr.splice(insertAt, 0, nl);
-
-  upsertProject(state.project);
-  pushHistory("addCard");
+  // ✅ keep Full in sync
+  syncFullTextFromSections();
+});
   renderSheet();
   updateFullIfVisible();
   updateKeyFromAllNotes();
@@ -3589,7 +3694,6 @@ delBtn.addEventListener("click", (e) => {
   e.preventDefault();
   e.stopPropagation();
 
-  // If it's the only card, clear it instead of deleting
   if(arr.length <= 1){
     if(!confirm("Clear this card?")) return;
     arr[0] = newLine();
@@ -3598,8 +3702,9 @@ delBtn.addEventListener("click", (e) => {
     arr.splice(idx, 1);
   }
 
-  upsertProject(state.project);
-  pushHistory("deleteCard");
+  editProject("deleteCard", () => {
+  syncFullTextFromSections();
+});
   renderSheet();
   updateFullIfVisible();
   updateKeyFromAllNotes();
@@ -3655,7 +3760,6 @@ card.appendChild(delBtn);
         const rawNow = String(inp.value || "").trim();
         inp.dataset.raw = rawNow;
         line.notes[i] = rawNow;
-pushHistory("note");
 
         upsertProject(state.project);
         updateKeyFromAllNotes();
@@ -3667,7 +3771,9 @@ pushHistory("note");
         inp.dataset.raw = rawNow;
         line.notes[i] = rawNow;
 
-        upsertProject(state.project);
+      editProject("note", () => {
+  // line.notes[i] already set above — just commit snapshot + save
+});
         updateKeyFromAllNotes();
         updateFullIfVisible();
 
@@ -3706,8 +3812,9 @@ pushHistory("note");
 
       inp.addEventListener("input", () => {
         line.beats[i] = String(inp.value || "").trim();
-        pushHistory("beat");
-        upsertProject(state.project);
+        editProject("beat", () => {
+  // line.beats[i] already set above
+});
         updateFullIfVisible();
       });
 
@@ -3716,13 +3823,13 @@ pushHistory("note");
     }
 
     lyr.addEventListener("input", () => {
-     line.lyrics = lyr.value;
-pushHistory("lyrics");
+     editProject("lyrics", () => {
+  line.lyrics = lyr.value;
+});
 
 // ✅ syll pill text + glow band
 updateSyllPill(syll, line.lyrics || "");
 
-upsertProject(state.project);
 updateFullIfVisible();
 
 refreshRhymesFromActive();
@@ -3735,7 +3842,6 @@ if(state.autoSplit){
     beatInputs[k].value = line.beats[k] || "";
   }
 
-  upsertProject(state.project);
   updateFullIfVisible();
 }
 
@@ -3766,6 +3872,7 @@ if(state.autoSplit){
     }
 
     arr.splice(idx+1, 0, nl);
+    syncFullTextFromSections();
   }
  
 
