@@ -3430,6 +3430,28 @@ BRIDGE
 CHORUS 3
 `;
 }
+  function buildFullScaffold(){
+  // headings only, spaced for “type under heading”
+  return FULL_EDIT_SECTIONS.map(h => `${h}\n`).join("\n");
+}
+
+// Adds any missing headings back in (does NOT reorder your content)
+function ensureFullHeadingsPresent(fullText){
+  const text = normalizeLineBreaks(fullText || "");
+  const lines = text.split("\n");
+
+  const present = new Set();
+  for(const line of lines){
+    const h = isSectionHeadingLine(line);
+    if(h) present.add(h);
+  }
+
+  const missing = FULL_EDIT_SECTIONS.filter(h => !present.has(h));
+  if(!missing.length) return text;
+
+  const suffix = (text.trim().length ? "\n\n" : "") + missing.map(h => `${h}\n`).join("\n");
+  return text.replace(/\s*$/, "") + suffix;
+}
 function renderSheet(){
   el.sheetTitle.textContent = state.currentSection;
   renderSheetActions();
@@ -3456,13 +3478,25 @@ Line 2
 CHORUS 1
 ...`;
 
-  // ✅ Auto-seed the template only ONCE per project when empty
-if(!String(state.project.fullText || "").trim() && !state.project.fullSeeded){
-  state.project.fullText = buildFullTemplate();
+  // ✅ STOP AUTO-POPULATING FULL TEXT
+// (No template gets inserted anymore)
+
+// ✅ OPTIONAL CLEANUP:
+// If a project already has the old template text, wipe it once automatically.
+const _tpl = buildFullTemplate();
+if(String(state.project.fullText || "") === _tpl){
+  state.project.fullText = "";
+  // keep flag true so it never tries to seed again (even if other code remains)
   state.project.fullSeeded = true;
   upsertProject(state.project);
 }
 
+// ✅ Seed headings scaffold if empty
+if(!String(state.project.fullText || "").trim()){
+  const scaffold = buildFullScaffold();
+  state.project.fullText = scaffold;
+  upsertProject(state.project);
+}
 ta.value = state.project.fullText || "";
 
 
