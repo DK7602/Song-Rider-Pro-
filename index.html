@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=1">
+  <link rel="manifest" href="./manifest.webmanifest?v=62">
   <style>
     :root{
     --horseRunH: 74px;   /* running GIF size */
@@ -172,12 +172,19 @@
       flex-wrap:wrap;
       overflow-x:hidden;
     }
-    .row.nowrap{
-      flex-wrap:nowrap;
-      overflow-x:hidden;
-      gap:6px;
-    }
+.row.nowrap{
+  flex-wrap:nowrap;
+  overflow:hidden;
+  gap:6px;
+  min-width:0;                 /* 🔥 allows shrinking */
+}
+   /* ✅ allow children in the top header row to shrink instead of pushing Key off-screen */
+#panelBody .row.nowrap > *{ min-width:0; } 
+}
 
+#panelBody .row.nowrap > *{
+  min-width:0;
+}
     .pill{
       border:1px solid #111;
       background:#111;
@@ -242,13 +249,65 @@
       height:34px;
       text-align:center;
     }
-   .tinyField.key input{
-  width:64px;              /* ✅ smaller so it fits beside Capo */
-  text-align:center;
-  padding-left:0;
+/* ✅ BPM pill with tiny label inside (label + input share one capsule) */
+.tinyCombo{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  height:34px;
+  padding:0 8px;                 /* ✅ compact */
+  border-radius:12px;
+  border:1px solid rgba(0,0,0,.12);
+  background:#fff;
+  flex:0 0 auto;
 }
+
+.tinyCombo .tinyLbl{
+  font-size:10px;
+  font-weight:1100;
+  letter-spacing:.4px;
+  color:#666;
+  line-height:1;
+  user-select:none;
+}
+
+/* ✅ hard-force compact BPM input */
+#bpmInput{
+  width:40px !important;
+  min-width:40px !important;
+  max-width:40px !important;
+  height:32px;
+  border:none;
+  outline:none;
+  background:transparent;
+  padding:0;
+  font-size:13px;
+  text-align:center;
+  -webkit-appearance:none;
+  appearance:none;
+}
+
+.tinyCombo input{
+  width:44px;            /* ✅ keeps it compact so the row doesn’t squish */
+  height:32px;
+  border:none;
+  outline:none;
+  background:transparent;
+  padding:0;
+  font-size:13px;
+  text-align:center;
+  -webkit-appearance:none;
+  appearance:none;
+}
+
+ .tinyField.key input{
+  width:56px;
+  min-width:0;                /* 🔥 critical */
+  padding-left:0;
+ }
+    
 @media (min-width: 420px){
-  .tinyField.key input{ width:78px; }  /* ✅ a little bigger on wider phones */
+  .tinyField.key input{ width:72px; }  /* ✅ a little bigger on wider phones */
 }
 
     .tinyField input[readonly]{ background:#f6f6f7; }
@@ -321,6 +380,20 @@
     }
 
     .tabs{ display:none; }
+    
+.miniIconBtn{
+  width:34px; height:34px;
+  border-radius:999px;
+  display:flex; align-items:center; justify-content:center;
+  border:1px solid rgba(0,0,0,.12);
+  background:#fff;
+  font-size:16px;
+  flex:0 0 auto;
+  cursor:pointer;
+  user-select:none;
+  line-height:1;
+}
+.miniIconBtn:active{ transform:scale(0.98); }
 
     /* ✅ main MUST be flex:1 so it fills below header */
     main{
@@ -666,14 +739,59 @@
       user-select:none;
       font-size:13px;
     }
+/* =========================
+   CAPO / STEP TOGGLE (vertical letters, always visible)
+========================= */
+/* ✅ CAPO/STEP pill created by app.js (single button with id capoStepToggle) */
+#capoStepToggle{
+  width:26px;
+  height:34px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,.18);
+  background:#fff;
+  color:#111;
+  font-weight:1100;
+  font-size:11px;
+
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  overflow:hidden;
+}
+#capoStepToggle.on{
+  background:#111;
+  color:#fff;
+}
+/* =========================
+   KEY WINDOW: keep on-screen (CSS safety net)
+   (works if your key window uses #keyWindow)
+========================= */
+#keyWindow{
+  position:fixed !important;
+  left:50% !important;
+  top: max(12px, env(safe-area-inset-top)) !important;
+  transform: translateX(-50%) !important;
+
+  width:min(520px, calc(100vw - 24px)) !important;
+  max-height: calc(100vh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  overflow:auto !important;
+
+  z-index:9999 !important;
+  box-sizing:border-box !important;
+} 
   </style>
 </head>
 
 <body>
   <!-- ✅ Horse GIFs -->
   <div class="horseWrap" id="horseWrap" aria-hidden="true">
-    <img id="horseRight" src="./Horserunsright.gif?v=61" alt="Horse runs right"/>
-    <img id="horseLeft"  src="./Horserunsleft.gif?v=61"  alt="Horse runs left"/>
+    <img id="horseRight" src="./Horserunsright.gif?v=62" alt="Horse runs right"/>
+    <img id="horseLeft"  src="./Horserunsleft.gif?v=62"  alt="Horse runs left"/>
   </div>
 
   <header>
@@ -705,13 +823,18 @@
       </div>
 
       <div id="panelBody">
-        <div class="row nowrap">
+        <div class="row nowrap" id="topControlsRow">
 
           <button id="undoBtn" class="miniIconBtn" type="button" title="Undo (Ctrl/Cmd+Z)">↶</button>
 <button id="redoBtn" class="miniIconBtn" type="button" title="Redo (Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z)">↷</button>
 <button id="saveBtn" class="miniIconBtn" type="button" title="Save">💾</button>
-          <div class="tinyField"><input id="bpmInput" type="number" min="40" max="220" step="1" value="95"/></div>
-          <div class="tinyField"><input id="capoInput" type="number" min="0" max="12" step="1" value="0"/></div>
+          <div class="tinyCombo">
+  <span class="tinyLbl">BPM</span>
+  <input id="bpmInput" type="number" min="40" max="220" step="1" value="95"/>
+</div>
+<div class="tinyField">
+  <input id="capoInput" type="number" min="0" max="12" step="1" value="0"/>
+</div>
           <div class="tinyField key"><input id="keyOutput" type="text" readonly value="—"/></div>
         </div>
 
@@ -786,23 +909,9 @@
   </div>
 
   <!-- ✅ tiny helper: measure sticky header height into CSS var -->
+
+<script src="./lame.min.js?v=62"></script>
+  <script src="./app.js?v=62"></script>
   <script>
-    (function(){
-      function syncHeaderH(){
-        var h = document.querySelector("header");
-        if(!h) return;
-        var r = h.getBoundingClientRect();
-        var px = Math.ceil(r.height || 0);
-        document.documentElement.style.setProperty("--headerH", px + "px");
-      }
-      window.addEventListener("load", syncHeaderH);
-      window.addEventListener("resize", syncHeaderH);
-      setTimeout(syncHeaderH, 60);
-      setTimeout(syncHeaderH, 300);
-    })();
-  </script>
-  
-<script src="./lame.min.js?v=1"></script>
-  <script src="./app.js?v=61"></script>
 </body>
 </html>
