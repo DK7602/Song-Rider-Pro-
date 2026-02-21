@@ -20,7 +20,27 @@ Utils
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const now = () => Date.now();
+function clampToViewport(el, pad=12){
+  if(!el) return;
 
+  el.style.position = "fixed";
+  el.style.maxWidth  = `calc(100vw - ${pad*2}px)`;
+  el.style.maxHeight = `calc(100vh - ${pad*2}px)`;
+  el.style.overflow  = "auto";
+
+  const r = el.getBoundingClientRect();
+  let left = r.left;
+  let top  = r.top;
+
+  if(r.right > window.innerWidth - pad) left -= (r.right - (window.innerWidth - pad));
+  if(r.left  < pad)                    left += (pad - r.left);
+
+  if(r.bottom > window.innerHeight - pad) top -= (r.bottom - (window.innerHeight - pad));
+  if(r.top    < pad)                      top += (pad - r.top);
+
+  el.style.left = `${left}px`;
+  el.style.top  = `${top}px`;
+}
 function uuid(){
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -250,7 +270,87 @@ function injectHeaderMiniIconBtnStyle(){
   `;
   document.head.appendChild(style);
 }
+function injectHeaderControlTightStyle(){
+  const old = document.getElementById("srpHeaderControlTightStyle");
+  if(old) old.remove();
 
+  const style = document.createElement("style");
+  style.id = "srpHeaderControlTightStyle";
+style.textContent = `
+  /* ===== TOP CONTROLS ROW: FIT — NO HORIZONTAL SCROLL ===== */
+  #topControlsRow{
+    display:flex !important;
+    flex-wrap:nowrap !important;
+    align-items:center !important;
+    gap:6px !important;
+    overflow:hidden !important;              /* ✅ no scroll */
+  }
+  #topControlsRow > *{
+    flex:0 0 auto !important;
+    min-width:0 !important;
+  }
+
+  /* ===== BPM: compact ===== */
+  #bpmInput{
+    width:40px !important;
+    min-width:40px !important;
+    max-width:40px !important;
+    padding:6px 4px !important;
+    text-align:center !important;
+    font-weight:900 !important;
+  }
+
+  /* ===== CAPO/STEP input: slightly tighter ===== */
+  #capoInput{
+    width:52px !important;
+    min-width:52px !important;
+    max-width:52px !important;
+    padding:6px 6px !important;
+    text-align:center !important;
+    font-weight:900 !important;
+  }
+
+  /* ===== KEY output: slightly tighter ===== */
+  #keyOutput{
+    width:52px !important;
+    min-width:52px !important;
+    max-width:52px !important;
+    text-align:center !important;
+    font-weight:900 !important;
+  }
+
+  /* ===== CAPO/STEP vertical pill ===== */
+  #capoStepToggle{
+    display:inline-flex !important;
+    flex:0 0 auto !important;
+
+    width:26px !important;
+    height:34px !important;
+    padding:0 !important;
+    margin-left:0 !important;
+
+    border-radius:999px !important;
+    border:1px solid rgba(0,0,0,.18) !important;
+    background:#fff !important;
+
+    align-items:center !important;
+    justify-content:center !important;
+
+    writing-mode:vertical-rl !important;
+    transform:rotate(180deg) !important;
+
+    font-size:11px !important;
+    font-weight:900 !important;
+    letter-spacing:1px !important;
+    line-height:1 !important;
+
+    white-space:nowrap !important;
+    overflow:hidden !important;
+  }
+  #capoStepToggle.on{ background:#111 !important; color:#fff !important; }
+`;
+  document.head.appendChild(style);
+}
 
 /***********************
 Active card + active lyrics
@@ -261,10 +361,16 @@ let lastActiveCardEl = null;
 document.addEventListener("focusin", (e) => {
   const t = e.target;
 
-  if(t && t.tagName === "TEXTAREA" && t.classList.contains("lyrics")){
+  // ✅ Track BOTH card lyrics textarea AND Full textarea
+  if(t && t.tagName === "TEXTAREA" && (t.classList.contains("lyrics") || t.classList.contains("fullBox"))){
     lastLyricsTextarea = t;
-    const card = t.closest(".card");
-    if(card) lastActiveCardEl = card;
+
+    // Only set active card when it's a card textarea
+    if(t.classList.contains("lyrics")){
+      const card = t.closest(".card");
+      if(card) lastActiveCardEl = card;
+    }
+
     refreshRhymesFromActive();
     return;
   }
@@ -274,6 +380,7 @@ document.addEventListener("focusin", (e) => {
     if(card) lastActiveCardEl = card;
   }
 });
+
 
 document.addEventListener("pointerdown", (e) => {
   const card = e.target && e.target.closest ? e.target.closest(".card") : null;
@@ -455,6 +562,8 @@ function defaultProject(name="New Song"){
   name,
   createdAt: now(),
   updatedAt: now(),
+   transposeMode: "capo",
+steps: 0,
   bpm: 95,
   capo: 0,
   fullText: "",
@@ -501,6 +610,8 @@ function normalizeProject(p){
   if(!p.sections || typeof p.sections !== "object") p.sections = {};
   if(!Number.isFinite(p.bpm)) p.bpm = 95;
   if(!Number.isFinite(p.capo)) p.capo = 0;
+  if(p.transposeMode !== "capo" && p.transposeMode !== "step") p.transposeMode = "capo";
+  if(!Number.isFinite(p.steps)) p.steps = 0;
 
   SECTIONS.filter(s=>s!=="Full").forEach(sec => {
     if(!Array.isArray(p.sections[sec])) p.sections[sec] = [];
@@ -602,6 +713,8 @@ const state = {
   bpm: 95,
   capo: 0,
   autoSplit: true,
+  transposeMode: "capo", // "capo" | "step"
+  steps: 0,              // semitone transpose when in STEP mode
 
   instrument: "piano",
   instrumentOn: false,
@@ -662,6 +775,62 @@ lastAutoBar: -1,
   recMixWired: false,
   recKeepAlive: null,
 };
+function roundToHalf(n){
+  n = Number(n);
+  if(!Number.isFinite(n)) return 0;
+  return Math.round(n * 2) / 2;
+}
+
+function getTransposeSemis(){
+  // capo is always integer semis, step can be .5
+  if(state.transposeMode === "step") return roundToHalf(state.steps);
+  return Math.round(Number(state.capo) || 0);
+}
+function commitCapoStepFromInput(fromToggle=false){
+  if(!el.capoInput || !state.project) return;
+
+  // normalize decimal comma just in case
+  const rawStr = String(el.capoInput.value ?? "").trim().replace(",", ".");
+  const rawNum = Number(rawStr);
+
+  if(state.transposeMode === "step"){
+    const steps = clamp(roundToHalf(rawNum), -24, 24);
+
+    editProject("steps", () => {
+      state.steps = steps;
+      state.project.steps = steps;
+    });
+
+    // keep UI stable (no “snap to int then back”)
+    el.capoInput.step = "0.5";
+    el.capoInput.inputMode = "decimal";
+    el.capoInput.value = String(steps);
+  }else{
+    const capo = clamp(Math.round(Number.isFinite(rawNum) ? rawNum : 0), 0, 12);
+
+    editProject("capo", () => {
+      state.capo = capo;
+      state.project.capo = capo;
+    });
+
+    el.capoInput.step = "1";
+    el.capoInput.inputMode = "numeric";
+    el.capoInput.value = String(capo);
+  }
+
+  // update displays
+  refreshDisplayedNoteCells();
+  updateKeyFromAllNotes();
+}
+
+// Helper: split into integer semis (for chord-name math) + fractional semis (for detune)
+function splitTranspose(semisFloat){
+  const s = Number(semisFloat) || 0;
+  const intSemis = Math.trunc(s);          // toward 0
+  const fracSemis = s - intSemis;          // -0.5..+0.5 possible
+  return { intSemis, fracSemis };
+} 
+
 /***********************
 UNDO / REDO (Project History)
 - Tracks meaningful edits to the current project
@@ -690,6 +859,9 @@ function projectSignature(p){
       name: p?.name || "",
       bpm: p?.bpm || 0,
       capo: p?.capo || 0,
+            transposeMode: p?.transposeMode || "capo",
+      steps: p?.steps || 0,
+
       fullText: p?.fullText || "",
       sections: p?.sections || {}
     });
@@ -1916,12 +2088,17 @@ function playSingleNoteForInstrument(rawChord, durMs){
   const ch0 = parseChordToken(rawChord);
   if(!ch0) return;
 
-  const capo = (state.capo|0) % 12;
-  const ch = {
-    ...ch0,
-    rootPC: (ch0.rootPC + capo + 12) % 12,
-    bassPC: (ch0.bassPC === null) ? null : ((ch0.bassPC + capo + 12) % 12)
-  };
+const tr = splitTranspose(getTransposeSemis());
+const capoInt = ((tr.intSemis % 12) + 12) % 12;
+
+const ch = {
+  ...ch0,
+  rootPC: (ch0.rootPC + capoInt + 12) % 12,
+  bassPC: (ch0.bassPC === null) ? null : ((ch0.bassPC + capoInt + 12) % 12)
+};
+
+// fractional semis applied as freq multiplier later
+const fracMul = Math.pow(2, (tr.fracSemis / 12));
 
   const ctx = ensureCtx();
 
@@ -1930,7 +2107,7 @@ function playSingleNoteForInstrument(rawChord, durMs){
   if(state.instrument === "piano") freqs = buildPianoVoicing(ch).map(midiToFreq);
   else freqs = buildGuitarStrumVoicing(ch).map(midiToFreq);
 
-  const f = freqs[Math.min(freqs.length-1, 3)] || freqs[0] || 440;
+  const f = (freqs[Math.min(freqs.length-1, 3)] || freqs[0] || 440) * fracMul;
 
   if(state.instrument === "acoustic"){
     const n = acousticPluckSafe(ctx, f, durMs, 0.95);
@@ -1947,7 +2124,7 @@ function playSingleNoteForInstrument(rawChord, durMs){
   }
 }
 
-  function playAcousticChord(ch, durMs){
+ function playAcousticChord(ch, durMs, fracMul=1){
   const ctx = ensureCtx();
   const token = state.audioToken;
 
@@ -1970,7 +2147,8 @@ function playSingleNoteForInstrument(rawChord, durMs){
 
   // strum
   const midi = buildGuitarStrumVoicing(ch);
-  const freqs = midi.map(midiToFreq);
+ const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
+
 
   const bpm = clamp(state.bpm||95, 40, 220);
   const strumMs = clamp(Math.round(24_000 / bpm), 12, 28);
@@ -1995,7 +2173,7 @@ function playSingleNoteForInstrument(rawChord, durMs){
 
 
 
-function playElectricChord(ch, durMs){
+function playElectricChord(ch, durMs, fracMul=1){
   const ctx = ensureCtx();
   const token = state.audioToken;
 
@@ -2010,7 +2188,8 @@ function playElectricChord(ch, durMs){
   dryBus.connect(room.in);
 
   const midi = buildGuitarStrumVoicing(ch);
-  const freqs = midi.map(midiToFreq);
+ const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
+
 
   const bpm = clamp(state.bpm||95, 40, 220);
   const strumMs = clamp(Math.round(20_000 / bpm), 10, 22);
@@ -2032,7 +2211,7 @@ function playElectricChord(ch, durMs){
   scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 2200);
 }
 
-function playPianoChord(ch, durMs){
+function playPianoChord(ch, durMs, fracMul=1){
   const ctx = ensureCtx();
   const room = makeSoftRoom(ctx);
 
@@ -2048,7 +2227,7 @@ function playPianoChord(ch, durMs){
   wet.connect(getOutNode());
 
   const midi = buildPianoVoicing(ch);
-  const freqs = midi.map(midiToFreq);
+ const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
 
   const bpm = clamp(state.bpm||95, 40, 220);
   const rollMs = clamp(Math.round(16_000 / bpm), 6, 18);
@@ -2072,30 +2251,33 @@ function playChordForInstrument(rawChord, durMs){
   const ch0 = parseChordToken(rawChord);
   if(!ch0) return;
 
-  const capo = (state.capo|0) % 12;
-  const ch = {
-    ...ch0,
-    rootPC: (ch0.rootPC + capo + 12) % 12,
-    bassPC: (ch0.bassPC === null) ? null : ((ch0.bassPC + capo + 12) % 12)
-  };
+  const tr = splitTranspose(getTransposeSemis());
+const capoInt = ((tr.intSemis % 12) + 12) % 12;
 
-  if(state.instrument === "acoustic") playAcousticChord(ch, durMs);
-  else if(state.instrument === "electric") playElectricChord(ch, durMs);
-  else playPianoChord(ch, durMs);
+const ch = {
+  ...ch0,
+  rootPC: (ch0.rootPC + capoInt + 12) % 12,
+  bassPC: (ch0.bassPC === null) ? null : ((ch0.bassPC + capoInt + 12) % 12)
+};
+
+// store multiplier so chord players can use it
+const fracMul = Math.pow(2, (tr.fracSemis / 12));
+
+  if(state.instrument === "acoustic") playAcousticChord(ch, durMs, fracMul);
+else if(state.instrument === "electric") playElectricChord(ch, durMs, fracMul);
+else playPianoChord(ch, durMs, fracMul);
 }
 
 /***********************
 Transpose display (now chord-aware)
 ***********************/
 function refreshDisplayedNoteCells(){
-  const root = el.sheetBody;
-  if(!root) return;
-  const active = document.activeElement;
+  // chord-name transpose must be integer semis (round for display)
+  const semis = Math.round(getTransposeSemis()) % 12;
 
-  root.querySelectorAll("input.noteCell").forEach(inp => {
-    if(inp === active) return;
-    const raw = String(inp.dataset.raw || "").trim();
-    inp.value = (state.capo ? transposeChordName(raw, state.capo) : raw);
+  document.querySelectorAll(".noteCell").forEach(inp => {
+    const raw = inp.dataset.raw || inp.value || "";
+    inp.value = (semis ? transposeChordName(raw, semis) : raw);
   });
 }
 
@@ -2901,8 +3083,28 @@ function startInstrument(){
   state.audioToken++; // new generation
   updateClock();
 }
+function stopAllMusic(){
+  // stops drum sequencer + instrument clocked playback
+  stopDrums();
+  stopInstrument();
 
+  // stop MP3 sync (horse/tick)
+  stopAudioSync();
 
+  // ✅ reset drum pills (remove green)
+  document.querySelectorAll(
+    "#drumRock, #drumHardRock, #drumPop, #drumRap"
+  ).forEach(btn => btn.classList.remove("active"));
+
+  // ✅ reset instrument pills (remove green)
+  document.querySelectorAll(
+    "#instAcoustic, #instElectric, #instPiano"
+  ).forEach(btn => btn.classList.remove("active"));
+
+  // clear running modes in state
+  state.drumMode = null;
+  state.instrumentMode = null;
+}
 /***********************
 UI helpers
 ***********************/
@@ -2913,7 +3115,79 @@ function setActive(ids, activeId){
     b.classList.toggle("active", id === activeId);
   });
 }
+function ensureCapoStepToggle(){
+  if(!el.capoInput) return;
 
+  // Wrap input + pill together (side-by-side)
+  let wrap = document.getElementById("capoStepWrap");
+  if(!wrap){
+    wrap = document.createElement("span");
+    wrap.id = "capoStepWrap";
+    wrap.style.display = "inline-flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "6px";
+
+    const parent = el.capoInput.parentNode;
+    parent.insertBefore(wrap, el.capoInput);
+    wrap.appendChild(el.capoInput);
+  }else{
+    if(el.capoInput.parentNode !== wrap) wrap.appendChild(el.capoInput);
+  }
+
+  // Create the single pill button if missing
+  let btn = document.getElementById("capoStepToggle");
+  if(!btn){
+    btn = document.createElement("button");
+    btn.id = "capoStepToggle";
+    btn.type = "button";
+    btn.className = "miniIconBtn";
+    wrap.appendChild(btn);
+  }else{
+    if(btn.parentNode !== wrap) wrap.appendChild(btn);
+  }
+
+  // Paint pill + input based on mode
+  function repaint(){
+    const mode = (state.transposeMode === "step") ? "step" : "capo";
+    btn.textContent = (mode === "step") ? "STEP" : "CAPO";
+    btn.setAttribute("aria-label", btn.textContent);
+
+    // visual
+    btn.classList.toggle("on", mode === "step");
+
+    // input behavior
+    if(mode === "capo"){
+      el.capoInput.step = "1";
+      el.capoInput.inputMode = "numeric";
+      el.capoInput.value = String(Number.isFinite(state.capo) ? state.capo : 0);
+    }else{
+      el.capoInput.step = "0.5";
+      el.capoInput.inputMode = "decimal";
+      el.capoInput.value = String(Number.isFinite(state.steps) ? state.steps : 0);
+    }
+  }
+
+  // Always wire once (even if button already existed)
+  if(!btn.dataset.wired){
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      editProject("transposeMode", () => {
+        state.transposeMode = (state.transposeMode === "capo") ? "step" : "capo";
+        if(state.project) state.project.transposeMode = state.transposeMode;
+      });
+
+      repaint();
+      refreshDisplayedNoteCells();
+      updateKeyFromAllNotes();
+      updateFullIfVisible?.();
+    });
+  }
+
+  repaint();
+}
 function renderNoteLenUI(){
   if(el.instDots) el.instDots.classList.toggle("active", state.noteLenMode === "eighth");
   if(el.instTieBar) el.instTieBar.classList.toggle("active", state.noteLenMode === "bar");
@@ -3203,7 +3477,8 @@ function updateKeyFromAllNotes(){
   });
 
   const k = keyFromHistogram(hist);
-  const transposedPC = (k.pc + (state.capo % 12) + 12) % 12;
+  const semisInt = Math.round(getTransposeSemis()) % 12;   // ✅ key name must be integer semis
+  const transposedPC = ((k.pc + semisInt) % 12 + 12) % 12; // ✅ always 0..11
   el.keyOutput.value = `${PC_TO_NAME[transposedPC]} ${k.mode}`;
 }
 
@@ -3295,7 +3570,7 @@ function buildFullPreviewText(){
 
       if(!hasNotes && !hasBeats && !hasLyrics) return;
 
-      const aligned = buildAlignedLine(line, state.capo || 0);
+      const aligned = buildAlignedLine(line, getTransposeSemis() || 0);
 
       out.push(`(${idx+1})`);
       out.push(`    ${aligned.notesLine}`);
@@ -3337,7 +3612,7 @@ function buildFullPreviewHtmlDoc(title){
       const hasLyrics = !!lyr;
       if(!hasNotes && !hasBeats && !hasLyrics) return;
 
-      const aligned = buildAlignedLine(line, state.capo || 0);
+      const aligned = buildAlignedLine(line,getTransposeSemis() || 0);
 
       lines.push({ kind:"idx", text:`(${idx+1})` });
       lines.push({ kind:"notes", text:`    ${aligned.notesLine}` });
@@ -3567,6 +3842,14 @@ if(state.currentSection === "Full"){
 
   const ta = document.createElement("textarea");
   ta.className = "fullBox";
+  ta.addEventListener("focus", () => {
+  lastLyricsTextarea = ta;     // ✅ so rhyme taps insert into Full view
+  refreshRhymesFromActive();
+});
+ta.addEventListener("click", () => {
+  lastLyricsTextarea = ta;     // ✅ cursor moves, seed word changes
+  refreshRhymesFromActive();
+});
   ta.readOnly = false;
   ta.placeholder =
 `VERSE 1
@@ -3822,70 +4105,59 @@ card.appendChild(delBtn);
       beatsRow.appendChild(inp);
     }
 
-    lyr.addEventListener("input", () => {
-     editProject("lyrics", () => {
-  line.lyrics = lyr.value;
-});
+   lyr.addEventListener("input", () => {
+  editProject("lyrics", () => {
+    // 1) set lyrics
+    line.lyrics = lyr.value;
 
-// ✅ syll pill text + glow band
-updateSyllPill(syll, line.lyrics || "");
-
-updateFullIfVisible();
-
-refreshRhymesFromActive();
-
-// ✅ AutoSplit stays ON, but "/" overrides this one line
-if(state.autoSplit){
-  applyBeatsFromLyrics(line);
-
-  for(let k=0;k<4;k++){
-    beatInputs[k].value = line.beats[k] || "";
-  }
-
-  updateFullIfVisible();
-}
-
-
-    if(state.autoSplit && lyr.value.includes("\n")){
-  const parts = lyr.value.split("\n");
-  const first = parts.shift();
-  line.lyrics = first;
-
-  // ✅ update current card beats & pill after trimming to first line
-  updateSyllPill(syll, line.lyrics || "");
-  applyBeatsFromLyrics(line);
-
-  // refresh the visible beat boxes for the current card
-  for(let k=0;k<4;k++){
-    beatInputs[k].value = line.beats[k] || "";
-  }
-
-  const rest = parts.join("\n").trim();
-
-  if(rest){
-    const nl = newLine();
-    nl.lyrics = rest;
-
-    // ✅ new card also respects "/" manual override if present
+    // 2) autosplit beats / manual slash override
     if(state.autoSplit){
-      applyBeatsFromLyrics(nl);
+      applyBeatsFromLyrics(line);
     }
 
-    arr.splice(idx+1, 0, nl);
-    syncFullTextFromSections();
-  }
- 
+    // 3) If user pasted multiple lines, split into new card(s)
+    if(state.autoSplit && String(line.lyrics || "").includes("\n")){
+      const parts = String(line.lyrics || "").split("\n");
+      const first = parts.shift() || "";
+      line.lyrics = first;
 
-        
-        upsertProject(state.project);
-        renderSheet();
-        updateFullIfVisible();
-        updateKeyFromAllNotes();
-        clearTick(); applyTick();
-        refreshDisplayedNoteCells();
-        refreshRhymesFromActive();
+      // update beats for trimmed first line
+      if(state.autoSplit) applyBeatsFromLyrics(line);
+
+      const rest = parts.join("\n").trim();
+      if(rest){
+        const nl = newLine();
+        nl.lyrics = rest;
+        if(state.autoSplit) applyBeatsFromLyrics(nl);
+        arr.splice(idx+1, 0, nl);
       }
-    });
+    }
+
+    // ✅ THE FIX: keep Full view text accurate for every card edit
+    syncFullTextFromSections();
+  });
+
+  // UI updates (no saving needed here; editProject already saves)
+  updateSyllPill(syll, line.lyrics || "");
+
+  // refresh beat boxes from model (in case autosplit/manual changed)
+  if(state.autoSplit){
+    for(let k=0;k<4;k++){
+      beatInputs[k].value = line.beats[k] || "";
+    }
+  }
+
+  refreshRhymesFromActive();
+
+  // If we split into new cards, rerender so you see them immediately
+  if(String(lyr.value || "").includes("\n")){
+    renderSheet();
+    updateKeyFromAllNotes();
+    clearTick(); applyTick();
+    refreshDisplayedNoteCells();
+    refreshRhymesFromActive();
+  }
+});
 
     card.appendChild(top);
     card.appendChild(notesRow);
@@ -4432,14 +4704,15 @@ await renderRecordings();
   state.isRecording = true;
   setRecordUI();
 }
-
 async function stopRecording(){
+  // ✅ PANIC STOP: kill drums + instrument + mp3-sync immediately
+  stopAllMusic();
+
   if(!state.rec) return;
   try{ state.rec.stop(); }catch{}
   state.isRecording = false;
   setRecordUI();
 }
-
 async function toggleRecording(){
   try{
     if(state.isRecording) await stopRecording();
@@ -4485,9 +4758,22 @@ function applyProjectSettingsToUI(){
 
   state.bpm = clamp(parseInt(state.project.bpm,10) || 95, 40, 220);
   state.capo = clamp(parseInt(state.project.capo,10) || 0, 0, 12);
+  state.transposeMode = state.project.transposeMode || "capo";
+state.steps = clamp(roundToHalf(parseFloat(state.project.steps) || 0), -24, 24);
+
 
   if(el.bpmInput) el.bpmInput.value = String(state.bpm);
-  if(el.capoInput) el.capoInput.value = String(state.capo);
+if(el.bpmInput) el.bpmInput.value = String(state.bpm);
+
+if(el.capoInput){
+  el.capoInput.value = String(
+    state.transposeMode === "capo"
+      ? state.capo
+      : state.steps
+  );
+}
+
+ensureCapoStepToggle();
 
   updateKeyFromAllNotes();
   refreshDisplayedNoteCells();
@@ -4521,6 +4807,14 @@ function getLastWord(text){
 function getSeedFromTextarea(ta){
   if(!ta) return "";
 
+  // ✅ FULL view: seed from text before cursor (last word)
+  if(ta.classList && ta.classList.contains("fullBox")){
+    const pos = (typeof ta.selectionStart === "number") ? ta.selectionStart : (ta.value || "").length;
+    const before = String(ta.value || "").slice(0, pos);
+    return getLastWord(before) || "";
+  }
+
+  // CARD view: prefer previous card's last word, else current last word
   const card = ta.closest(".card");
   if(card){
     const allCards = Array.from(el.sheetBody.querySelectorAll(".card"));
@@ -4566,8 +4860,14 @@ async function fetchDatamuseNearRhymes(word, max = 24){
 }
 
 function insertWordIntoLyrics(word){
+  // ✅ Use the currently active textarea if it’s lyrics or fullBox
+  const active = document.activeElement;
+  if(active && active.tagName === "TEXTAREA" && (active.classList.contains("lyrics") || active.classList.contains("fullBox"))){
+    lastLyricsTextarea = active;
+  }
+
   if(!lastLyricsTextarea){
-    const first = el.sheetBody.querySelector("textarea.lyrics");
+    const first = el.sheetBody.querySelector("textarea.lyrics") || el.sheetBody.querySelector("textarea.fullBox");
     if(first) lastLyricsTextarea = first;
   }
   if(!lastLyricsTextarea) return;
@@ -4588,10 +4888,12 @@ function insertWordIntoLyrics(word){
   ta.value = before + insert + after;
 
   const newPos = (before + insert).length;
-  ta.selectionStart = ta.selectionEnd = newPos;
+  try{ ta.selectionStart = ta.selectionEnd = newPos; }catch{}
 
+  // ✅ Trigger normal input pipeline (cards OR full view)
   ta.dispatchEvent(new Event("input", { bubbles:true }));
 }
+
 
 async function renderRhymes(seed){
   const word = normalizeWord(seed);
@@ -4675,6 +4977,8 @@ function updateAudioButtonsUI(){
   refreshDisplayedNoteCells();
   
   updateAudioButtonsUI();
+    ensureCapoStepToggle();
+    injectHeaderControlTightStyle();
 }
 /***********************
 SECTION paging (swipe left/right)
@@ -4830,7 +5134,110 @@ function wire(){
       setTimeout(()=> el.saveBtn && el.saveBtn.classList.remove("savedFlash"), 220);
     }catch{}
   });
+  // ✅ create the CAPO/STEP pill + force inline wrap
+  ensureCapoStepToggle();
+  injectHeaderControlTightStyle();
+  // ✅ CAPTURE commit: prevents any other blur/change handlers from snapping .5 to int
+if(el.capoInput){
+  const commitCapoStep_CAPTURE = (e) => {
+    e.stopImmediatePropagation();
 
+    const mode = (state.transposeMode === "step") ? "step" : "capo";
+    let v = parseFloat(el.capoInput.value);
+    if(!Number.isFinite(v)) v = 0;
+
+    if(mode === "capo"){
+      v = clamp(Math.round(v), 0, 12);
+      state.capo = v;
+      if(state.project) state.project.capo = v;
+      el.capoInput.value = String(v);
+    }else{
+      v = clamp(Math.round(v * 2) / 2, -24, 24);
+      state.steps = v;
+      if(state.project) state.project.steps = v;
+      el.capoInput.value = String(v);
+    }
+
+    if(state.project) upsertProject(state.project);
+
+    // keep UI synced
+    ensureCapoStepToggle();
+    refreshDisplayedNoteCells();
+    updateKeyFromAllNotes();
+    updateFullIfVisible?.();
+  };
+
+  el.capoInput.addEventListener("change", commitCapoStep_CAPTURE, true);
+  el.capoInput.addEventListener("blur", commitCapoStep_CAPTURE, true);
+}
+// ===== CAPO / STEP input (mode-aware, supports .5 in STEP) =====
+function roundToHalf(n){
+  return Math.round(n * 2) / 2;
+}
+
+function commitCapoOrStepFromInput(){
+  const mode = state.transposeMode || "capo";
+  const raw = parseFloat(el.capoInput.value);
+  let v = Number.isFinite(raw) ? raw : 0;
+
+  if(mode === "capo"){
+    v = clamp(Math.round(v), 0, 12);
+    state.capo = v;
+    if(state.project) state.project.capo = v;
+    el.capoInput.step = "1";
+    el.capoInput.inputMode = "numeric";
+    el.capoInput.value = String(v);
+  }else{
+    v = clamp(roundToHalf(v), -24, 24);
+    state.steps = v;
+    if(state.project) state.project.steps = v;
+    el.capoInput.step = "0.5";
+    el.capoInput.inputMode = "decimal";
+    el.capoInput.value = String(v);
+  }
+
+  if(state.project) upsertProject(state.project);
+  refreshDisplayedNoteCells();
+  updateKeyFromAllNotes();
+  updateFullIfVisible();
+  ensureCapoStepToggle(); // ✅ re-paint label CAPO/STEP every commit
+}
+if(el.capoInput){
+  el.capoInput.addEventListener("keydown", (e) => {
+    if(e.key === "Enter"){
+      e.preventDefault();
+      e.stopPropagation();
+      el.capoInput.blur();
+    }
+  });
+
+  el.capoInput.addEventListener("input", () => {
+    const mode = state.transposeMode || "capo";
+    const raw = parseFloat(el.capoInput.value);
+    const v = Number.isFinite(raw) ? raw : 0;
+
+    editProject("transposeAmount", () => {
+      if(mode === "capo"){
+        state.capo = clamp(v, 0, 12);
+        if(state.project) state.project.capo = state.capo;
+      }else{
+        state.steps = clamp(v, -24, 24);
+        if(state.project) state.project.steps = state.steps;
+      }
+    });
+
+    refreshDisplayedNoteCells();
+    updateKeyFromAllNotes();
+  });
+
+  el.capoInput.addEventListener("change", () => {
+    editProject("capoOrStep", () => commitCapoOrStepFromInput());
+  });
+
+  el.capoInput.addEventListener("blur", () => {
+    editProject("capoOrStep", () => commitCapoOrStepFromInput());
+  });
+}
   // Keyboard shortcuts (don’t trigger while typing in inputs/textareas)
   document.addEventListener("keydown", (e) => {
     const a = document.activeElement;
@@ -4925,25 +5332,26 @@ function wire(){
     refreshDisplayedNoteCells();
   }
 
-  el.capoInput.addEventListener("input", () => {
-    const raw = el.capoInput.value;
-    if(raw === "") return;
+ el.capoInput.addEventListener("input", () => {
+   
+  const mode = state.transposeMode || "capo";
+   
+ const raw = parseFloat(el.capoInput.value);
+const v = Number.isFinite(raw) ? raw : 0; 
 
-    const n0 = parseInt(raw, 10);
-    if(!Number.isFinite(n0)) return;
-
-    const n = clamp(n0, 0, 12);
-
-    state.capo = n;
-    if(state.project){
-      state.project.capo = n;
-      upsertProject(state.project);
+  editProject("transposeAmount", () => {
+    if(mode === "capo"){
+      state.capo = clamp(v, 0, 12);
+      if(state.project) state.project.capo = state.capo;
+    }else{
+      state.steps = clamp(v, -24, 24);
+      if(state.project) state.project.steps = state.steps;
     }
-
-    updateKeyFromAllNotes();
-    updateFullIfVisible();
-    refreshDisplayedNoteCells();
   });
+
+  refreshDisplayedNoteCells();
+  updateKeyFromAllNotes();
+}); 
 
   el.capoInput.addEventListener("change", commitCapo);
   el.capoInput.addEventListener("blur", commitCapo);
