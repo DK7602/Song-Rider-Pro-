@@ -993,15 +993,17 @@ if(parked) parked.style.visibility = "visible";
 }
 
 function horseShouldRun(){
-  // “as the mp3 / instrument / drums play…”
-  return !!(state.drumsOn || state.instrumentOn || state.audioSyncOn);
+  // Run horse when ANY time-based playback is happening:
+  // drums, instrument, mp3 sync, OR autoscroll-only
+  return !!(state.autoScrollOn || state.drumsOn || state.instrumentOn || state.audioSyncOn);
 }
 
 function triggerHorseRun(){
-  const parked = document.getElementById("horseParked");
-if(parked) parked.style.visibility = "hidden";
-
   if(!horseShouldRun()) return;
+
+  const parked = document.getElementById("horseParked");
+  if(parked) parked.style.visibility = "hidden";
+
   if(!el.horseRight || !el.horseLeft) return;
 
   const bpm = clamp(state.bpm || 95, 40, 220);
@@ -3028,7 +3030,27 @@ function updateClock(){
   }
 }
 
+function resetAutoScrollToFirstCardOfActivePage(){
+  if(!state.autoScrollOn) return;
+  if(state.currentSection === "Full") return;
 
+  const cards = getCards();
+  if(!cards.length) return;
+
+  let idx = 0;
+  const firstIdx = firstNonBlankCardIndexInDOM();
+  if(firstIdx !== null) idx = firstIdx;
+
+  state.playCardIndex = idx;
+  state.lastAutoBar = -1; // restart bar-advance guard
+  state.tick8 = 0;        // restart the bar clock so we begin at bar 1
+
+  const tgt = cards[idx] || cards[0];
+  if(tgt) scrollCardIntoView(tgt);
+
+  clearTick();
+  applyTick();
+}
 function stopDrums(){
   if(state.drumTimer){
     clearInterval(state.drumTimer);
@@ -3042,6 +3064,8 @@ function startDrums(){
   stopDrums();
   state.drumsOn = true;
   updateClock();
+
+  resetAutoScrollToFirstCardOfActivePage();
 
   const bpm = clamp(state.bpm || 95, 40, 220);
   const stepMs = Math.round((60000 / bpm) / 4);
@@ -3084,6 +3108,8 @@ function startInstrument(){
   ensureCtx();
   state.audioToken++; // new generation
   updateClock();
+
+  resetAutoScrollToFirstCardOfActivePage();
 }
 function stopAllMusic(){
   // stops drum sequencer + instrument clocked playback
