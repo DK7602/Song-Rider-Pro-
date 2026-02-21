@@ -145,9 +145,10 @@ function injectBspCardLook(){
   style.textContent = `
     /* ===== REEL-IN CARD LOOK (2 cards visible, smaller text) ===== */
 
-    .cards{
-      padding-bottom: 18px;
-    }
+  .cards{
+  /* ✅ give the scroll container enough runway so the LAST card can lift fully into view */
+  padding-bottom: calc(100vh + env(safe-area-inset-bottom));
+}
 
     .card{
       position: relative !important;      /* needed for + / × positioning */
@@ -2456,7 +2457,8 @@ function scrollCardIntoView(card){
     const pad = 12;
     const target = Math.max(0, Math.round(sb.scrollTop + delta - pad));
 
-    sb.scrollTop = target;
+    const maxScroll = Math.max(0, sb.scrollHeight - sb.clientHeight);
+sb.scrollTop = Math.min(maxScroll, target);
     return;
   }
 
