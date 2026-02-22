@@ -145,9 +145,9 @@ function injectBspCardLook(){
   style.textContent = `
     /* ===== REEL-IN CARD LOOK (2 cards visible, smaller text) ===== */
 
-  .cards{
-  /* ✅ give the scroll container enough runway so the LAST card can lift fully into view */
-  padding-bottom: calc(100vh + env(safe-area-inset-bottom));
+.cards{
+  /* ✅ enough runway for last card without giant slack */
+  padding-bottom: calc(clamp(140px, 35vh, 260px) + env(safe-area-inset-bottom));
 }
 
     .card{
