@@ -419,19 +419,27 @@
       box-shadow:var(--shadow);
       border:1px solid rgba(0,0,0,.06);
       overflow:hidden;
+       position:relative;
 
       flex:1;
       display:flex;
       flex-direction:column;
       min-height:calc(100vh - var(--headerH) - 24px);
     }
+    
+.sheetHeader{
+  /* ✅ stays pinned to the TOP of the LOWER scroll panel (#sheetBody) */
+  position: sticky;
+  top: 0;
+  z-index: 5;
 
-    .sheetHeader{
-      padding:10px 12px;
-      border-bottom:1px solid rgba(0,0,0,.06);
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
-      flex-wrap:wrap;
-    }
+  padding:10px 12px;
+  background: var(--card);
+  border-bottom:1px solid rgba(0,0,0,.06);
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  flex-wrap:wrap;
+}
+   
     .sheetHeader h2{ margin:0; font-size:14px; font-weight:1100; letter-spacing:.3px; }
     .hint{ font-size:12px; color:var(--muted); font-weight:900; }
 
@@ -892,16 +900,21 @@
     <div class="tabs hidden" id="tabs"></div>
   </header>
 
-  <main>
-    <div class="sheet" id="editorRoot">
+<main>
+  <div class="sheet" id="editorRoot">
+    <!-- ✅ #sheetBody is the LOWER panel scroller; header must be INSIDE it so sticky works -->
+    <div id="sheetBody">
       <div class="sheetHeader">
         <h2 id="sheetTitle">Full</h2>
         <div class="sheetActions" id="sheetActions"></div>
         <div class="hint" id="sheetHint"></div>
       </div>
-      <div id="sheetBody"></div>
+
+      <!-- ✅ app.js renders into this, so the sticky header never gets wiped -->
+      <div id="sheetInner"></div>
     </div>
-  </main>
+  </div>
+</main>
 
   <div class="rBtn" id="rBtn">R</div>
   <div class="rhymeDock" id="rhymeDock">
@@ -917,7 +930,48 @@
   <!-- ✅ tiny helper: measure sticky header height into CSS var -->
 
 <script src="./lame.min.js?v=62"></script>
-  <script src="./app.js?v=62"></script>
-  <script>
+<script src="./app.js?v=62"></script>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  const header = document.querySelector("header");
+  if(!header) return;
+
+  let raf = 0;
+  const syncHeaderH = () => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      const h = Math.ceil(header.getBoundingClientRect().height || 0);
+      root.style.setProperty("--headerH", h + "px");
+    });
+  };
+
+  // initial
+  syncHeaderH();
+
+  // keep updated
+  window.addEventListener("resize", syncHeaderH, { passive:true });
+
+  // updates after Show/Hide toggles
+  const toggleBtn = document.getElementById("togglePanelBtn");
+  if(toggleBtn){
+    toggleBtn.addEventListener("click", () => {
+      // wait for DOM/layout to settle, then measure
+      setTimeout(syncHeaderH, 0);
+      setTimeout(syncHeaderH, 60);
+    });
+  }
+
+  // observe header size changes (covers dynamic rows showing/hiding)
+  if("ResizeObserver" in window){
+    const ro = new ResizeObserver(syncHeaderH);
+    ro.observe(header);
+  }else{
+    const mo = new MutationObserver(syncHeaderH);
+    mo.observe(header, { attributes:true, childList:true, subtree:true });
+  }
+})();
+</script>
 </body>
-  </html>
+</html>
