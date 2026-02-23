@@ -1623,7 +1623,7 @@ function noteTokenToMidi(s, defaultOct=4){
 function nearestMidiForPC(pc, targetMidi){
   const t = Math.round(targetMidi);
   const candidates = [];
-  for(let k=-4;k<=4;k++){
+  for(let k=-24;k<=24;k++){
     const m = t + k;
     if(((m % 12) + 12) % 12 === pc) candidates.push(m);
   }
