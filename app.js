@@ -1947,7 +1947,7 @@ function pianoNote(ctx, freq, durMs, vel=0.9){
   out.gain.setValueAtTime(peak * 0.85, endTime);
 
   const longFactor = clamp((dur - 0.8) / 2.6, 0, 1);
-  const tail = clamp(1.2 + dur * 1.05 + longFactor * 3.1, 1.4, 9.0);
+const tail = clamp(1.2 + dur * 1.05 + longFactor * 3.1, 1.4, 5.0);
   out.gain.exponentialRampToValueAtTime(0.0001, endTime + tail);
 
   const nodes = [out];
@@ -2169,9 +2169,10 @@ const fracMul = Math.pow(2, (tr.fracSemis / 12));
     const n = electricGuitarSafe(ctx, f, durMs, 0.90);
     n.out.connect(getOutNode());
     scheduleCleanup([n.out], durMs + 1400);
-  }else{
+   }else{
+    const fx = ensurePianoFx(ctx);
     const n = pianoNote(ctx, f, durMs, 0.95);
-    n.out.connect(getOutNode());
+    n.out.connect(fx.dryBus);
     scheduleCleanup([n.out], durMs + 6000);
   }
 }
@@ -2195,8 +2196,9 @@ function playMelodyNoteForInstrument(rawNote, durMs){
     n.out.connect(getOutNode());
     scheduleCleanup([n.out], durMs + 1400);
   }else{
+    const fx = ensurePianoFx(ctx);
     const n = pianoNote(ctx, f, durMs, 0.95);
-    n.out.connect(getOutNode());
+    n.out.connect(fx.dryBus);
     scheduleCleanup([n.out], durMs + 6000);
   }
 }
@@ -2314,9 +2316,6 @@ function playPianoChord(ch, durMs, fracMul=1){
       scheduleCleanup([n.out], durMs + 11_000);
     }, delayMs);
   }
-}
-
-  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 12_000);
 }
 
 function playChordForInstrument(rawChord, durMs){
