@@ -120,9 +120,9 @@ saveBtn: $("saveBtn"),
   tabs: $("tabs"),
   sheetTitle: $("sheetTitle"),
   sheetHint: $("sheetHint"),
-  sheetBody: $("sheetBody"),
-  sheetActions: $("sheetActions"),
-
+sheetBody: $("sheetBody"),
+sheetInner: $("sheetInner"),
+sheetActions: $("sheetActions"),
   rBtn: $("rBtn"),
   rhymeDock: $("rhymeDock"),
   hideRhymeBtn: $("hideRhymeBtn"),
@@ -2353,7 +2353,8 @@ function getHeaderBottomY(){
 }
 
 function getCards(){
-  return Array.from(el.sheetBody.querySelectorAll(".card"));
+  const root = el.sheetInner || el.sheetBody;
+  return root ? Array.from(root.querySelectorAll(".card")) : [];
 }
 
 function getVisibleCards(){
@@ -3863,7 +3864,7 @@ function renderSheet(){
 
 if(state.currentSection === "Full"){
   el.sheetHint.textContent = 'Paste + edit. Use headings: VERSE 1, CHORUS 1, VERSE 2, CHORUS 2, VERSE 3, BRIDGE, CHORUS 3. Blank line = next card.';
-  el.sheetBody.innerHTML = "";
+(el.sheetInner || el.sheetBody).innerHTML = "";
 
   const wrap = document.createElement("div");
   wrap.className = "fullBoxWrap";
@@ -3940,7 +3941,7 @@ ta.value = state.project.fullText || "";
 upsertProject(state.project); // ok to keep (no history needed on first open)
 
   wrap.appendChild(ta);
-  el.sheetBody.appendChild(wrap);
+(el.sheetInner || el.sheetBody).appendChild(wrap);
   return;
 }
 
@@ -4194,8 +4195,8 @@ card.appendChild(delBtn);
     cardsWrap.appendChild(card);
   });
 
-  el.sheetBody.innerHTML = "";
-  el.sheetBody.appendChild(cardsWrap);
+(el.sheetInner || el.sheetBody).innerHTML = "";
+(el.sheetInner || el.sheetBody).appendChild(cardsWrap);
 
   lastActiveCardEl = getNearestVisibleCard();
   clearTick(); applyTick();
@@ -4845,7 +4846,8 @@ function getSeedFromTextarea(ta){
   // CARD view: prefer previous card's last word, else current last word
   const card = ta.closest(".card");
   if(card){
-    const allCards = Array.from(el.sheetBody.querySelectorAll(".card"));
+    const root = el.sheetInner || el.sheetBody;
+const allCards = root ? Array.from(root.querySelectorAll(".card")) : [];
     const idx = allCards.indexOf(card);
     const prev = allCards[idx - 1];
     if(prev){
@@ -4895,7 +4897,8 @@ function insertWordIntoLyrics(word){
   }
 
   if(!lastLyricsTextarea){
-    const first = el.sheetBody.querySelector("textarea.lyrics") || el.sheetBody.querySelector("textarea.fullBox");
+const root = el.sheetInner || el.sheetBody;
+const first = root ? (root.querySelector("textarea.lyrics") || root.querySelector("textarea.fullBox")) : null; 
     if(first) lastLyricsTextarea = first;
   }
   if(!lastLyricsTextarea) return;
