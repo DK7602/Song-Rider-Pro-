@@ -1587,7 +1587,27 @@ function parseChordToken(raw){
 function midiToFreq(m){
   return 440 * Math.pow(2, (m - 69)/12);
 }
+// Accepts: C, C#, Db, F4, Bb3 (octave optional)
+function isSingleNoteToken(s){
+  const t = String(s||"").trim().replace(/♯/g,"#").replace(/♭/g,"b");
+  return /^([A-Ga-g])\s*([#b])?\s*(\d)?$/.test(t);
+}
 
+// MIDI: C4 = 60. If octave omitted, defaultOct=4.
+function noteTokenToMidi(s, defaultOct=4){
+  const t = String(s||"").trim().replace(/♯/g,"#").replace(/♭/g,"b");
+  const m = t.match(/^([A-Ga-g])\s*([#b])?\s*(\d)?$/);
+  if(!m) return null;
+
+  const name = (m[1].toUpperCase() + (m[2]||""));
+  const pc = NOTE_TO_PC[name] ?? null;
+  if(pc === null) return null;
+
+  const oct = (m[3] !== undefined) ? Number(m[3]) : defaultOct;
+  if(!Number.isFinite(oct)) return null;
+
+  return ((oct + 1) * 12) + pc;
+}
 function nearestMidiForPC(pc, targetMidi){
   const t = Math.round(targetMidi);
   const candidates = [];
@@ -1690,7 +1710,36 @@ function makeSoftRoom(ctx){
 
   return { in: inG, wet, nodes:[inG,d,fb,lp,wet] };
 }
+/***********************
+PIANO FX (shared chain) — prevents runaway node creation/freezes
+***********************/
+function ensurePianoFx(ctx){
+  if(state._pianoFx && state._pianoFx.ctx === ctx) return state._pianoFx;
 
+  // best-effort disconnect old chain (if any)
+  try{
+    if(state._pianoFx?.nodes){
+      state._pianoFx.nodes.forEach(n => { try{ n.disconnect(); }catch{} });
+    }
+  }catch{}
+
+  const room = makeSoftRoom(ctx);
+
+  const dryBus = ctx.createGain();
+  dryBus.gain.value = 0.95;
+
+  const wet = ctx.createGain();
+  wet.gain.value = 0.26;
+
+  dryBus.connect(getOutNode());
+  dryBus.connect(room.in);
+
+  room.wet.connect(wet);
+  wet.connect(getOutNode());
+
+  state._pianoFx = { ctx, dryBus, wet, room, nodes:[dryBus, wet, ...room.nodes] };
+  return state._pianoFx;
+}
 function makeCabinet(ctx){
   const hp = ctx.createBiquadFilter();
   hp.type = "highpass";
@@ -2126,7 +2175,31 @@ const fracMul = Math.pow(2, (tr.fracSemis / 12));
     scheduleCleanup([n.out], durMs + 6000);
   }
 }
+function playMelodyNoteForInstrument(rawNote, durMs){
+  const midi0 = noteTokenToMidi(rawNote, 4);
+  if(midi0 === null) return;
 
+  const tr = splitTranspose(getTransposeSemis());
+  const fracMul = Math.pow(2, (tr.fracSemis / 12));
+  const midi = midi0 + (tr.intSemis|0);
+  const f = midiToFreq(midi) * fracMul;
+
+  const ctx = ensureCtx();
+
+  if(state.instrument === "acoustic"){
+    const n = acousticPluckSafe(ctx, f, durMs, 0.95);
+    n.out.connect(getOutNode());
+    scheduleCleanup(n.nodes, durMs + 2200);
+  }else if(state.instrument === "electric"){
+    const n = electricGuitarSafe(ctx, f, durMs, 0.90);
+    n.out.connect(getOutNode());
+    scheduleCleanup([n.out], durMs + 1400);
+  }else{
+    const n = pianoNote(ctx, f, durMs, 0.95);
+    n.out.connect(getOutNode());
+    scheduleCleanup([n.out], durMs + 6000);
+  }
+}
  function playAcousticChord(ch, durMs, fracMul=1){
   const ctx = ensureCtx();
   const token = state.audioToken;
@@ -2216,21 +2289,13 @@ function playElectricChord(ch, durMs, fracMul=1){
 
 function playPianoChord(ch, durMs, fracMul=1){
   const ctx = ensureCtx();
-  const room = makeSoftRoom(ctx);
+  const token = state.audioToken;
 
-  const dryBus = ctx.createGain();
-  dryBus.gain.value = 0.95;
-
-  const wet = ctx.createGain();
-  wet.gain.value = 0.26;
-
-  dryBus.connect(getOutNode());
-  dryBus.connect(room.in);
-  room.wet.connect(wet);
-  wet.connect(getOutNode());
+  // ✅ Reuse one shared piano FX chain (prevents freeze from node buildup)
+  const fx = ensurePianoFx(ctx);
 
   const midi = buildPianoVoicing(ch);
- const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
+  const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
 
   const bpm = clamp(state.bpm||95, 40, 220);
   const rollMs = clamp(Math.round(16_000 / bpm), 6, 18);
@@ -2240,12 +2305,16 @@ function playPianoChord(ch, durMs, fracMul=1){
     const delayMs = i * rollMs;
 
     setTimeout(() => {
+      if(token !== state.audioToken) return;
+      if(!state.instrumentOn) return;
+
       const vel = clamp(0.90 - i*0.06, 0.55, 0.98);
       const n = pianoNote(ctx, f, durMs, vel);
-      n.out.connect(dryBus);
+      n.out.connect(fx.dryBus);
       scheduleCleanup([n.out], durMs + 11_000);
     }, delayMs);
   }
+}
 
   scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 12_000);
 }
@@ -2602,7 +2671,11 @@ function playInstrumentStep(){
     }
     return;
   }
-
+  // ✅ Single-note token (C, F#, Bb3, etc.) = play the exact note (fixes "wrong notes")
+  if(isSingleNoteToken(raw)){
+    playMelodyNoteForInstrument(raw, eighthMs);
+    return;
+  }
   // default chord cell = normal strum
   if(!parseChordToken(raw)) return;
 
