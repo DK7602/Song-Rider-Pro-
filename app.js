@@ -1931,99 +1931,109 @@ return { out: makeup, nodes:[ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,p
 PIANO NOTE (make "_" ties hold LONGER)
 ***********************/
 function pianoNote(ctx, freq, durMs, vel=0.9){
+  // ✅ MOBILE-SAFE piano: lighter synth + hard polyphony cap (prevents freezes)
   const t0 = ctx.currentTime;
-  const dur = Math.max(0.12, durMs/1000);
+  const dur = Math.max(0.10, (durMs||120)/1000);
+
+  // Polyphony limiter (disconnect oldest voices if we’re stacking too many)
+  function registerPianoVoice(nodes){
+    state._pianoVoices = state._pianoVoices || [];
+    state._pianoVoices.push(nodes);
+    const LIMIT = 18; // keep it low for phones
+    while(state._pianoVoices.length > LIMIT){
+      const old = state._pianoVoices.shift();
+      (old || []).forEach(n => { try{ n.disconnect(); }catch{} });
+    }
+  }
 
   const out = ctx.createGain();
-  const peak = 0.18 * clamp(vel, 0.2, 1.0);
+  const peak = 0.14 * clamp(vel, 0.2, 1.0);
+
+  // Envelope (short + capped tail)
+  const atk = 0.006;
+  const hold = Math.min(0.16, 0.04 + dur*0.18);
+  const endTime = t0 + dur;
+  const tail = Math.min(1.6, 0.55 + dur*0.35); // ✅ cap release tail hard
 
   out.gain.setValueAtTime(0.0001, t0);
-  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
-
-  const hold = Math.min(0.34, 0.07 + dur * 0.22);
-  out.gain.setValueAtTime(peak * 0.92, t0 + hold);
-
-  const endTime = t0 + dur;
-  out.gain.setValueAtTime(peak * 0.85, endTime);
-
-  const longFactor = clamp((dur - 0.8) / 2.6, 0, 1);
-const tail = clamp(1.2 + dur * 1.05 + longFactor * 3.1, 1.4, 5.0);
+  out.gain.exponentialRampToValueAtTime(peak, t0 + atk);
+  out.gain.setValueAtTime(peak * 0.82, t0 + hold);
   out.gain.exponentialRampToValueAtTime(0.0001, endTime + tail);
 
   const nodes = [out];
 
+  // 3 partials (much cheaper than 5)
   const partials = [
     {h:1, a:1.00},
-    {h:2, a:0.32},
-    {h:3, a:0.18},
-    {h:4, a:0.10},
-    {h:5, a:0.06}
+    {h:2, a:0.28},
+    {h:3, a:0.14}
   ];
 
   for(const p of partials){
     const o = ctx.createOscillator();
     const g = ctx.createGain();
 
-    const inharm = 1 + (p.h>=3 ? 0.0018 : 0.0008);
-    o.type = "sine";
-    o.frequency.value = freq * p.h * inharm;
-    o.detune.value = (Math.random()*2-1) * 5;
+    o.type = (p.h === 1) ? "triangle" : "sine";
+    o.frequency.value = freq * p.h;
+    o.detune.value = (Math.random()*2 - 1) * 4;
 
-    const a = (0.16 * clamp(vel,0.2,1.0)) * p.a;
+    const a = (0.12 * clamp(vel,0.2,1.0)) * p.a;
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(a, t0 + 0.006);
-    g.gain.setValueAtTime(a * 0.70, endTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, endTime + Math.min(9.0, tail));
+    g.gain.exponentialRampToValueAtTime(a, t0 + 0.010);
+    g.gain.exponentialRampToValueAtTime(0.0001, endTime + tail);
 
     o.connect(g);
     g.connect(out);
 
     o.start(t0);
-    o.stop(endTime + Math.min(9.2, tail) + 0.15);
+    o.stop(endTime + tail + 0.08);
 
     nodes.push(o,g);
   }
 
-  // hammer noise
-  const nLen = 0.018;
-  const bufferSize = Math.max(256, Math.floor(ctx.sampleRate * nLen));
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for(let i=0;i<data.length;i++){
-    data[i] = (Math.random()*2-1) * (1 - i/data.length);
-  }
+  // Tiny hammer noise (very short)
   const ns = ctx.createBufferSource();
-  ns.buffer = buffer;
+  const bufLen = Math.max(256, Math.min(2048, Math.floor(ctx.sampleRate * 0.012)));
+  const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+  const ch = buf.getChannelData(0);
+  for(let i=0;i<bufLen;i++){
+    const x = 1 - (i/(bufLen-1));
+    ch[i] = (Math.random()*2-1) * x * x;
+  }
+  ns.buffer = buf;
 
   const nf = ctx.createBiquadFilter();
   nf.type = "highpass";
-  nf.frequency.value = 900;
-  nf.Q.value = 0.7;
+  nf.frequency.value = 1200;
 
   const ng = ctx.createGain();
   ng.gain.setValueAtTime(0.0001, t0);
-  ng.gain.exponentialRampToValueAtTime(0.07 * clamp(vel,0.2,1.0), t0 + 0.002);
-  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
+  ng.gain.exponentialRampToValueAtTime(0.045 * clamp(vel,0.2,1.0), t0 + 0.004);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.040);
 
   ns.connect(nf);
   nf.connect(ng);
   ng.connect(out);
 
   ns.start(t0);
-  ns.stop(t0 + nLen + 0.01);
+  ns.stop(t0 + 0.020);
 
   nodes.push(ns,nf,ng);
 
-  // soundboard/body EQ
+  // Light body EQ (keep, but cheap)
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
-  body.frequency.value = 280;
-  body.Q.value = 0.8;
-  body.gain.value = 2.0;
+  body.frequency.value = 260;
+  body.Q.value = 0.9;
+  body.gain.value = 1.6;
 
   out.connect(body);
 
-  scheduleCleanup([...nodes, body], (durMs + (tail*1000) + 1200));
+  // Cleanup + register voice for limiter
+  const killMs = Math.round((dur + tail) * 1000) + 800;
+  scheduleCleanup([...nodes, body], killMs);
+  registerPianoVoice([...nodes, body]);
+
   return { out: body, nodes:[...nodes, body] };
 }
 
@@ -2549,7 +2559,14 @@ Tie utilities (across cards)
 ***********************/
 function getNoteRawFromCell(cell){
   if(!cell) return "";
-  return String(cell.dataset?.raw || cell.value || "").trim();
+  let raw = String(cell.dataset?.raw || cell.value || "").trim();
+
+  // ✅ Normalize "natural" suffix used by your UI (e.g. "F#n", "Bb3n") so playback reads it as a note.
+  // Also normalize the unicode natural sign (♮).
+  raw = raw.replace(/♮/g, "n");
+  raw = raw.replace(/^([A-Ga-g])\s*([#b])?\s*(\d?)\s*n$/i, "$1$2$3");
+
+  return raw.trim();
 }
 function isDotsToken(s){
   const t = String(s || "").trim();
