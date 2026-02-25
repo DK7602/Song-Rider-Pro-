@@ -3895,6 +3895,38 @@ function enableSection(sec){
   }
 }
 
+
+function deleteSectionPage(sec){
+  if(!state.project) return;
+  if(sec === "Full") return;
+
+  // only allow delete if the page has no chords/lyrics/notes/beats
+  if(sectionHasAnyContent(sec)){
+    alert("This page has content. Clear the cards first, then delete the page.");
+    return;
+  }
+
+  // remove from enabledSections so it disappears
+  if(Array.isArray(state.project.enabledSections)){
+    state.project.enabledSections = state.project.enabledSections.filter(s => s !== sec);
+  }else{
+    state.project.enabledSections = [];
+  }
+
+  // reset the section to a single blank card (keeps data model consistent)
+  if(!state.project.sections) state.project.sections = {};
+  state.project.sections[sec] = [ newLine() ];
+
+  upsertProject(state.project);
+
+  // move away so it can hide immediately
+  if(state.currentSection === sec){
+    goToSection("Full");
+  }else{
+    renderAllSections();
+  }
+}
+
 function addNextSectionInSequence(){
   if(!state.project) return;
 
@@ -3914,6 +3946,7 @@ function addNextSectionInSequence(){
   nextSection();
 }
 
+
 function renderSheetActions(){
   el.sheetActions.innerHTML = "";
 
@@ -3921,16 +3954,26 @@ function renderSheetActions(){
   if(state.currentSection === "Full") return;
 
   // ✅ Add “+ Page” button
-  const btn = document.createElement("button");
-  btn.className = "miniIconBtn";
-  btn.type = "button";
-  btn.title = "Add next page";
-  btn.textContent = "+";
-  btn.addEventListener("click", () => {
+  const addBtn = document.createElement("button");
+  addBtn.className = "miniIconBtn";
+  addBtn.type = "button";
+  addBtn.title = "Add next page";
+  addBtn.textContent = "+";
+  addBtn.addEventListener("click", () => {
     editProject("addNextPage", () => addNextSectionInSequence());
   });
+  el.sheetActions.appendChild(addBtn);
 
-  el.sheetActions.appendChild(btn);
+  // ✅ Add “X Delete page” button (for blank pages)
+  const delBtn = document.createElement("button");
+  delBtn.className = "miniIconBtn";
+  delBtn.type = "button";
+  delBtn.title = "Delete this page (blank only)";
+  delBtn.textContent = "×";
+  delBtn.addEventListener("click", () => {
+    editProject("deletePage", () => deleteSectionPage(state.currentSection));
+  });
+  el.sheetActions.appendChild(delBtn);
 }
 function buildFullTemplate(){
   return `VERSE 1
