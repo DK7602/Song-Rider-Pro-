@@ -558,19 +558,21 @@ function defaultProject(name="New Song"){
   SECTIONS.filter(s=>s!=="Full").forEach(sec => {
     sections[sec] = [ newLine() ]; // ✅ start with ONE card
   });
- return {
-  id: uuid(),
-  name,
-  createdAt: now(),
-  updatedAt: now(),
-   transposeMode: "capo",
-steps: 0,
-  bpm: 95,
-  capo: 0,
-  fullText: "",
-  fullSeeded: false,   // ✅ NEW
-  sections
-};
+
+  return {
+    id: uuid(),
+    name,
+    createdAt: now(),
+    updatedAt: now(),
+    transposeMode: "capo",
+    steps: 0,
+    bpm: 95,
+    capo: 0,
+    fullText: "",
+    fullSeeded: false,   // ✅ NEW
+    enabledSections: [], // ✅ NEW: only show “pages” once enabled or content exists
+    sections
+  };
 }
 
 function loadAllProjects(){
@@ -608,6 +610,8 @@ function normalizeProject(p){
 
   if(typeof p.fullText !== "string") p.fullText = "";
   if(typeof p.fullSeeded !== "boolean") p.fullSeeded = false; // ✅ NEW
+  if(!Array.isArray(p.enabledSections)) p.enabledSections = []; // ✅ NEW
+p.enabledSections = p.enabledSections.filter(s => SECTIONS.includes(s) && s !== "Full");
   if(!p.sections || typeof p.sections !== "object") p.sections = {};
   if(!Number.isFinite(p.bpm)) p.bpm = 95;
   if(!Number.isFinite(p.capo)) p.capo = 0;
@@ -3587,16 +3591,43 @@ function rotate(arr, t){
   return out;
 }
 function keyFromHistogram(hist){
+
   const hn = norm(hist);
   let best = { score:-1e9, pc:0, mode:"maj" };
+
   for(let t=0;t<12;t++){
     const maj = rotate(MAJOR_PROFILE, t);
     const min = rotate(MINOR_PROFILE, t);
+
     const sMaj = dot(hist, maj)/hn/norm(maj);
     const sMin = dot(hist, min)/hn/norm(min);
-    if(sMaj > best.score) best = { score:sMaj, pc:t, mode:"maj" };
-    if(sMin > best.score) best = { score:sMin, pc:t, mode:"min" };
+
+    if(sMaj > best.score){
+      best = { score:sMaj, pc:t, mode:"maj" };
+    }
+    if(sMin > best.score){
+      best = { score:sMin, pc:t, mode:"min" };
+    }
   }
+
+  // -----------------------------
+  // 🔥 MINOR TONIC OVERRIDE FIX
+  // -----------------------------
+  // If tonic pitch class has strong minor chord presence,
+  // prefer minor mode even if major profile slightly wins.
+
+  const tonicWeight = hist[best.pc] || 0;
+
+  // Compare direct correlation of both modes at tonic
+  const majScore = dot(hist, rotate(MAJOR_PROFILE, best.pc))/hn;
+  const minScore = dot(hist, rotate(MINOR_PROFILE, best.pc))/hn;
+
+  // If minor is close or higher and tonic appears as minor chord,
+  // force minor
+  if(minScore > majScore * 0.92){
+    best.mode = "min";
+  }
+
   return best;
 }
 
@@ -3853,10 +3884,53 @@ async function exportFullPreview(){
 /***********************
 Sheet rendering
 ***********************/
+function enableSection(sec){
+  if(!state.project) return;
+  if(sec === "Full") return;
+
+  if(!Array.isArray(state.project.enabledSections)) state.project.enabledSections = [];
+  if(!state.project.enabledSections.includes(sec)){
+    state.project.enabledSections.push(sec);
+    upsertProject(state.project);
+  }
+}
+
+function addNextSectionInSequence(){
+  if(!state.project) return;
+
+  // find first “next” section after current that is NOT yet visible
+  const startIdx = Math.max(0, SECTIONS.indexOf(state.currentSection));
+  for(let step=1; step<SECTIONS.length; step++){
+    const sec = SECTIONS[(startIdx + step) % SECTIONS.length];
+    if(sec === "Full") continue;
+    if(!isSectionVisible(sec)){
+      enableSection(sec);
+      goToSection(sec);
+      return;
+    }
+  }
+
+  // if all are already visible, just go next
+  nextSection();
+}
+
 function renderSheetActions(){
-  // ✅ no "+ Line" in the header anymore
   el.sheetActions.innerHTML = "";
+
+  // No actions on Full page
   if(state.currentSection === "Full") return;
+
+  // ✅ Add “+ Page” button
+  const btn = document.createElement("button");
+  btn.className = "miniIconBtn";
+  btn.type = "button";
+  btn.title = "Add next page";
+  btn.textContent = "+";
+  btn.addEventListener("click", () => {
+    editProject("addNextPage", () => addNextSectionInSequence());
+  });
+
+  el.sheetActions.appendChild(btn);
 }
 function buildFullTemplate(){
   return `VERSE 1
@@ -5121,7 +5195,27 @@ function updateAudioButtonsUI(){
 SECTION paging (swipe left/right)
 Order loops back to Full after CHORUS 3
 ***********************/
-const SECTION_PAGES = SECTIONS.slice(); // includes "Full" first
+function sectionHasAnyContent(sec){
+  // uses your existing data-check helper
+  return firstContentLineIndexInSection(sec) !== null;
+}
+
+function isSectionVisible(sec){
+  if(sec === "Full") return true;
+  if(!state.project) return true;
+
+  const enabled = Array.isArray(state.project.enabledSections) ? state.project.enabledSections : [];
+  return enabled.includes(sec) || sectionHasAnyContent(sec) || sec === state.currentSection;
+}
+
+function getVisibleSectionPages(){
+  const pages = ["Full"];
+  for(const sec of SECTIONS){
+    if(sec === "Full") continue;
+    if(isSectionVisible(sec)) pages.push(sec);
+  }
+  return pages;
+}
 
 function isEditableEl(target){
   if(!target) return false;
@@ -5133,6 +5227,7 @@ function isEditableEl(target){
 
 function goToSection(sec){
   if(!sec || sec === state.currentSection) return;
+  if(sec !== "Full" && !isSectionVisible(sec)) return; // ✅ don’t navigate to hidden pages
 
   state.currentSection = sec;
   state.playCardIndex = null;
@@ -5149,21 +5244,22 @@ function goToSection(sec){
   refreshDisplayedNoteCells();
   updateFullIfVisible();
 
-scrollToTopOfSheet();
+  scrollToTopOfSheet();
 }
 
 function nextSection(){
-  const i = SECTION_PAGES.indexOf(state.currentSection);
-  const next = SECTION_PAGES[(i + 1) % SECTION_PAGES.length];
+  const pages = getVisibleSectionPages();
+  const i = pages.indexOf(state.currentSection);
+  const next = pages[(i + 1) % pages.length];
   goToSection(next);
 }
 
 function prevSection(){
-  const i = SECTION_PAGES.indexOf(state.currentSection);
-  const prev = SECTION_PAGES[(i - 1 + SECTION_PAGES.length) % SECTION_PAGES.length];
+  const pages = getVisibleSectionPages();
+  const i = pages.indexOf(state.currentSection);
+  const prev = pages[(i - 1 + pages.length) % pages.length];
   goToSection(prev);
 }
-
 /***********************
 Swipe detection (horizontal)
 ***********************/
