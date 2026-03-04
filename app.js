@@ -1,7 +1,11 @@
-/* app.js (FULL REPLACE MAIN v44) */
+/* app.js (FULL REPLACE MAIN v46_unfrozen_pdfHeadings) */
 (() => {
 
 "use strict";
+
+// ✅ prevents heavy full-text auto-apply from running on every render
+let didInitialFullApply = false;
+let sheetHeaderBtnLock = false;
 
 /***********************
 FORCE-NUKE OLD SERVICE WORKER CACHE
@@ -20,6 +24,24 @@ Utils
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const now = () => Date.now();
+
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
+const nextTick = () => new Promise(r => setTimeout(r, 0));
+
+/***********************
+Textarea autosize (Full page blocks)
+- Makes each section body expand to fit content
+- Prevents inner scrolling between headings
+***********************/
+function autosizeTextarea(ta){
+  if(!ta) return;
+  // Reset then expand to scrollHeight
+  ta.style.height = "auto";
+  ta.style.overflowY = "hidden";
+  // Use scrollHeight; add a tiny buffer to avoid jitter on Android
+  const h = (ta.scrollHeight || 0) + 2;
+  if(h > 0) ta.style.height = h + "px";
+}
 function clampToViewport(el, pad=12){
   if(!el) return;
 
@@ -155,20 +177,29 @@ function injectBspCardLook(){
       margin: 10px 0 !important;          /* tighter so 2 cards fit */
       padding: 12px !important;
       border-radius: 16px !important;
-      padding-top: 56px !important;       /* room for top row + / × */       /* room for + / × */
+      padding-top: 12px !important;       /* top bar is in-flow now */
     }
 
     /* Top row (number + syllables pill) smaller */
     .cardTop{
-      position:absolute !important;
-      top: 10px !important;
-      left: 12px !important;
-      right: 90px !important; /* leave space for + / × */
-      display:flex !important;
-      gap: 10px !important;
-      margin: 0 !important;
+      display: flex !important;
       align-items: center !important;
-      z-index: 3 !important;
+      justify-content: space-between !important;
+      gap: 10px !important;
+      margin-bottom: 8px !important;
+    }
+    .cardTopLeft{
+      display: flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
+    }
+    .cardTopRight{
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      flex: 0 0 auto !important;
     }
     .cardNum{
       width: 34px !important;
@@ -217,27 +248,26 @@ function injectBspCardLook(){
       line-height: 1.15 !important;
       padding: 7px !important;
       border-radius: 12px !important;
-      min-height: 60px !important;
+      min-height: 70px !important;
     }
 
-    /* ===== FIX: + and × spacing ===== */
+    /* ===== Card top right buttons (in-flow) ===== */
     .cardAdd, .cardDel{
-      position: absolute !important;
-      top: 10px !important;
-      width: 34px !important;
+      position: static !important;
+      width: 38px !important;
       height: 34px !important;
       font-size: 18px !important;
-      border-radius: 12px !important;
+      border-radius: 999px !important;
       display: inline-flex !important;
       align-items: center !important;
       justify-content: center !important;
       padding: 0 !important;
       line-height: 1 !important;
+      border: 1px solid rgba(0,0,0,.16) !important;
+      background: rgba(255,255,255,.92) !important;
+      flex: 0 0 auto !important;
     }
-
-    .cardDel{ right: 10px !important; }
-    .cardAdd{ right: 52px !important; }
-  `;
+`;
 
   document.head.appendChild(style);
 }
@@ -406,93 +436,42 @@ document.addEventListener("selectionchange", () => {
 });
 
 /***********************
-Sections (ORDER LOCKED)
+Sections (PAGES)
+- No preset titles.
+- 10 base pages always exist.
+- Extra pages can be added after Page 10.
 ***********************/
-const SECTIONS = ["Full","INTRO","VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
-
-// ✅ Optional extra pages (user-created after CHORUS 3)
-function getExtraSections(){
-  const ex = (state.project && Array.isArray(state.project.extraSections)) ? state.project.extraSections : [];
-  const clean = ex.map(s => String(s||"").trim()).filter(Boolean);
-  const uniq = [];
-  for(const s of clean){ if(!uniq.includes(s) && !SECTIONS.includes(s)) uniq.push(s); }
-  return uniq;
-}
-function getAllSections(){
-  return SECTIONS.concat(getExtraSections());
-}
-function getFullEditSections(){
-  return getAllSections().filter(s => s !== "Full");
-}
-function sectionHasContent(sec){
-  const arr = (state.project && state.project.sections && Array.isArray(state.project.sections[sec])) ? state.project.sections[sec] : [];
-  return arr.some(line => {
-    const lyr = String(line?.lyrics || "").trim();
-    const notes = Array.isArray(line?.notes) ? line.notes : [];
-    const beats = Array.isArray(line?.beats) ? line.beats : [];
-    return !!lyr || notes.some(n => String(n||"").trim()) || beats.some(b => String(b||"").trim());
-  });
-}
-function getHiddenSectionsSet(){
-  if(!state.project) return new Set();
-  if(!Array.isArray(state.project.hiddenSections)) state.project.hiddenSections = [];
-  return new Set(state.project.hiddenSections.map(s=>String(s||"").trim().toUpperCase()));
-}
-function isHiddenBuiltIn(sec){
-  if(!sec) return false;
-  if(sec === "Full") return false;
-  if(!SECTIONS.includes(sec)) return false;
-  const hidden = getHiddenSectionsSet();
-  return hidden.has(String(sec).trim().toUpperCase());
-}
-
-function refreshEnabledSectionsFromContent(){
-  if(!state.project) return;
-  if(!Array.isArray(state.project.enabledSections)) state.project.enabledSections = [];
-  const en = new Set(state.project.enabledSections.map(s => String(s||"").trim()).filter(Boolean));
-  for(const sec of getFullEditSections()){
-    if(sectionHasContent(sec)) en.add(sec);
-  }
-  // ✅ keep user-deleted built-in pages hidden unless they have content
-  for(const sec of SECTIONS){
-    if(sec === "Full") continue;
-    if(isHiddenBuiltIn(sec) && !sectionHasContent(sec)) en.delete(sec);
-  }
-  // Always keep at least one working page
-  if(!en.size) en.add("VERSE 1");
-  state.project.enabledSections = Array.from(en);
-}
-function getSectionPages(){
-  if(!state.project) return SECTIONS.slice();
-  refreshEnabledSectionsFromContent();
-  const en = new Set((state.project.enabledSections||[]).map(s => String(s||"").trim()));
-  const pages = ["Full"];
-  for(const sec of getFullEditSections()){
-    if((en.has(sec) || sectionHasContent(sec)) && !(isHiddenBuiltIn(sec) && !sectionHasContent(sec))) pages.push(sec);
-  }
-  return pages;
-}
-function nextNewExtraName(){
-  // Internal-only id. User will see a blank editable title box and can rename it.
-  // We keep it unique so multiple unnamed extras can exist.
-  let name = "";
-  do{
-    name = "__EXTRA_" + uuid().slice(0,8).toUpperCase();
-  }while(SECTIONS.includes(name) || getExtraSections().map(s=>String(s).toUpperCase()).includes(name.toUpperCase()));
-  return name;
-}
-
-
+const BASE_PAGES = Array.from({length:10}, (_,i)=>`PAGE ${i+1}`);
+const SECTIONS = ["Full", ...BASE_PAGES];
 const MIN_LINES_PER_SECTION = 1;
-/***********************
-FULL PAGE (Beat Sheet Pro style)
-- User types under headings in one big textarea (Full)
-- Blank line = new card
-- Auto-fills cards in each section
-- DOES NOT change export format (export still prints from cards)
-***********************/
-// (dynamic) sections used by Full-page editor
 
+/***********************
+FULL PAGE (Break-Line sections)
+- Full view uses "__________" as the section break line
+- Optional title line appears right after a break line
+- Upload/copy-paste can still use headings like INTRO / VERSE / CHORUS / BRIDGE / OUTRO / INTERLUDE, etc.
+***********************/
+const BREAK_LINE = "__________"; // 10 underscores
+const FULL_EDIT_SECTIONS = BASE_PAGES.slice(); // all non-Full pages
+
+// Global break-line parser
+// Used by both the legacy full-text parser and the newer Full-page block editor.
+// A "break" is either the raw BREAK_LINE, a single underscore "_", or underscore(s)
+// followed by a title (ex: "________VERSE 1" or "_VERSE 1").
+function _parseBreakLine(line){
+  const t = String(line || "").trim();
+  if(!t) return null;
+  if(t === BREAK_LINE) return { title: "" };
+  if(t === "_") return { title: "" };
+  if(t[0] === "_"){
+    const m = t.match(/^_{1,}\s*(.+)$/);
+    if(m){
+      const title = String(m[1] || "").trim();
+      return { title };
+    }
+  }
+  return null;
+}
 
 // match headings like "VERSE 1" or "VERSE 1:" (case-insensitive)
 function normalizeLineBreaks(s){
@@ -500,83 +479,537 @@ function normalizeLineBreaks(s){
 }
 
 function isSectionHeadingLine(line){
-  const t = String(line || "").trim().replace(/:$/, "");
-  const u = t.toUpperCase();
-  const list = getFullEditSections().map(s => String(s||"").trim().toUpperCase());
-  return list.includes(u) ? u : null;
+  // Accept: VERSE 4, [Verse 4], (Verse4), "Verse 4:" etc.
+  let t = String(line || "").trim();
+  if(!t) return null;
+  t = t.replace(/:$/, "");
+  t = t.replace(/^[\[\(\{]+\s*/, "").replace(/\s*[\]\)\}]+$/, "");
+  t = t.toUpperCase().replace(/\s+/g," ").trim();
+  t = t.replace(/^(VERSE|CHORUS)\s*(\d+)$/, "$1 $2");
+
+  // 1) direct match on known section keys
+  if(FULL_EDIT_SECTIONS.includes(t)) return t;
+
+  // 2) allow custom titles (EXTRA pages) to act as headings in Full page
+  //    If the line matches a stored custom title, map it back to the real section key.
+  try{
+    const titles = state?.project?.sectionTitles;
+    if(titles && typeof titles === "object"){
+      for(const k of Object.keys(titles)){
+        const v = String(titles[k] || "").trim();
+        if(!v) continue;
+        const vNorm = v.toUpperCase().replace(/\s+/g," ").trim();
+        if(vNorm === t){
+          const key = String(k || "").toUpperCase().replace(/\s+/g," ").trim();
+          return FULL_EDIT_SECTIONS.includes(key) ? key : null;
+        }
+      }
+    }
+  }catch{}
+
+  
+  // 3) headings that are NOT base pages (VERSE 4+, CHORUS 4+, OUTRO) -> auto EXTRA page
+  const mVC = t.match(/^(VERSE|CHORUS)\s+(\d+)$/);
+  if(mVC){
+    const n = parseInt(mVC[2],10);
+    if(n >= 4){
+      const extra = getOrCreateExtraSectionForTitle(`${mVC[1]} ${n}`);
+      if(extra) return extra;
+    }
+  }
+  if(t === "OUTRO"){
+    const extra = getOrCreateExtraSectionForTitle("OUTRO");
+    if(extra) return extra;
+  }
+return null;
 }
 
-// Parse fullText -> { sections: { "VERSE 1":[lyrics1, lyrics2...], ... } }
+// Parse fullText -> { sections: { "VERSE 1":[{lyrics,chords?}...], ... } }
+// ✅ chord-aware:
+//   - supports "chords line above lyric line" blocks
+//   - supports inline chords like: [G]Amazing [D]Grace  OR  (G)Amazing (D)Grace
+//   - supports simple chord-only lines like: G   D/F#   Em7
 function parseFullTextToSectionCards(fullText){
   const text = normalizeLineBreaks(fullText);
   const lines = text.split("\n");
 
-  // default start section if user types without heading
-  let cur = "VERSE 1";
+  // Decide mode:
+  // - If we see break lines, we parse by breaks -> PAGE 1..10 (+extras)
+  // - Otherwise, we parse by headings (INTRO/VERSE/CHORUS/BRIDGE/OUTRO/INTERLUDE/etc.) into pages sequentially
+  const hasBreaks = lines.some(l => !!_parseBreakLine(l));
+
 
   const buckets = {};
-  getFullEditSections().forEach(s => buckets[s] = []);
+  const titles = {};
 
-  let acc = []; // lines accumulating for current card block
+  // Ensure base buckets exist
+  FULL_EDIT_SECTIONS.forEach(s => buckets[s] = []);
 
-  function flushCard(){
-    // blank-line ends a card
-    const blockLines = acc
-  .map(x => String(x || "").trim())
-  .filter(Boolean); // ✅ trims whitespace-only lines so they never become “blank cards”
-    acc = [];
-    if(!blockLines.length) return;
-
-    // IMPORTANT: join with SPACE so we don’t create "\n" inside a card
-    // (your card textarea treats "\n" as “split into new card”)
-    const lyric = blockLines.join(" ").trim();
-    if(lyric) buckets[cur].push(lyric);
+  function ensureBucket(sec){
+    if(!sec) return;
+    if(!buckets[sec]) buckets[sec] = [];
   }
 
-  for(const rawLine of lines){
-    const line = String(rawLine ?? "");
+  const CHORD_TOKEN_RE = /^([A-G](?:#|b)?)(?:(?:maj|min|m|dim|aug|\+|sus|add)?(?:2|4|5|6|7|9|11|13)?(?:maj7|M7|m7|m9|m11|m13|sus2|sus4|add9|add11|add13|dim7|hdim7|m7b5)?(?:b5|#5|b9|#9|b11|#11|b13|#13)?)?(?:\/[A-G](?:#|b)?)?$|^N\.?C\.?$/i;
 
-    const heading = isSectionHeadingLine(line);
-    if(heading){
-      // finish any pending card in previous section
-      flushCard();
-      cur = heading;
-      continue;
-    }
-
-    if(line.trim() === ""){
-      flushCard();
-      continue;
-    }
-
-    acc.push(line);
+  function isChordToken(tok){
+    let t = String(tok || "").trim();
+    if(!t) return false;
+    t = t.replace(/^[\[\(\{]+/,"").replace(/[\]\)\}]+$/,"").trim();
+    t = t.replace(/♯/g,"#").replace(/♭/g,"b");
+    t = t.replace(/[\.,;:]+$/,"").trim();
+    t = t.replace(/\s+/g,"");
+    return CHORD_TOKEN_RE.test(t);
   }
-  flushCard();
 
+  // ✅ Positional chord tokens:
+  // A leading digit 1-8 sets the target chord box, e.g. "1Am 5Dm" -> slot0=Am, slot4=Dm
+  // IMPORTANT: chord-internal numbers like "E7" are NOT positions (no leading digit).
+  function parsePositionalChordToken(tok){
+    let t = String(tok || "").trim();
+    if(!t) return null;
+
+    // strip surrounding bracket wrappers, keep inner
+    t = t.replace(/^[\[\(\{]+/,"").replace(/[\]\)\}]+$/,"").trim();
+    t = t.replace(/♯/g,"#").replace(/♭/g,"b");
+    t = t.replace(/[\.,;:]+$/,"").trim();
+    t = t.replace(/\s+/g,"");
+
+    const m = t.match(/^([1-8])(.+)$/);
+    if(!m) return null;
+    const slot = clamp(parseInt(m[1],10) - 1, 0, 7);
+    const chord = String(m[2] || "").trim();
+
+    // chord part must be a valid chord token
+    if(!isChordToken(chord)) return null;
+    return { slot, chord };
+  }
+
+  function isChordishToken(tok){
+    return isChordToken(tok) || !!parsePositionalChordToken(tok);
+  }
+
+  function extractInlineChords(line){
+    const chords = [];
+    let cleaned = String(line || "");
+    cleaned = cleaned.replace(/[\[\(\{]\s*([^\]\)\}]+?)\s*[\]\)\}]/g, (m, inner) => {
+      const tok = String(inner || "").trim()
+        .replace(/[|]+/g,"")
+        .replace(/[\.,;:]+$/,"")
+        .trim()
+        .replace(/\s+/g,"")
+        .replace(/♯/g,"#").replace(/♭/g,"b");
+      if(isChordToken(tok)) chords.push(tok);
+      return " ";
+    });
+    cleaned = cleaned.replace(/\s+/g, " ").trim();
+    return { cleaned, chords };
+  }
+
+    function lineIsMostlyChords(line){
+    const raw = String(line || "").replace(/\u00A0/g," ").trim();
+    if(!raw) return false;
+
+    // Split on whitespace / bars / commas to catch common chord charts like:
+    // "Am | G | F"  or  "Am, G, F"  or  "Am    G    F"
+    const toks0 = raw.split(/[\s|,]+/).map(s=>s.trim()).filter(Boolean);
+    if(!toks0.length) return false;
+
+    const normTok = (t) => String(t || "")
+      .trim()
+      .replace(/^[\[\(\{]+/,"").replace(/[\]\)\}]+$/,"")
+      .replace(/^[^A-Za-z0-9#b\/\.]+/,"")
+      .replace(/[^A-Za-z0-9#b\/\.]+$/,"")
+      .replace(/[\.,;:]+$/,"")
+      .replace(/♯/g,"#").replace(/♭/g,"b")
+      .trim()
+      .replace(/\s+/g,"");
+
+    let chordCount = 0;
+    let otherCount = 0;
+
+    for(const t0 of toks0){
+      const t = normTok(t0);
+      if(!t) continue;
+
+      // ignore common repeat markers
+      const up = t.toUpperCase();
+      if(up === "REPEAT" || up === "REP" || up === "RPT") continue;
+      if(/^\(?X?\d+\)?$/.test(up)) continue;        // (2)  x2  4  etc
+      if(/^\d+X$/.test(up)) continue;                // 2X, 4X
+
+      if(isChordishToken(t)) chordCount++; else otherCount++;
+    }
+
+    const total = chordCount + otherCount;
+    if(chordCount === 0) return false;
+    if(total === 1) return chordCount === 1;
+
+    // chord lines should be overwhelmingly chord tokens.
+    // allow 1 small "extra" token like "(x2)" or a stray symbol.
+    if(chordCount >= 2 && otherCount <= 1) return true;
+
+    // be a little forgiving for messy copy/paste (still mostly chords)
+    if(chordCount >= 3 && (chordCount / total) >= 0.65 && otherCount <= 2) return true;
+
+    return false;
+  }
+
+    
+  function buildSlotsFromAlignedChordLine(chordLineRaw, lyricLineRaw){
+    const chordLine = String(chordLineRaw || "").replace(/\u00A0/g," ").replace(/\t/g," ");
+    const lyricLine = String(lyricLineRaw || "");
+    const slots = Array(8).fill("");
+
+    const toks = [];
+    let i = 0;
+    while(i < chordLine.length){
+      while(i < chordLine.length && chordLine[i] === " ") i++;
+      if(i >= chordLine.length) break;
+      const start = i;
+      while(i < chordLine.length && chordLine[i] !== " ") i++;
+      let tok = chordLine.slice(start, i).trim();
+      tok = tok
+        .replace(/^[^A-Za-z0-9#b\/\.]+/,"")
+        .replace(/[^A-Za-z0-9#b\/\.]+$/,"")
+        .replace(/[|]+/g,"")
+        .replace(/[\.,;:]+$/,"")
+        .trim()
+        .replace(/\s+/g,"")
+        .replace(/♯/g,"#").replace(/♭/g,"b");
+      const pos = parsePositionalChordToken(tok);
+      if(pos){
+        const s = pos.slot;
+        const chord = pos.chord;
+        if(!slots[s]) slots[s] = chord;
+        else slots[s] = (slots[s] + " " + chord).trim();
+      }else if(isChordToken(tok)){
+        toks.push({ tok, col: start });
+      }
+    }
+    if(!toks.length) return slots;
+
+    let looksCollapsed = !/  +/.test(chordLine) && toks.length >= 2;
+
+    const denom = Math.max(1, chordLine.length - 1);
+    const n = toks.length;
+
+    let wordStarts = [];
+    if(looksCollapsed){
+      const reWord = /\S+/g;
+      let m;
+      while((m = reWord.exec(String(lyricLine || "")))){
+        wordStarts.push(m.index);
+      }
+      if(!wordStarts.length) looksCollapsed = false;
+    }
+
+    toks.forEach((item, idx) => {
+      let slot;
+      if(looksCollapsed){
+        const wIdx = (n === 1) ? 0 : Math.round(idx * (wordStarts.length - 1) / (n - 1));
+        const col = wordStarts[clamp(wIdx, 0, wordStarts.length - 1)] || 0;
+        const denomL = Math.max(1, lyricLine.length - 1);
+        slot = clamp(Math.round((col / denomL) * 7), 0, 7);
+      }else{
+        slot = n > 8
+          ? clamp(Math.floor(idx * 8 / n), 0, 7)
+          : clamp(Math.round((item.col / denom) * 7), 0, 7);
+      }
+      if(!slots[slot]) slots[slot] = item.tok;
+      else slots[slot] = (slots[slot] + " " + item.tok).trim();
+    });
+
+    return slots;
+  }
+
+  function pushCard(sec, lyricsRaw, slots){
+    const lyrics = String(lyricsRaw || "").replace(/\s+/g," ").trim();
+    if(!lyrics && (!slots || !slots.some(x=>String(x||"").trim()))) return;
+
+    const chords = Array.isArray(slots) ? slots.slice(0,8) : Array(8).fill("");
+    while(chords.length < 8) chords.push("");
+
+    ensureBucket(sec);
+    buckets[sec].push({ lyrics, chords });
+  }
+
+  // Recognize common headings in pasted/uploaded text
+  function headingTitleFromLine(line){
+    let raw = String(line || "").trim();
+    if(!raw) return null;
+
+    raw = raw.replace(/^[\[\(\{]+/,"").replace(/[\]\)\}]+$/,"").trim();
+    raw = raw.replace(/(?:\b[A-Za-z]\s){2,}[A-Za-z]\b/g, (m)=>m.replace(/\s+/g,""));
+    raw = raw.replace(/\s*:\s*$/,"").trim();
+
+    const t = raw.toUpperCase()
+      .replace(/[^\w\s\/-]+/g," ")
+      .replace(/\s+/g," ")
+      .trim();
+
+    // Basic buckets we care about:
+    // INTRO, VERSE 1/2/3..., CHORUS 1/2/3..., BRIDGE, OUTRO, INTERLUDE, PRE-CHORUS, TAG
+    const mVC = t.match(/^(VERSE|CHORUS)\s*([0-9]+)?$/);
+    if(mVC){
+      const num = mVC[2] ? String(mVC[2]) : "";
+      return num ? `${mVC[1]} ${num}` : mVC[1];
+    }
+    if(t === "INTRO" || t === "INTRODUCTION") return "INTRO";
+    if(t === "BRIDGE") return "BRIDGE";
+    if(t === "OUTRO" || t === "CODA") return "OUTRO";
+    if(t === "INTERLUDE") return "INTERLUDE";
+    if(t === "PRECHORUS" || t === "PRE-CHORUS" || t === "PRE CHORUS") return "PRE-CHORUS";
+    if(t === "TAG") return "TAG";
+    return null;
+  }
+
+  // Allocate a section in order (PAGE 1..PAGE 10 then extras)
+  // opts.enable:
+  //   - true  => make the created EXTRA visible immediately (enabledSections)
+  //   - false => create the EXTRA but keep it hidden until it has content or user adds via +
+  let nextPageIdx = 0;
+  function allocateNextSection(optionalTitle, opts={}){
+    ensurePageMeta();
+
+    // base first
+    const base = FULL_EDIT_SECTIONS;
+    if(nextPageIdx < base.length){
+      const sec = base[nextPageIdx++];
+      if(optionalTitle) titles[sec] = String(optionalTitle || "").trim();
+      return sec;
+    }
+
+    // extras
+    // If we have a title (e.g., OUTRO / VERSE 4) we assume the user intended this page.
+    // Otherwise (no title) keep it hidden unless explicitly requested.
+    const enable = (typeof opts.enable === "boolean") ? opts.enable : !!String(optionalTitle||"").trim();
+    const sec = createExtraSection({ enable });
+    if(optionalTitle && sec){
+      titles[sec] = String(optionalTitle || "").trim();
+    }
+    return sec || base[base.length - 1];
+  }
+
+  // Mode state
+  let cur = hasBreaks ? FULL_EDIT_SECTIONS[0] : allocateNextSection(null);
+  ensureBucket(cur);
+
+  let pendingChordLine = null;
+
+  function maybeConsumeTitleLine(i){
+    // After a break line, the very next non-empty line can be treated as the page title
+    let k = i;
+    while(k < lines.length && String(lines[k] || "").trim() === "") k++;
+    if(k >= lines.length) return { nextIndex: k, title: "" };
+
+    const cand = String(lines[k] || "").trim();
+    if(!cand) return { nextIndex: k, title: "" };
+    if(_parseBreakLine(cand)) return { nextIndex: k, title: "" };
+    if(lineIsMostlyChords(cand)) return { nextIndex: k, title: "" };
+
+    // If it looks like a heading, we still allow it to be a title line (this is what the user wants)
+    return { nextIndex: k + 1, title: cand };
+  }
+
+  if(hasBreaks){
+    // Walk through break sections in order
+    let pageIdx = -1;
+
+    for(let i=0; i<lines.length; i++){
+      const line = String(lines[i] ?? "");
+
+      const _br = _parseBreakLine(line);
+      if(_br){
+        // flush any dangling chord line
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+        }
+        pendingChordLine = null;
+
+         pageIdx++;
+         // A break line is an explicit "new page" action.
+         cur = (pageIdx < FULL_EDIT_SECTIONS.length)
+           ? FULL_EDIT_SECTIONS[pageIdx]
+           : allocateNextSection(null, { enable:true });
+        ensureBucket(cur);
+
+        // ✅ Title can be inline on the same break line: ________Verse 1
+        if(_br && _br.title){
+          titles[cur] = _br.title;
+          continue;
+        }
+        // Back-compat: title on the NEXT non-empty line
+        const info = maybeConsumeTitleLine(i+1);
+        if(info.title) titles[cur] = info.title;
+        i = info.nextIndex - 1;
+        continue;
+      }
+
+      if(line.trim() === ""){
+        // allow chord-line + lyric-line pairing across blanks
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          let k = i + 1;
+          while(k < lines.length && String(lines[k] || "").trim() === "") k++;
+          const nxt = k < lines.length ? String(lines[k] || "") : "";
+          if(nxt && !_parseBreakLine(nxt) && !lineIsMostlyChords(nxt)){
+            continue;
+          }
+        }
+
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+        }
+        pendingChordLine = null;
+        continue;
+      }
+
+      if(lineIsMostlyChords(line)){
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+        }
+        pendingChordLine = line;
+        continue;
+      }
+
+      const { cleaned, chords: inlineChords } = extractInlineChords(line);
+
+      let slots = Array(8).fill("");
+      if(pendingChordLine){
+        slots = buildSlotsFromAlignedChordLine(pendingChordLine, cleaned);
+        pendingChordLine = null;
+      }else if(inlineChords.length){
+        const n = inlineChords.length;
+        for(let k=0;k<n;k++){
+          const slot = clamp(Math.floor((k / Math.max(1,n-1)) * 7), 0, 7);
+          if(!slots[slot]) slots[slot] = inlineChords[k];
+          else slots[slot] = (slots[slot] + " " + inlineChords[k]).trim();
+        }
+      }
+
+      pushCard(cur, cleaned, slots);
+    }
+
+    if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+      pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+    }
+  }else{
+    // Heading-driven parsing
+    // NOTE: "cur" is already initialized above for no-break mode.
+    // Do NOT allocate again, or we'll consume an extra page and can accidentally
+    // create a trailing blank page later.
+    ensureBucket(cur);
+
+    for(let i=0; i<lines.length; i++){
+      const line = String(lines[i] ?? "");
+
+      const heading = headingTitleFromLine(line);
+      if(heading){
+        // flush any dangling chord line
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+        }
+        pendingChordLine = null;
+
+         cur = allocateNextSection(heading, { enable:true });
+        ensureBucket(cur);
+        continue;
+      }
+
+      if(line.trim() === ""){
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          let k = i + 1;
+          while(k < lines.length && String(lines[k] || "").trim() === "") k++;
+          const nxt = k < lines.length ? String(lines[k] || "") : "";
+          const nxtHeading = headingTitleFromLine(nxt);
+          if(nxt && !nxtHeading && !lineIsMostlyChords(nxt)){
+            continue;
+          }
+        }
+
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+        }
+        pendingChordLine = null;
+        continue;
+      }
+
+      if(lineIsMostlyChords(line)){
+        if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+          pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+        }
+        pendingChordLine = line;
+        continue;
+      }
+
+      const { cleaned, chords: inlineChords } = extractInlineChords(line);
+
+      let slots = Array(8).fill("");
+      if(pendingChordLine){
+        slots = buildSlotsFromAlignedChordLine(pendingChordLine, cleaned);
+        pendingChordLine = null;
+      }else if(inlineChords.length){
+        const n = inlineChords.length;
+        for(let k=0;k<n;k++){
+          const slot = clamp(Math.floor((k / Math.max(1,n-1)) * 7), 0, 7);
+          if(!slots[slot]) slots[slot] = inlineChords[k];
+          else slots[slot] = (slots[slot] + " " + inlineChords[k]).trim();
+        }
+      }
+
+      pushCard(cur, cleaned, slots);
+    }
+
+    if(pendingChordLine && lineIsMostlyChords(pendingChordLine)){
+      pushCard(cur, "", buildSlotsFromAlignedChordLine(pendingChordLine, ""));
+    }
+  }
+
+  buckets.__titles = titles;
   return buckets;
 }
+function reconcileDeletedBaseSections(){
+  if(!state.project) return;
+  ensurePageMeta();
+  const del = state.project.deletedBaseSections || [];
+  if(!del.length) return;
+  state.project.deletedBaseSections = del.filter(sec => !sectionHasAnyContent(sec));
+}
 
-// Merge parsed lyrics into existing project.sections
-// - preserves existing notes when possible (by index)
-// - updates lyrics
-// - (optional) auto-splits beats from lyrics when AutoSplit is ON
 function applyFullTextToProjectSections(fullText){
   if(!state.project || !state.project.sections) return;
 
   const parsed = parseFullTextToSectionCards(fullText);
 
-  getFullEditSections().forEach(sec => {
+  // pull @@TITLE metadata (optional)
+  if(parsed && parsed.__titles){
+    if(!state.project.sectionTitles || typeof state.project.sectionTitles !== "object") state.project.sectionTitles = {};
+    for(const k of Object.keys(parsed.__titles || {})){
+      state.project.sectionTitles[k] = String(parsed.__titles[k] || "").trim();
+    }
+  }
+
+  const secsToApply = [...FULL_EDIT_SECTIONS, ...((state.project.extraSections)||[])];
+  secsToApply.forEach(sec => {
     const want = parsed[sec] || [];
     const have = Array.isArray(state.project.sections[sec]) ? state.project.sections[sec] : [];
 
     const next = [];
 
-    // Build up to want.length cards, reusing existing card objects to preserve notes
     for(let i=0; i<want.length; i++){
       const base = have[i] && typeof have[i] === "object" ? have[i] : newLine();
-      base.lyrics = want[i] || "";
 
-      // keep notes; update beats if autosplit is on
+      const w = want[i] || {};
+      base.lyrics = String(w.lyrics || "");
+
+      if(Array.isArray(w.chords) && w.chords.length){
+        if(!Array.isArray(base.notes)) base.notes = Array(8).fill("");
+        for(let k=0;k<8;k++){
+          const c = String(w.chords[k] || "").trim();
+          base.notes[k] = c || (base.notes[k] || "");
+        }
+      }
+
       if(state.autoSplit){
         base.beats = autosplitBeatsFromLyrics(base.lyrics);
       }
@@ -584,28 +1017,20 @@ function applyFullTextToProjectSections(fullText){
       next.push(base);
     }
 
-    // SAFETY: if user typed fewer lines than existing, keep any extra cards
-    // that contain NOTES/BEATS so we don’t accidentally wipe chords.
     for(let i=want.length; i<have.length; i++){
       const L = have[i];
-      if(lineHasContent(L)){ // your existing “has notes or beats or lyrics” check
+      if(lineHasContent(L)){
         next.push(L);
       }
     }
 
-    // ensure at least 1 card
     if(next.length < MIN_LINES_PER_SECTION) next.push(newLine());
-
-    // also trim trailing fully blank cards (but keep 1)
     while(next.length > 1 && !lineHasContent(next[next.length - 1])) next.pop();
 
     state.project.sections[sec] = next;
   });
-
-  // ✅ if user typed content under headings, those pages should appear
-  refreshEnabledSectionsFromContent();
+  reconcileDeletedBaseSections();
 }
-
 
 /***********************
 Project storage (MAIN)
@@ -645,22 +1070,23 @@ function defaultProject(name="New Song"){
   SECTIONS.filter(s=>s!=="Full").forEach(sec => {
     sections[sec] = [ newLine() ]; // ✅ start with ONE card
   });
-  return {
-    id: uuid(),
-    name,
-    createdAt: now(),
-    updatedAt: now(),
-    transposeMode: "capo",
-    steps: 0,
-    bpm: 95,
-    capo: 0,
-    fullText: "",
-    fullSeeded: false,   // ✅ NEW
-    extraSections: [],   // ✅ pages after CHORUS 3
-    enabledSections: ["VERSE 1"], // ✅ only show pages that have content or were added
-    hiddenSections: [],   // ✅ built-in pages user deleted (block + from re-adding)
-    sections
-  };
+ return {
+  id: uuid(),
+  name,
+  createdAt: now(),
+  updatedAt: now(),
+   transposeMode: "capo",
+steps: 0,
+  bpm: 95,
+  capo: 0,
+  fullText: "",
+  fullSeeded: false,   // ✅ NEW
+  sections,
+  enabledSections: ["PAGE 1"],
+  sectionTitles: {},
+  extraSections: [],
+  deletedBaseSections: []
+};
 }
 
 function loadAllProjects(){
@@ -687,6 +1113,16 @@ function upsertProject(p){
   localStorage.setItem(LS_CUR, p.id);
 }
 
+// Some newer UI paths call this helper.
+// Keep it simple and reliable: persist the current project snapshot.
+function saveCurrentProject(){
+  try{
+    if(state && state.project) upsertProject(state.project);
+  }catch(err){
+    console.error(err);
+  }
+}
+
 function deleteProjectById(id){
   const all = loadAllProjects().filter(p => p.id !== id);
   saveAllProjects(all);
@@ -698,72 +1134,83 @@ function normalizeProject(p){
 
   if(typeof p.fullText !== "string") p.fullText = "";
   if(typeof p.fullSeeded !== "boolean") p.fullSeeded = false; // ✅ NEW
-  if(!Array.isArray(p.extraSections)) p.extraSections = [];
-  if(!Array.isArray(p.enabledSections) || !p.enabledSections.length) p.enabledSections = ["VERSE 1"];
-  if(!Array.isArray(p.hiddenSections)) p.hiddenSections = [];
   if(!p.sections || typeof p.sections !== "object") p.sections = {};
+  // ✅ Pages-only model: enabledSections must be a subset of BASE_PAGES
+  if(!Array.isArray(p.enabledSections)) p.enabledSections = [];
+  if(!p.sectionTitles || typeof p.sectionTitles !== "object") p.sectionTitles = {};
+  if(!Array.isArray(p.deletedBaseSections)) p.deletedBaseSections = [];
+  if(!Array.isArray(p.extraSections)) p.extraSections = [];
+
+  // --- Migration from old titled-sections (INTRO/VERSE/CHORUS/...) to PAGE 1..10
+  // Any section keys that are not base pages get copied into the next available page
+  // and the old section name becomes the page title.
+  try{
+    const used = new Set(Object.keys(p.sections||{}));
+    const avail = [
+      ...BASE_PAGES.filter(pg => !used.has(pg))
+    ];
+    const keys = Object.keys(p.sections||{}).filter(k => k && k !== "Full" && !BASE_PAGES.includes(k));
+    for(const oldKey of keys){
+      const pg = avail.shift() || null;
+      if(!pg) break;
+      // move cards
+      p.sections[pg] = Array.isArray(p.sections[oldKey]) ? p.sections[oldKey] : [];
+      delete p.sections[oldKey];
+      // keep a readable title
+      if(!p.sectionTitles[pg]) p.sectionTitles[pg] = String(oldKey);
+    }
+
+    // migrate enabledSections too
+    const migratedEnabled = [];
+    for(const s of (Array.isArray(p.enabledSections) ? p.enabledSections : [])){
+      if(BASE_PAGES.includes(s)) migratedEnabled.push(s);
+      else{
+        // try to find a page whose title matches the old section
+        const match = BASE_PAGES.find(pg => String(p.sectionTitles?.[pg]||"") === String(s));
+        if(match) migratedEnabled.push(match);
+      }
+    }
+    p.enabledSections = migratedEnabled;
+  }catch{}
+
+  // sanitize enabledSections to valid pages (base + extras)
+  {
+    const allowed = new Set([...(BASE_PAGES||[]), ...((Array.isArray(p.extraSections)?p.extraSections:[]))]);
+    p.enabledSections = (Array.isArray(p.enabledSections) ? p.enabledSections : []).filter(s => allowed.has(s));
+  }
+
+  // Always have at least PAGE 1 enabled
+  if(p.enabledSections.length === 0) p.enabledSections = [BASE_PAGES[0]];
   if(!Number.isFinite(p.bpm)) p.bpm = 95;
   if(!Number.isFinite(p.capo)) p.capo = 0;
   if(p.transposeMode !== "capo" && p.transposeMode !== "step") p.transposeMode = "capo";
   if(!Number.isFinite(p.steps)) p.steps = 0;
 
-  const _extra = Array.isArray(p.extraSections) ? p.extraSections.map(s=>String(s||"").trim()).filter(Boolean) : [];
-  const _uniq = [];
-  for(const s of _extra){ if(!_uniq.includes(s) && !SECTIONS.includes(s) && s !== "Full") _uniq.push(s); }
-  // keep sanitized/unique extras back onto project
-  p.extraSections = _uniq.slice();
-
-    // ✅ sanitize hiddenSections (only built-in, excludes Full)
-  const _hidden = Array.isArray(p.hiddenSections) ? p.hiddenSections.map(s=>String(s||"").trim()).filter(Boolean) : [];
-  const _hiddenSet = new Set();
-  for(const s of _hidden){
-    const u = String(s).toUpperCase();
-    if(u !== "FULL" && SECTIONS.map(x=>x.toUpperCase()).includes(u)) _hiddenSet.add(SECTIONS.find(x=>x.toUpperCase()===u));
-  }
-  p.hiddenSections = Array.from(_hiddenSet);
-
-const _allSecs = SECTIONS.filter(s=>s!=="Full").concat(p.extraSections);
-  _allSecs.forEach(sec => {
+  SECTIONS.filter(s=>s!=="Full").forEach(sec => {
     if(!Array.isArray(p.sections[sec])) p.sections[sec] = [];
 
     p.sections[sec] = p.sections[sec].map(line => {
-      const L = (
-        line && typeof line === "object"
-      ) ? line : {};
-
+      const L = (line && typeof line === "object") ? line : {};
       if(typeof L.id !== "string") L.id = uuid();
       if(!Array.isArray(L.notes)) L.notes = Array(8).fill("");
       if(typeof L.lyrics !== "string") L.lyrics = "";
       if(!Array.isArray(L.beats)) L.beats = Array(4).fill("");
 
-      // coerce sizes
       L.notes = Array.from({length:8}, (_,i)=> String(L.notes[i] ?? "").trim());
       L.beats = Array.from({length:4}, (_,i)=> String(L.beats[i] ?? "").trim());
-
       return L;
     });
 
-    // ensure at least 1 card per section
-    if(p.sections[sec].length < MIN_LINES_PER_SECTION) p.sections[sec].push(newLine());
+    // ✅ trim trailing blank cards, but keep at least 1
+    while(p.sections[sec].length > 1 && !lineHasContent(p.sections[sec][p.sections[sec].length - 1])){
+      p.sections[sec].pop();
+    }
+
+    // ✅ ensure minimum 1 card
+    if(p.sections[sec].length < MIN_LINES_PER_SECTION){
+      p.sections[sec].push(newLine());
+    }
   });
-  // ✅ enabled sections: keep valid + auto-enable sections with content
-  const _validSecs = new Set(_allSecs);
-  const _en = Array.isArray(p.enabledSections) ? p.enabledSections.map(s=>String(s||"").trim()).filter(Boolean) : [];
-  const _enSet = new Set(_en.filter(s => _validSecs.has(s)));
-
-  for(const sec of _allSecs){
-    const arr = Array.isArray(p.sections[sec]) ? p.sections[sec] : [];
-    const has = arr.some(line => {
-      const lyr = String(line?.lyrics || "").trim();
-      const notes = Array.isArray(line?.notes) ? line.notes : [];
-      const beats = Array.isArray(line?.beats) ? line.beats : [];
-      return !!lyr || notes.some(n => String(n||"").trim()) || beats.some(b => String(b||"").trim());
-    });
-    if(has) _enSet.add(sec);
-  }
-  if(!_enSet.size) _enSet.add("VERSE 1");
-  p.enabledSections = Array.from(_enSet);
-
 
   return p;
 }
@@ -883,6 +1330,9 @@ lastAutoBar: -1,
   eighthMs: 315,
 
 
+
+  // AutoScroll can re-base the *visual* beat without restarting playback
+  autoScrollTickOffset: 0,
   // NEW: kills pending strum timeouts instantly when toggling instruments
   audioToken: 0,
 
@@ -908,8 +1358,9 @@ function roundToHalf(n){
 }
 
 function getTransposeSemis(){
-  // capo is always integer semis, step can be .5
-  if(state.transposeMode === "step") return roundToHalf(state.steps);
+  // ✅ In "step" mode, 1.0 = 1 WHOLE STEP = 2 semitones (like a guitarist thinking in steps),
+  // so .5 = 1 semitone. In "capo" mode, the number is already semitones.
+  if(state.transposeMode === "step") return Math.round(roundToHalf(state.steps) * 2);
   return Math.round(Number(state.capo) || 0);
 }
 function commitCapoStepFromInput(fromToggle=false){
@@ -1174,9 +1625,16 @@ Tick UI (stable + can tick all visible cards)
 ***********************/
 function clearTick(){
   (state.lastTickEls || []).forEach(elm => {
-    try{ elm.classList.remove("tick"); }catch{}
+    try{
+      elm.classList.remove("tick");
+      elm.classList.remove("tickFlash");
+    }catch{}
   });
   state.lastTickEls = [];
+  if(state._tickFlashTimers){
+    state._tickFlashTimers.forEach(t => { try{ clearTimeout(t); }catch{} });
+  }
+  state._tickFlashTimers = [];
 }
 
 // During MP3 sync: only show tick when AutoScroll is ON
@@ -1203,12 +1661,23 @@ function getVisibleCards(){
   return vis.length ? vis : [cards[0]];
 }
 
+function uiTick8(){
+  // When AutoScroll is turned ON mid-playback, we want the UI to start at beat 1
+  // without touching the underlying playback clock.
+  if(state.autoScrollOn){
+    const off = Number(state.autoScrollTickOffset) || 0;
+    return state.tick8 - off;
+  }
+  return state.tick8;
+}
+
 function applyTick(){
   if(!el.sheetBody) return;
   if(state.currentSection === "Full") return;
   if(!shouldTickRun()) return;
 
-  const nIdx = ((state.tick8 % 8) + 8) % 8;
+  const t8 = uiTick8();
+  const nIdx = ((t8 % 8) + 8) % 8;
   const bIdx = Math.floor(nIdx / 2);
 
   const touched = [];
@@ -1227,16 +1696,34 @@ function applyTick(){
     if(all.length) cards = [all[0]];
   }
 
+  // Flash helper (Beat Sheet Pro style: yellow pop inside the box)
+  function pulse(elm){
+    try{
+      // re-trigger the CSS animation every tick
+      elm.classList.remove("tickFlash");
+      // force reflow so the animation restarts
+      void elm.offsetWidth;
+      elm.classList.add("tickFlash");
+
+      const timers = state._tickFlashTimers || (state._tickFlashTimers = []);
+      timers.push(setTimeout(() => {
+        try{ elm.classList.remove("tickFlash"); }catch{}
+      }, 140));
+    }catch{}
+  }
+
   for(const card of cards){
     const notes = card.querySelectorAll(".noteCell");
     const beats = card.querySelectorAll(".beatCell");
 
     if(notes && notes[nIdx]){
       notes[nIdx].classList.add("tick");
+      pulse(notes[nIdx]);
       touched.push(notes[nIdx]);
     }
     if(beats && beats[bIdx]){
       beats[bIdx].classList.add("tick");
+      pulse(beats[bIdx]);
       touched.push(beats[bIdx]);
     }
   }
@@ -1603,6 +2090,115 @@ function noteToPC(n){
   return NOTE_TO_PC[p.key] ?? null;
 }
 
+/* =========================
+   CHORD -> PITCH CLASSES (for key detection)
+   - We used to detect key from chord ROOTS only, which biases toward Major
+     (e.g. Am,Am,Am => A Maj).
+   - This adds chord tones (3rd/5th/7th/etc) so minor keys resolve correctly.
+========================= */
+function cleanChordToken(tok){
+  return String(tok||"")
+    .trim()
+    .replace(/^[\[\(\{]+/,"").replace(/[\]\)\}]+$/,"")
+    .replace(/♯/g,"#").replace(/♭/g,"b")
+    .replace(/[\.,;:]+$/,"")
+    .replace(/\s+/g,"");
+}
+
+function chordQuality(main){
+  // main = "Am7", "Cmaj7", "F#m7b5", "E7#9", "Gsus4", "A", etc.
+  const s = String(main||"");
+  const lower = s.toLowerCase();
+
+  // priority: explicit maj/min words
+  if(lower.includes("maj") || /(^|[^a-z])m7a?j/.test(lower)) return "maj";
+  if(lower.includes("min")) return "min";
+
+  // diminished / half-diminished
+  if(lower.includes("dim") || lower.includes("o") || lower.includes("m7b5") || lower.includes("hdim")) return "dim";
+
+  // augmented
+  if(lower.includes("aug") || /(^|[^a-z])\+/.test(lower)) return "aug";
+
+  // suspended
+  if(lower.includes("sus2")) return "sus2";
+  if(lower.includes("sus4") || lower.includes("sus")) return "sus4";
+
+  // shorthand: "m" after root means minor, but avoid catching "maj" / "M"
+  // Examples: Am, F#m7, Bm7b5
+  if(/^[A-Ga-g](?:#|b)?m(?!a)/.test(s)) return "min";
+
+  return "maj";
+}
+
+function chordTokenToPCs(tok){
+  // returns array of {pc, w}
+  const t = cleanChordToken(tok);
+  if(!t) return [];
+
+  // ignore N.C.
+  if(/^n\.?c\.?$/i.test(t)) return [];
+
+  const parts = t.split("/");
+  const main = parts[0] || "";
+  const bass = parts[1] || "";
+
+  const rootPC = noteToPC(main);
+  if(rootPC === null) return [];
+
+  const q = chordQuality(main);
+
+  // default triad intervals
+  let third = 4; // maj 3rd
+  let fifth = 7; // perfect 5th
+  if(q === "min"){ third = 3; fifth = 7; }
+  else if(q === "dim"){ third = 3; fifth = 6; }
+  else if(q === "aug"){ third = 4; fifth = 8; }
+  else if(q === "sus2"){ third = 2; fifth = 7; }
+  else if(q === "sus4"){ third = 5; fifth = 7; }
+
+  const out = [];
+  const add = (pc, w)=> out.push({ pc: ((pc%12)+12)%12, w });
+
+  // weights (root strongest, then 3rd, etc.)
+  add(rootPC, 2.0);
+  add(rootPC + third, 1.5);
+  add(rootPC + fifth, 1.0);
+
+  const lower = main.toLowerCase();
+
+  // 6ths
+  if(/(^|[^0-9])6([^0-9]|$)/.test(lower) && !lower.includes("16")){
+    add(rootPC + 9, 0.8);
+  }
+
+  // 7ths
+  if(lower.includes("maj7") || lower.includes("mmaj7") || lower.includes("m7maj") || lower.includes("m7+")){
+    add(rootPC + 11, 1.0);
+  }else if(/7/.test(lower)){
+    add(rootPC + 10, 1.0);
+  }
+
+  // extensions (very light)
+  if(/(^|[^0-9])9([^0-9]|$)/.test(lower)) add(rootPC + 14, 0.5);
+  if(/11/.test(lower)) add(rootPC + 17, 0.4);
+  if(/13/.test(lower)) add(rootPC + 21, 0.35);
+
+  // alterations (override/add)
+  if(lower.includes("b9")) add(rootPC + 13, 0.45);
+  if(lower.includes("#9")) add(rootPC + 15, 0.45);
+  if(lower.includes("b5")) add(rootPC + 6, 0.35);
+  if(lower.includes("#5")) add(rootPC + 8, 0.35);
+  if(lower.includes("b13")) add(rootPC + 20, 0.25);
+  if(lower.includes("#11")) add(rootPC + 18, 0.25);
+
+  // slash bass
+  const bassPC = bass ? noteToPC(bass) : null;
+  if(bassPC !== null) add(bassPC, 1.2);
+
+  return out;
+}
+
 function transposeNoteName(note, semitones){
   const pc = noteToPC(note);
   if(pc === null) return String(note||"").trim();
@@ -1622,6 +2218,12 @@ function transposeChordName(chord, semis){
   const tRoot = transposeNoteName(root, semis);
   return (tRoot + rest).trim();
 }
+
+// Backwards-compat alias (older code calls transposeChordLabel)
+function transposeChordLabel(label, semis){
+  return transposeChordName(label, semis);
+}
+
 
 /***********************
 CHORD → INTERVALS → MIDIs
@@ -1712,43 +2314,11 @@ function parseChordToken(raw){
 function midiToFreq(m){
   return 440 * Math.pow(2, (m - 69)/12);
 }
-// Accepts: C, C#, Db, F4, Bb3 (octave optional)
-// Also accepts a trailing natural marker: "n" or "♮" (e.g., F#n, Dn, Bb♮)
-function normalizeNoteToken(s){
-  return String(s||"")
-    .trim()
-    .replace(/♯/g,"#")
-    .replace(/♭/g,"b")
-    .replace(/♮/g,"n")
-    .replace(/\s+/g,"")
-    .replace(/n$/i,""); // strip trailing natural marker
-}
-function isSingleNoteToken(s){
-  // ✅ Single-note tokens must include an octave (e.g., C4, F#3, Bb5)
-  // This prevents plain major chords like "C" or "D#" from being treated as melody beeps.
-  const t = normalizeNoteToken(s);
-  return /^([A-Ga-g])([#b])?(\d)$/.test(t);
-}
 
-// MIDI: C4 = 60. If octave omitted, defaultOct=4.
-function noteTokenToMidi(s, defaultOct=4){
-  const t = normalizeNoteToken(s);
-  const m = t.match(/^([A-Ga-g])([#b])?(\d)$/);
-  if(!m) return null;
-
-  const name = (m[1].toUpperCase() + (m[2]||""));
-  const pc = NOTE_TO_PC[name] ?? null;
-  if(pc === null) return null;
-
-  const oct = (m[3] !== undefined) ? Number(m[3]) : defaultOct;
-  if(!Number.isFinite(oct)) return null;
-
-  return ((oct + 1) * 12) + pc;
-}
 function nearestMidiForPC(pc, targetMidi){
   const t = Math.round(targetMidi);
   const candidates = [];
-  for(let k=-24;k<=24;k++){
+  for(let k=-4;k<=4;k++){
     const m = t + k;
     if(((m % 12) + 12) % 12 === pc) candidates.push(m);
   }
@@ -1766,41 +2336,47 @@ Voicing builders
 ***********************/
 function buildPianoVoicing(ch){
   const root = ch.rootPC;
-  const tones = ch.intervals.map(iv => (root + iv) % 12);
 
-  const bassPC = (ch.bassPC !== null) ? ch.bassPC : root;
-  const bass = nearestMidiForPC(bassPC, 48); // ~C3
+  // chord pitch-classes from parsed intervals (literal chord tones)
+  let pcs = Array.from(new Set((ch.intervals || []).map(iv => (root + iv) % 12)));
 
-  const target = 64; // ~E4
+  // ensure root is included
+  if(!pcs.includes(root)) pcs.unshift(root);
+
+  // sort pcs by distance above root (0..11)
+  pcs.sort((a,b)=>(((a-root+12)%12) - ((b-root+12)%12)));
+
+  // left-hand bass: honor slash chords, otherwise root
+  const bassPC = (ch.bassPC !== null && ch.bassPC !== undefined) ? ch.bassPC : root;
+  const bass = nearestMidiForPC(bassPC, 48); // ~C3 area
+
+  // right-hand: stack chord tones upward in a predictable way
   const mids = [];
+  let target = 60; // start around C4
 
-  const want = [];
-  const has = (pc)=> tones.includes(pc);
+  for(const pc of pcs){
+    let m = nearestMidiForPC(pc, target);
 
-  const thirdPC = (root + (ch.triad==="min"?3:(ch.triad==="sus2"?2:(ch.triad==="sus4"?5:4)))) % 12;
-  const fifthPC = (root + (ch.triad==="dim"?6:(ch.triad==="aug"?8:7))) % 12;
-  const seventhPC = has((root+11)%12) ? (root+11)%12 : (has((root+10)%12) ? (root+10)%12 : null);
-  const ninthPC = has((root+2)%12) ? (root+2)%12 : null;
+    // keep everything clearly above bass
+    while(m <= bass + 3) m += 12;
 
-  if(has(thirdPC)) want.push(thirdPC);
-  if(seventhPC!==null) want.push(seventhPC);
-  if(has(fifthPC)) want.push(fifthPC);
-  if(ninthPC!==null) want.push(ninthPC);
-  want.push(root);
+    // keep ascending stack
+    if(mids.length){
+      while(m <= mids[mids.length - 1] + 1) m += 12;
+    }
 
-  for(const pc of want){
-    const m = nearestMidiForPC(pc, target + mids.length*3);
-    if(!mids.includes(m)) mids.push(m);
-    if(mids.length >= 4) break;
+    mids.push(m);
+    target = m + 3;
   }
 
-  while(mids.length < 3){
-    const pc = tones[mids.length % tones.length];
-    const m = nearestMidiForPC(pc, target + mids.length*3);
-    if(!mids.includes(m)) mids.push(m);
-  }
+  // add a top root for “piano chord” fullness
+  let top = nearestMidiForPC(root, (mids[mids.length - 1] || 60) + 7);
+  while(top <= (mids[mids.length - 1] || 60) + 2) top += 12;
+  mids.push(top);
 
-  return [bass, ...mids].sort((a,b)=>a-b);
+  // final sorted unique list
+  const all = [bass, ...mids].sort((a,b)=>a-b);
+  return Array.from(new Set(all));
 }
 
 function buildGuitarStrumVoicing(ch){
@@ -1847,36 +2423,7 @@ function makeSoftRoom(ctx){
 
   return { in: inG, wet, nodes:[inG,d,fb,lp,wet] };
 }
-/***********************
-PIANO FX (shared chain) — prevents runaway node creation/freezes
-***********************/
-function ensurePianoFx(ctx){
-  if(state._pianoFx && state._pianoFx.ctx === ctx) return state._pianoFx;
 
-  // best-effort disconnect old chain (if any)
-  try{
-    if(state._pianoFx?.nodes){
-      state._pianoFx.nodes.forEach(n => { try{ n.disconnect(); }catch{} });
-    }
-  }catch{}
-
-  const room = makeSoftRoom(ctx);
-
-  const dryBus = ctx.createGain();
-  dryBus.gain.value = 0.95;
-
-  const wet = ctx.createGain();
-  wet.gain.value = 0.26;
-
-  dryBus.connect(getOutNode());
-  dryBus.connect(room.in);
-
-  room.wet.connect(wet);
-  wet.connect(getOutNode());
-
-  state._pianoFx = { ctx, dryBus, wet, room, nodes:[dryBus, wet, ...room.nodes] };
-  return state._pianoFx;
-}
 function makeCabinet(ctx){
   const hp = ctx.createBiquadFilter();
   hp.type = "highpass";
@@ -2009,7 +2556,7 @@ const body = ctx.createBiquadFilter();
 body.type = "peaking";
 body.frequency.value = 260;
 body.Q.value = 0.9;
-body.gain.value = 1.4;
+body.gain.value = 0.8; // ✅ less mid boost (helps match electric)
 
 // add presence so it cuts on phone speaker
 const presence = ctx.createBiquadFilter();
@@ -2068,107 +2615,177 @@ return { out: makeup, nodes:[ns,nGain,bp1,bp2,noiseMix,o,oGain,sum,env,hp,body,p
 PIANO NOTE (make "_" ties hold LONGER)
 ***********************/
 function pianoNote(ctx, freq, durMs, vel=0.9){
+  // ✅ Pitch-stable piano: single oscillator + gentle body EQ (no inharmonic partials)
+  // This avoids any “off-key” perception on small phone speakers.
   const t0 = ctx.currentTime;
   const dur = Math.max(0.12, durMs/1000);
 
-  const out = ctx.createGain();
-  const peak = 0.18 * clamp(vel, 0.2, 1.0);
+  const o = ctx.createOscillator();
+  o.type = "triangle";
+  o.frequency.value = clamp(freq, 40, 2500);
+  o.detune.value = 0;
 
-  out.gain.setValueAtTime(0.0001, t0);
-  out.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
+  const g = ctx.createGain();
+  const peak = 0.055 * clamp(vel, 0.2, 1.0); // ✅ volume trim (was 0.11)
 
-  const hold = Math.min(0.34, 0.07 + dur * 0.22);
-  out.gain.setValueAtTime(peak * 0.92, t0 + hold);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(peak, t0 + 0.008);
+
+  // hold + decay
+  const hold = Math.min(0.28, 0.06 + dur * 0.20);
+  g.gain.setValueAtTime(peak * 0.92, t0 + hold);
 
   const endTime = t0 + dur;
-  out.gain.setValueAtTime(peak * 0.85, endTime);
+  g.gain.setValueAtTime(peak * 0.80, endTime);
 
-  const longFactor = clamp((dur - 0.8) / 2.6, 0, 1);
-  const tail = clamp(1.2 + dur * 1.05 + longFactor * 3.1, 1.4, 9.0);
-  out.gain.exponentialRampToValueAtTime(0.0001, endTime + tail);
+  const tail = clamp(1.4 + dur * 0.9, 1.4, 7.0);
+  g.gain.exponentialRampToValueAtTime(0.0001, endTime + tail);
 
-  const nodes = [out];
-
-  // ✅ Fewer partials = much lighter CPU on phones (prevents freeze on dense chords)
-  const partials = [
-    {h:1, a:1.00},
-    {h:2, a:0.30},
-    {h:3, a:0.16}
-  ];
-
-  for(const p of partials){
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-
-    const inharm = 1 + (p.h>=3 ? 0.0018 : 0.0008);
-    o.type = "sine";
-    o.frequency.value = clamp(freq * p.h * inharm, 40, 5000);
-    o.detune.value = (Math.random()*2-1) * 5;
-
-    const a = (0.16 * clamp(vel,0.2,1.0)) * p.a;
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(a, t0 + 0.006);
-    g.gain.setValueAtTime(a * 0.70, endTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, endTime + Math.min(9.0, tail));
-
-    o.connect(g);
-    g.connect(out);
-
-    o.start(t0);
-    o.stop(endTime + Math.min(9.2, tail) + 0.15);
-
-    nodes.push(o,g);
+  // subtle hammer noise
+  const nLen = 0.016;
+  const bufferSize = Math.max(256, Math.floor(ctx.sampleRate * nLen));
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i=0;i<data.length;i++){
+    data[i] = (Math.random()*2-1) * (1 - i/data.length);
   }
-
-  // hammer noise (shared buffer: prevents per-note allocations that can freeze mobile browsers)
-  const nLen = 0.018;
-
-  // ✅ Create once per AudioContext
-  if(!state._pianoHammerBuf || state._pianoHammerBufCtx !== ctx){
-    const bufferSize = Math.max(256, Math.floor(ctx.sampleRate * nLen));
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for(let i=0;i<data.length;i++){
-      data[i] = (Math.random()*2-1) * (1 - i/data.length);
-    }
-    state._pianoHammerBuf = buffer;
-    state._pianoHammerBufCtx = ctx;
-  }
-
   const ns = ctx.createBufferSource();
-  ns.buffer = state._pianoHammerBuf;
+  ns.buffer = buffer;
 
   const nf = ctx.createBiquadFilter();
   nf.type = "highpass";
-  nf.frequency.value = 900;
+  nf.frequency.value = 1100;
   nf.Q.value = 0.7;
 
   const ng = ctx.createGain();
   ng.gain.setValueAtTime(0.0001, t0);
-  ng.gain.exponentialRampToValueAtTime(0.07 * clamp(vel,0.2,1.0), t0 + 0.002);
+  ng.gain.exponentialRampToValueAtTime(0.015 * clamp(vel,0.2,1.0), t0 + 0.002); // ✅ softer hammer noise
   ng.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
+
+  // body EQ
+  const body = ctx.createBiquadFilter();
+  body.type = "peaking";
+  body.frequency.value = 320;
+  body.Q.value = 0.9;
+  body.gain.value = 0.8; // ✅ less mid boost (helps match electric)
+
+  // route
+  o.connect(g);
+  g.connect(body);
 
   ns.connect(nf);
   nf.connect(ng);
-  ng.connect(out);
+  ng.connect(body);
+
+  o.start(t0);
+  o.stop(endTime + tail + 0.12);
 
   ns.start(t0);
   ns.stop(t0 + nLen + 0.01);
 
-  nodes.push(ns,nf,ng);
+  scheduleCleanup([o,g,ns,nf,ng,body], (durMs + tail*1000 + 1200));
+  return { out: body, nodes:[o,g,ns,nf,ng,body] };
+}
+/***********************
+ACOUSTIC GRAND PIANO NOTE (for Acoustic instrument)
+Distinct from "Piano" instrument: a bit brighter attack, shorter tail, less room.
+***********************/
+function grandPianoNote(ctx, freq, durMs, vel=0.9){
+  const t0 = ctx.currentTime;
+  const dur = Math.max(0.10, durMs/1000);
+  const f0 = clamp(freq, 55, 2500);
 
-  // soundboard/body EQ
+  // Two partials (stable pitch) -> gentle detune for "stringy" grand feel
+  const o1 = ctx.createOscillator();
+  o1.type = "triangle";
+  o1.frequency.value = f0;
+  o1.detune.value = -3;
+
+  const o2 = ctx.createOscillator();
+  o2.type = "sine";
+  o2.frequency.value = f0 * 2;  // subtle 2nd harmonic
+  o2.detune.value = 2;
+
+  const mix = ctx.createGain();
+  const g1 = ctx.createGain(); g1.gain.value = 0.78;
+  const g2 = ctx.createGain(); g2.gain.value = 0.22;
+
+  // Main envelope (slightly snappier than Piano)
+  const env = ctx.createGain();
+  const peak = 0.060 * clamp(vel, 0.2, 1.0);  // tuned to match electric
+
+  env.gain.setValueAtTime(0.0001, t0);
+  env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);
+  env.gain.setValueAtTime(peak * 0.88, t0 + 0.05);
+
+  const endTime = t0 + dur;
+  env.gain.setValueAtTime(peak * 0.72, endTime);
+
+  // shorter tail than Piano (so it feels more percussive)
+  const tail = clamp(0.85 + dur * 0.55, 0.85, 4.0);
+  env.gain.exponentialRampToValueAtTime(0.0001, endTime + tail);
+
+  // Hammer noise (brighter than Piano but quiet)
+  const nLen = 0.014;
+  const bs = Math.max(256, Math.floor(ctx.sampleRate * nLen));
+  const buf = ctx.createBuffer(1, bs, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++){
+    data[i] = (Math.random()*2-1) * (1 - i/data.length);
+  }
+  const ns = ctx.createBufferSource();
+  ns.buffer = buf;
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 1400;
+  hp.Q.value = 0.75;
+
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, t0);
+  ng.gain.exponentialRampToValueAtTime(0.012 * clamp(vel,0.2,1.0), t0 + 0.002);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + nLen);
+
+  // Grand-ish body EQ
   const body = ctx.createBiquadFilter();
   body.type = "peaking";
-  body.frequency.value = 280;
-  body.Q.value = 0.8;
-  body.gain.value = 2.0;
+  body.frequency.value = 240;
+  body.Q.value = 0.85;
+  body.gain.value = 1.1;
 
-  out.connect(body);
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 5200;
+  lp.Q.value = 0.75;
 
-  scheduleCleanup([...nodes, body], (durMs + (tail*1000) + 1200));
-  return { out: body, nodes:[...nodes, body] };
+  // ✅ final trim to guarantee matching with electric
+  const outTrim = ctx.createGain();
+  outTrim.gain.value = 0.26;
+
+  // route
+  o1.connect(g1); g1.connect(mix);
+  o2.connect(g2); g2.connect(mix);
+  mix.connect(env);
+  env.connect(body);
+  body.connect(lp);
+  lp.connect(outTrim);
+
+  ns.connect(hp);
+  hp.connect(ng);
+  ng.connect(body);
+
+  o1.start(t0);
+  o2.start(t0);
+  o1.stop(endTime + tail + 0.12);
+  o2.stop(endTime + tail + 0.12);
+
+  ns.start(t0);
+  ns.stop(t0 + nLen + 0.01);
+
+  scheduleCleanup([o1,o2,g1,g2,mix,env,ns,hp,ng,body,lp,outTrim], (durMs + tail*1000 + 1200));
+  return { out: outTrim, nodes:[o1,o2,g1,g2,mix,env,ns,hp,ng,body,lp,outTrim] };
 }
+
 
 /***********************
 NEW ELECTRIC (SAFE)
@@ -2305,92 +2922,58 @@ const fracMul = Math.pow(2, (tr.fracSemis / 12));
   const f = (freqs[Math.min(freqs.length-1, 3)] || freqs[0] || 440) * fracMul;
 
   if(state.instrument === "acoustic"){
-    const n = acousticPluckSafe(ctx, f, durMs, 0.95);
+    const n = grandPianoNote(ctx, f, durMs, 0.90);
     n.out.connect(getOutNode());
-    scheduleCleanup(n.nodes, durMs + 2200);
+    scheduleCleanup(n.nodes, durMs + 5200);
   }else if(state.instrument === "electric"){
     const n = electricGuitarSafe(ctx, f, durMs, 0.90);
     n.out.connect(getOutNode());
     scheduleCleanup([n.out], durMs + 1400);
   }else{
-    const n = pianoNote(ctx, f, durMs, 0.95);
+    const n = pianoNote(ctx, f, durMs, 0.65);
     n.out.connect(getOutNode());
     scheduleCleanup([n.out], durMs + 6000);
   }
 }
-function playMelodyNoteForInstrument(rawNote, durMs){
-  const midi0 = noteTokenToMidi(rawNote, 4);
-  if(midi0 === null) return;
 
-  const tr = splitTranspose(getTransposeSemis());
-  const fracMul = Math.pow(2, (tr.fracSemis / 12));
-  const midi = midi0 + (tr.intSemis|0);
-  const f = midiToFreq(midi) * fracMul;
-  if(!Number.isFinite(f) || f <= 0) return;
-
-  const ctx = ensureCtx();
-
-  if(state.instrument === "acoustic"){
-    const n = acousticPluckSafe(ctx, f, durMs, 0.95);
-    n.out.connect(getOutNode());
-    scheduleCleanup(n.nodes, durMs + 2200);
-  }else if(state.instrument === "electric"){
-    const n = electricGuitarSafe(ctx, f, durMs, 0.90);
-    n.out.connect(getOutNode());
-    scheduleCleanup([n.out], durMs + 1400);
-  }else{
-    const n = pianoNote(ctx, f, durMs, 0.95);
-    n.out.connect(getOutNode());
-    scheduleCleanup([n.out], durMs + 6000);
-  }
-}
  function playAcousticChord(ch, durMs, fracMul=1){
   const ctx = ensureCtx();
   const token = state.audioToken;
 
-  // softer overall (prevents harshness on phones)
-  const bus = ctx.createGain();
-  bus.gain.value = 1.25;
+  // "Acoustic" is now an ACOUSTIC GRAND PIANO (distinct from Piano instrument)
+  // Keep it tight + matched to Electric loudness.
+  const room = makeSoftRoom(ctx);
+  const wet = ctx.createGain(); wet.gain.value = 0.045;
+  room.wet.connect(wet);
+  wet.connect(getOutNode());
 
-  // small “air” delay (NO FEEDBACK)
-  const dly = ctx.createDelay(0.25);
-  dly.delayTime.value = 0.065;
+  const dryBus = ctx.createGain();
+  dryBus.gain.value = 0.34; // tuned vs electric (0.4)
+  dryBus.connect(getOutNode());
+  dryBus.connect(room.in);
 
-  const dlyGain = ctx.createGain();
-  dlyGain.gain.value = 0.10;
-
-  // dry + delay to output
-  bus.connect(getOutNode());
-  bus.connect(dly);
-  dly.connect(dlyGain);
-  dlyGain.connect(getOutNode());
-
-  // strum
-  const midi = buildGuitarStrumVoicing(ch);
- const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
-
+  const midi = buildPianoVoicing(ch);
+  const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
 
   const bpm = clamp(state.bpm||95, 40, 220);
-  const strumMs = clamp(Math.round(24_000 / bpm), 12, 28);
+  const rollMs = clamp(Math.round(18_000 / bpm), 7, 20); // slight roll like a real grand
 
   for(let i=0;i<freqs.length;i++){
     const f = freqs[i];
-    const delayMs = i * strumMs;
+    const delayMs = i * rollMs;
 
     setTimeout(() => {
       if(token !== state.audioToken) return;
       if(!state.instrumentOn) return;
 
-      // guard against bad frequencies that can lock up WebAudio on some mobiles
-      if(!Number.isFinite(f) || f <= 0) return;
-      const vel = clamp(0.95 - i*0.10, 0.55, 0.98);
-      const n = acousticPluckSafe(ctx, f, durMs, vel);
-      n.out.connect(bus);
-      scheduleCleanup(n.nodes, durMs + 2200);
+      const vel = clamp(0.88 - i*0.06, 0.55, 0.95);
+      const n = grandPianoNote(ctx, f, durMs, vel);
+      n.out.connect(dryBus);
+      scheduleCleanup([n.out], durMs + 6500);
     }, delayMs);
   }
 
-  scheduleCleanup([bus,dly,dlyGain], durMs + 2600);
+  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 7000);
 }
 
 
@@ -2423,8 +3006,6 @@ function playElectricChord(ch, durMs, fracMul=1){
     setTimeout(() => {
       if(token !== state.audioToken) return;
       if(!state.instrumentOn) return;
-      // guard against bad frequencies that can lock up WebAudio on some mobiles
-      if(!Number.isFinite(f) || f <= 0) return;
       const vel = clamp(0.95 - i*0.08, 0.55, 0.98);
       const n = electricGuitarSafe(ctx, f, durMs, vel);
       n.out.connect(dryBus);
@@ -2437,13 +3018,21 @@ function playElectricChord(ch, durMs, fracMul=1){
 
 function playPianoChord(ch, durMs, fracMul=1){
   const ctx = ensureCtx();
-  const token = state.audioToken;
+  const room = makeSoftRoom(ctx);
 
-  // ✅ Reuse one shared piano FX chain (prevents freeze from node buildup)
-  const fx = ensurePianoFx(ctx);
+ const dryBus = ctx.createGain();
+dryBus.gain.value = 0.22;   // ✅ closer to electric perceived loudness
+
+const wet = ctx.createGain();
+wet.gain.value = 0.06;      // ✅ less room so it doesn't “wash” louder
+
+  dryBus.connect(getOutNode());
+  dryBus.connect(room.in);
+  room.wet.connect(wet);
+  wet.connect(getOutNode());
 
   const midi = buildPianoVoicing(ch);
-  const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
+ const freqs = midi.map(midiToFreq).map(f => f * (fracMul || 1));
 
   const bpm = clamp(state.bpm||95, 40, 220);
   const rollMs = clamp(Math.round(16_000 / bpm), 6, 18);
@@ -2453,23 +3042,17 @@ function playPianoChord(ch, durMs, fracMul=1){
     const delayMs = i * rollMs;
 
     setTimeout(() => {
-      if(token !== state.audioToken) return;
-      if(!state.instrumentOn) return;
-
-      // ✅ Hard guard: never let a bad/NaN frequency lock up audio on some mobiles
-      if(!Number.isFinite(f) || f <= 0) return;
-
       const vel = clamp(0.90 - i*0.06, 0.55, 0.98);
       const n = pianoNote(ctx, f, durMs, vel);
-      n.out.connect(fx.dryBus);
+      n.out.connect(dryBus);
       scheduleCleanup([n.out], durMs + 11_000);
     }, delayMs);
   }
+
+  scheduleCleanup([dryBus,wet, ...room.nodes], durMs + 12_000);
 }
 
-
 function playChordForInstrument(rawChord, durMs){
-  durMs = Math.min(Math.max(80, durMs|0), 12000);
   const ch0 = parseChordToken(rawChord);
   if(!ch0) return;
 
@@ -2661,7 +3244,6 @@ function getCardAtPlayLine(){
   return getNearestVisibleCard() || cards[0];
 }
 
-
 function scrollCardIntoView(card){
   if(!card) return;
 
@@ -2669,64 +3251,35 @@ function scrollCardIntoView(card){
 
   // If sheetBody is the scroller, scroll inside it (NOT window)
   if(sb){
-    const doScroll = () => {
-      const sbRect = sb.getBoundingClientRect();
+    const sbRect = sb.getBoundingClientRect();
+    const r = card.getBoundingClientRect();
 
-      // sticky lower-panel header height (inside #sheetBody)
-      const headerEl = sb.querySelector(".sheetHeader");
-      const headerH = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height || 0) : 0;
+    // ✅ IMPORTANT: account for the sticky header inside sheetBody
+    const stickyHeader = sb.querySelector(".sheetHeader");
+    const stickyH = stickyHeader ? stickyHeader.getBoundingClientRect().height : 0;
 
-      // card's own top row (card # + syllables) height
-      const topRow = card.querySelector(".cardTop");
-      const topRowH = topRow ? Math.ceil(topRow.getBoundingClientRect().height || 0) : 0;
+    // how far the card is from the top of the scroll viewport
+    const delta = (r.top - sbRect.top);
 
-      // ✅ extra safety so the card top never hides under the header
-      const extraPad = 56;
+    // ✅ pad = sticky header height + a little breathing room
+    const pad = Math.round(stickyH + 16);
 
-      // We want the card TOP to land BELOW the sticky header AND below its own top row.
-      const pad = headerH + topRowH + extraPad;
+    // target = current scrollTop + delta - pad
+    const target = Math.max(0, Math.round(sb.scrollTop + delta - pad));
 
-      const r = card.getBoundingClientRect();
-      const desiredTop = sbRect.top + pad;
-      const delta = (r.top - desiredTop);
-
-      const target = Math.max(0, Math.round(sb.scrollTop + delta));
-      const maxScroll = Math.max(0, sb.scrollHeight - sb.clientHeight);
-      sb.scrollTop = Math.min(maxScroll, target);
-
-      // Second pass after layout settles (mobile chrome can shift after scroll)
-      requestAnimationFrame(() => {
-        const sbRect2 = sb.getBoundingClientRect();
-        const r2 = card.getBoundingClientRect();
-        const desiredTop2 = sbRect2.top + pad;
-        const delta2 = (r2.top - desiredTop2);
-        if(Math.abs(delta2) > 2){
-          const t2 = Math.max(0, Math.round(sb.scrollTop + delta2));
-          const max2 = Math.max(0, sb.scrollHeight - sb.clientHeight);
-          sb.scrollTop = Math.min(max2, t2);
-        }
-      });
-    };
-
-    // run after render/paint
-    requestAnimationFrame(doScroll);
+    const maxScroll = Math.max(0, sb.scrollHeight - sb.clientHeight);
+    sb.scrollTop = Math.min(maxScroll, target);
     return;
   }
 
-  // fallback (window scroller)
+  // fallback (window scrolling)
   const yLine = getHeaderBottomY();
-  const topRow = card.querySelector(".cardTop");
-  const topRowH = topRow ? Math.ceil(topRow.getBoundingClientRect().height || 0) : 0;
-  const extraPad = 56;
-
-  const r = card.getBoundingClientRect();
-  const cardTopDoc = r.top + window.scrollY;
-  const targetY = Math.max(0, Math.round(cardTopDoc - (yLine + topRowH + extraPad)));
+  const r2 = card.getBoundingClientRect();
+  const cardTopDoc = r2.top + window.scrollY;
+  const targetY = Math.max(0, Math.round(cardTopDoc - yLine));
   try{ window.scrollTo({ top: targetY, behavior:"auto" }); }
   catch{ window.scrollTo(0, targetY); }
 }
-
-
 
 /***********************
 Tie utilities (across cards)
@@ -2746,13 +3299,6 @@ function isRepeatToken(s){
 function isTieToken(s){
   return isDotsToken(s) || isRepeatToken(s);
 }
-function isPlayableToken(raw){
-  // something we can actually "sound": a chord OR a single-note token
-  if(!raw) return false;
-  const t = String(raw).trim();
-  if(isTieToken(t)) return false;
-  return isSingleNoteToken(t) || !!parseChordToken(t);
-}
 
 function findNextNoteForwardFrom(cardEl, startCellIndexPlus1){
   const cards = getCards();
@@ -2768,7 +3314,7 @@ function findNextNoteForwardFrom(cardEl, startCellIndexPlus1){
     const startIdx = (barOffset === 0) ? startCellIndexPlus1 : 0;
     for(let j = startIdx; j < 8; j++){
       const raw = getNoteRawFromCell(cells[j]);
-      if(isPlayableToken(raw)) return { barsAhead: barOffset, cellIndex: j, raw };
+      if(raw) return { barsAhead: barOffset, cellIndex: j, raw };
     }
   }
   return null;
@@ -2790,7 +3336,8 @@ function computeNoteDurEighths(cardEl, cells, nIdx){
   for(let j=nIdx+1;j<8;j++){
   const raw = getNoteRawFromCell(cells[j]);
   if(!raw) continue;
-  if(!isPlayableToken(raw)) continue;  // skip blanks, "_" / "...", and random text
+  if(isTieToken(raw)) continue;        // skip "_" and "..."
+  if(!parseChordToken(raw)) continue;  // skip random text
   next = j;
   break;
 }
@@ -2860,20 +3407,14 @@ function playInstrumentStep(){
     }
     return;
   }
-  // ✅ Single-note token (C, F#, Bb3, etc.) = play the exact note (fixes "wrong notes")
-  if(isSingleNoteToken(raw)){
-    playMelodyNoteForInstrument(raw, eighthMs);
-    return;
-  }
+
   // default chord cell = normal strum
   if(!parseChordToken(raw)) return;
 
   state.lastChordRaw = raw; // remember it for "_" and "..."
 
   const durEighths = computeNoteDurEighths(card, cells, nIdx);
-  let durMs = Math.max(80, durEighths * (state.eighthMs || 300));
-  // hard cap to prevent extreme ties from scheduling massive envelopes/timeouts
-  durMs = Math.min(durMs, 12000);
+  const durMs = Math.max(80, durEighths * (state.eighthMs || 300));
 
   playChordForInstrument(raw, durMs);
 }
@@ -2885,13 +3426,12 @@ AutoScroll
 ***********************/
   // ---------- AutoScroll: skip blanks + page (section) advance ----------
 
-const AUTO_SECTIONS = () => getSectionPages().filter(s => s !== "Full");
+const AUTO_SECTIONS = SECTIONS.filter(s => s !== "Full");
 
 function nextAutoSectionName(cur){
-  const secs = AUTO_SECTIONS();
-  const i = secs.indexOf(cur);
-  if(i === -1) return secs[0] || "VERSE 1";
-  return secs[(i + 1) % secs.length];
+  const i = AUTO_SECTIONS.indexOf(cur);
+  if(i === -1) return "VERSE 1";
+  return AUTO_SECTIONS[(i + 1) % AUTO_SECTIONS.length];
 }
 
 // A "blank card" = NO lyrics AND ALL note cells empty
@@ -2976,11 +3516,12 @@ function autoAdvanceOnBar(){
   if(!state.autoScrollOn) return;
   if(state.currentSection === "Full") return;
 
-  // only on bar boundary (every 8 eighth-notes)
-  if(state.tick8 === 0) return;
-  if(state.tick8 % 8 !== 0) return;
+  // only on bar boundary (every 8 eighth-notes) — use visual tick so AutoScroll can re-base
+  const t8 = uiTick8();
+  if(t8 === 0) return;
+  if(t8 % 8 !== 0) return;
 
-  const bar = Math.floor(state.tick8 / 8);
+  const bar = Math.floor(t8 / 8);
   if(state.lastAutoBar === bar) return;
   state.lastAutoBar = bar;
 
@@ -3303,13 +3844,14 @@ function resetAutoScrollToFirstCardOfActivePage(){
   const cards = getCards();
   if(!cards.length) return;
 
-  let idx = 0;
-  const firstIdx = firstNonBlankCardIndexInDOM();
-  if(firstIdx !== null) idx = firstIdx;
+  // ✅ User expectation: start at the FIRST card, even if it's blank.
+  const idx = 0;
 
   state.playCardIndex = idx;
   state.lastAutoBar = -1; // restart bar-advance guard
-  state.tick8 = 0;        // restart the bar clock so we begin at bar 1
+
+  // ✅ Re-base AutoScroll's *visual* beat at the current playback tick (do NOT restart playback)
+  state.autoScrollTickOffset = state.tick8;
 
   const tgt = cards[idx] || cards[0];
   if(tgt) scrollCardIntoView(tgt);
@@ -3510,39 +4052,23 @@ function setAutoScroll(on){
   $("mScrollBtn")?.classList.toggle("on", state.autoScrollOn);
 
   if(state.autoScrollOn){
-    // If user is on Full, start from VERSE 1 automatically
+    // If user is on Full, switch to the first real page (PAGE 1)
     if(state.currentSection === "Full"){
-      switchToSectionForAuto("VERSE 1");
+      switchToSectionForAuto(FULL_EDIT_SECTIONS[0]);
     }
 
-    // reset section-advance guard so the first bar advance is clean
+    // ✅ Do NOT restart playback. We only re-base the *visual* beat + scroll position.
     state.lastAutoBar = -1;
+    state.playCardIndex = 0;
 
-    // Try to anchor to the current playline card
-    const cards = getCards();
-    if(cards.length){
-      let cur = getCardAtPlayLine() || getNearestVisibleCard() || cards[0];
-      let idx = Math.max(0, cards.indexOf(cur));
+    // Re-base visual beat at the CURRENT playback position so UI starts at Beat 1 now
+    state.autoScrollTickOffset = state.tick8;
 
-      // If current is blank, jump to first non-blank in this section
-      if(cardIsBlank(cards[idx])){
-        const firstIdx = firstNonBlankCardIndexInDOM();
-        if(firstIdx !== null) idx = firstIdx;
-      }
-
-      state.playCardIndex = idx;
-      const tgt = cards[state.playCardIndex];
-      if(tgt && !cardIsBlank(tgt)) scrollCardIntoView(tgt);
-    }else{
-      state.playCardIndex = null;
-    }
-
-    // show an immediate tick (then the clock keeps it moving)
-    clearTick();
-    applyTick();
+    resetAutoScrollToFirstCardOfActivePage();
 
   }else{
     state.playCardIndex = null;
+    state.autoScrollTickOffset = 0;
 
     // If MP3 sync is playing, stop the highlight immediately when AutoScroll OFF
     if(state.audioSyncOn){
@@ -3550,7 +4076,7 @@ function setAutoScroll(on){
     }
   }
 
-  // ✅ THIS IS THE MISSING PIECE: start/stop the beat clock based on AutoScroll
+  // ✅ start/stop the beat clock based on AutoScroll
   updateClock();
 }
 
@@ -3581,7 +4107,6 @@ Tabs + editor
 ***********************/
 function ensureSectionArray(sec){
   if(sec === "Full") return [];
-  if(!state.project || !state.project.sections) return [];
   if(!state.project.sections[sec]) state.project.sections[sec] = [];
 
   // ✅ keep at least 1 card
@@ -3761,180 +4286,53 @@ function keyFromHistogram(hist){
 }
 
 function updateKeyFromAllNotes(){
-  // Key detection:
-  // - Use CHORD boxes (line.notes) as the primary signal (these are your blue chord cells)
-  // - Only treat syllable/beat boxes as chords if the token looks like a real chord
-  // - Only treat note tokens as notes if they look like real notes (A, Bb, F#, etc.)
-  //
-  // Fixes false keys caused by words like "about" being misread as chord "A...".
+  if(!state.project || !state.project.sections){
+    if(el.keyOutput) el.keyOutput.value = "—";
+    return;
+  }
 
   const hist = Array(12).fill(0);
+  let majVotes = 0;
+  let minVotes = 0;
 
-  const rootCount = Array(12).fill(0);
-  const minorRootCount = Array(12).fill(0);
-  const majorRootCount = Array(12).fill(0);
+  SECTIONS.filter(s => s !== "Full").forEach(sec => {
+    (state.project.sections[sec] || []).forEach(line => {
+      (Array.isArray(line.notes) ? line.notes : []).forEach(tok => {
+        const pcs = chordTokenToPCs(tok);
+        if(!pcs.length) return;
 
-  let firstChord = null; // {rootPC, triad}
-  let lastChord = null;
+        // vote quality (helps when progression is sparse, e.g. Am Am Am)
+        const t = cleanChordToken(tok);
+        const main = (t.split("/")[0] || "");
+        const q = chordQuality(main);
+        if(q === "min" || q === "dim") minVotes++;
+        else if(q === "maj" || q === "aug" || q === "sus2" || q === "sus4") majVotes++;
 
-  const addPC = (pc, w=1) => {
-    if(pc === null || pc === undefined) return;
-    const p = ((pc % 12) + 12) % 12;
-    hist[p] += w;
-  };
-
-  // Very strict: reject normal words.
-  const isLikelyChordToken = (raw) => {
-    const s = String(raw||"")
-      .replace(/[^\w#b+\/-]/g,"") // keep letters/digits/#/b/+/- and slash
-      .trim();
-    if(!s) return false;
-    // allow slash bass (C/G) but main part must be chord-ish
-    const parts = s.split("/");
-    const main = parts[0] || "";
-    const bass = parts[1] || "";
-
-    // main: Root + optional accidental + (optional) chord quality/extension
-    // allowed starts after root: "", m, maj, min, dim, aug, sus, add, 2/4/5/6/7/9/11/13, +, -
-    if(!/^[A-Ga-g][#b]?((m(?![a-z]))|maj|min|dim|aug|sus2|sus4|sus|add|no|\+|-|[0-9]|$)/.test(main)) return false;
-
-    if(bass && !/^[A-Ga-g][#b]?$/.test(bass)) return false;
-    return true;
-  };
-
-  const isLikelyNoteToken = (raw) => {
-    const s = String(raw||"").trim();
-    if(!s) return false;
-    // A, Bb, F#, C4 etc (optional single-digit octave)
-    return /^[A-Ga-g][#b]?\d?$/.test(s.replace(/♯/g,"#").replace(/♭/g,"b"));
-  };
-
-  const addChord = (ch, weight=1.0) => {
-    if(!ch) return;
-
-    if(!firstChord) firstChord = { rootPC: ch.rootPC, triad: ch.triad };
-    lastChord = { rootPC: ch.rootPC, triad: ch.triad };
-
-    const rp = ((ch.rootPC % 12) + 12) % 12;
-    rootCount[rp] += 1 * weight;
-    if(ch.triad === "min" || ch.triad === "dim") minorRootCount[rp] += 1 * weight;
-    else if(ch.triad === "maj") majorRootCount[rp] += 1 * weight;
-
-    // chord tones: root strongest
-    addPC(ch.rootPC, 3.2 * weight);
-    (Array.isArray(ch.intervals) ? ch.intervals : []).forEach(iv => {
-      if(iv === 0) return;
-      addPC(ch.rootPC + iv, 1.5 * weight);
-    });
-    if(ch.bassPC !== null) addPC(ch.bassPC, 1.0 * weight);
-  };
-
-  let sawAnyChord = false;
-
-  getFullEditSections().forEach(sec => {
-    const arr = (state.project && state.project.sections && state.project.sections[sec]) ? state.project.sections[sec] : [];
-    arr.forEach(line => {
-      // 1) CHORD BOXES (blue row) — primary
-      const chordCells = Array.isArray(line?.notes) ? line.notes : [];
-      chordCells.forEach(tok => {
-        if(!isLikelyChordToken(tok)) return;
-        const ch = parseChordToken(tok);
-        if(!ch) return;
-        sawAnyChord = true;
-        addChord(ch, 1.0);
+        pcs.forEach(({pc,w}) => { hist[pc] += (w || 1); });
       });
-
-      // 2) Syllable boxes — only treat as chords if they look like chords
-      const beats = Array.isArray(line?.beats) ? line.beats : [];
-      beats.forEach(b => {
-        const t = String(b||"").replace(/[\[\]\(\)\{\}]/g," ").replace(/\u00A0/g," ").trim();
-        if(!t) return;
-        const toks = t.split(/\s+/).filter(Boolean);
-        toks.forEach(tok => {
-          if(!isLikelyChordToken(tok)) return;
-          const ch = parseChordToken(tok);
-          if(!ch) return;
-          sawAnyChord = true;
-          // beats are secondary signal
-          addChord(ch, 0.65);
-        });
-      });
-
-      // 3) If no chords at all, use note-ish tokens lightly (prevents words being read as notes)
-      if(!sawAnyChord){
-        const notes = Array.isArray(line?.notes) ? line.notes : [];
-        notes.forEach(tok => {
-          if(!isLikelyNoteToken(tok)) return;
-          const pc = noteToPC(tok);
-          if(pc !== null) addPC(pc, 0.6);
-        });
-      }
     });
   });
 
   const total = hist.reduce((a,b)=>a+b,0);
-  if(total <= 0){
-    el.keyOutput.value = "—";
+  if(!total){
+    if(el.keyOutput) el.keyOutput.value = "—";
     return;
   }
 
-  // Base: Krumhansl-style histogram match
-  let k = keyFromHistogram(hist); // {pc, mode:"maj"|"min", score}
+  // profile match (Krumhansl-style) using chord TONES (not just roots)
+  const k = keyFromHistogram(hist);
 
-  // ----- Heuristic tonic override (works well for common progressions) -----
-  const argmax = (arr) => {
-    let bi = 0, bv = -1e9;
-    for(let i=0;i<arr.length;i++){
-      if(arr[i] > bv){ bv = arr[i]; bi = i; }
-    }
-    return { i: bi, v: bv };
-  };
+  // If user mostly typed minor chords, prefer minor mode when the profile pick is close / ambiguous.
+  // (Example: Am,Am,Am used to show A Maj.)
+  let mode = k.mode;
+  if(minVotes >= (majVotes + 2)) mode = "min";
 
-  const topRoot = argmax(rootCount).i;
-  const topRootV = argmax(rootCount).v;
+  const semisInt = Math.round(getTransposeSemis()) % 12;   // ✅ key name must be integer semis
+  const transposedPC = ((k.pc + semisInt) % 12 + 12) % 12; // ✅ always 0..11
 
-  const topMinorRoot = argmax(minorRootCount).i;
-  const topMinorV = argmax(minorRootCount).v;
-
-  const kV = rootCount[k.pc] || 0;
-
-  const isStrongBoundary = (pc) => {
-    if(!firstChord && !lastChord) return false;
-    if(firstChord && ((firstChord.rootPC%12+12)%12) === pc) return true;
-    if(lastChord  && ((lastChord.rootPC%12+12)%12)  === pc) return true;
-    return false;
-  };
-
-  // Prefer last chord if it's minor and appears multiple times (very common tonic behavior)
-  if(lastChord && (lastChord.triad === "min" || lastChord.triad === "dim")){
-    const lp = ((lastChord.rootPC % 12) + 12) % 12;
-    if(minorRootCount[lp] >= 2 && (minorRootCount[lp] >= topMinorV)){
-      k = { pc: lp, mode: "min", score: k.score };
-    }
-  }
-
-  // If Krumhansl says a relative key but a different minor root is clearly more "tonic-like", pick it.
-  if(k.mode === "min" && topMinorV >= 2){
-    const cand = topMinorRoot;
-    const candV = minorRootCount[cand] || 0;
-    if(cand !== k.pc && candV >= (minorRootCount[k.pc] || 0) + 1 && isStrongBoundary(cand)){
-      k = { pc: cand, mode: "min", score: k.score };
-    }
-  }
-
-  // If a root strongly dominates and is on boundary, use it (mode inferred from chord quality counts)
-  if(topRootV >= kV + 1 && isStrongBoundary(topRoot)){
-    const mode = (minorRootCount[topRoot] >= majorRootCount[topRoot] && minorRootCount[topRoot] > 0) ? "min" : "maj";
-    k = { pc: topRoot, mode, score: k.score };
-  }
-
-  // Apply transpose (capo/step) to the KEY label
-  const semisInt = Math.round(getTransposeSemis()) % 12;
-  const transposedPC = ((k.pc + semisInt) % 12 + 12) % 12;
-  el.keyOutput.value = `${PC_TO_NAME[transposedPC]} ${k.mode}`;
+  const modeLabel = (mode === "min") ? "min" : "Maj";
+  el.keyOutput.value = `${PC_TO_NAME[transposedPC]} ${modeLabel}`;
 }
-
-
 
 
 /***********************
@@ -3948,81 +4346,88 @@ function beatTok(s){
   return String(s ?? "").trim();
 }
 
+
+// ✅ left-pad helper used by export alignment
+function padTo(str, width){
+  const s = String(str ?? "");
+  const w = Math.max(0, Number(width) || 0);
+  if(s.length >= w) return s;
+  return s + " ".repeat(w - s.length);
+}
+
+
 function buildAlignedLine(line, semis=0){
   const notes = Array.isArray(line?.notes) ? line.notes : Array(8).fill("");
-  const beats = Array.isArray(line?.beats) ? line.beats : Array(4).fill("");
   const lyric = String(line?.lyrics ?? "").trim();
+
+  // Use stored beats if present; otherwise auto-split from lyric
+  let segs = Array.isArray(line?.beats) ? line.beats.slice(0,4) : [];
+  if(!segs.some(s => String(s||"").trim())){
+    segs = autosplitBeatsFromLyrics(lyric);
+  }
+  while(segs.length < 4) segs.push("");
 
   const n = Array.from({length:8}, (_,i)=>{
     const raw = String(notes[i] ?? "").trim();
-    if(!raw) return "-";
-    return semis ? transposeChordName(raw, semis) : raw;
+    if(!raw) return "";
+    // Keep chord spelling consistent with existing transpose functions
+    return semis ? (typeof transposeChordName === "function" ? transposeChordName(raw, semis) : raw) : raw;
   });
 
-  const b = Array.from({length:4}, (_,i)=> beatTok(beats[i] ?? ""));
-
-  const anyBeats = b.some(x => x.trim().length);
-  const beatRow = anyBeats ? b : (lyric ? autosplitBeatsFromLyrics(lyric) : ["","","",""]);
-
-  const noteGroups = [
-    `${safeTok(n[0])} ${safeTok(n[1])}`,
-    `${safeTok(n[2])} ${safeTok(n[3])}`,
-    `${safeTok(n[4])} ${safeTok(n[5])}`,
-    `${safeTok(n[6])} ${safeTok(n[7])}`
+  const chordGroups = [
+    [n[0], n[1]].filter(Boolean).join(" "),
+    [n[2], n[3]].filter(Boolean).join(" "),
+    [n[4], n[5]].filter(Boolean).join(" "),
+    [n[6], n[7]].filter(Boolean).join(" "),
   ];
 
-  const widths = [0,1,2,3].map(i => {
-    const w = Math.max(noteGroups[i].length, String(beatRow[i]||"").length);
-    return Math.max(6, w) + 2;
+  const widths = Array(4).fill(0).map((_,i)=>{
+    return Math.max(String(segs[i] ?? "").length, String(chordGroups[i] ?? "").length, 1);
   });
 
-  const pad = (s, w) => String(s||"").padEnd(w, " ");
+  const notesLine  = chordGroups.map((g,i)=> padTo(g || "-", widths[i])).join(" | ");
+  const lyricsLine = segs.map((s,i)=> padTo(String(s ?? ""), widths[i])).join(" | ");
 
-  const notesLine =
-    pad(noteGroups[0], widths[0]) + "| " +
-    pad(noteGroups[1], widths[1]) + "| " +
-    pad(noteGroups[2], widths[2]) + "| " +
-    pad(noteGroups[3], widths[3]);
+  return { notesLine, lyricsLine, beatsLine: lyricsLine };
+}
 
-  const beatsLine =
-    pad(beatRow[0], widths[0]) + "| " +
-    pad(beatRow[1], widths[1]) + "| " +
-    pad(beatRow[2], widths[2]) + "| " +
-    pad(beatRow[3], widths[3]);
-
-  return { notesLine: notesLine.trimEnd(), beatsLine: beatsLine.trimEnd() };
+function buildChordSheetLines(noteRows, lyric){
+  const L = String(lyric || "");
+  const slots = Array.isArray(noteRows) ? noteRows.slice(0,8) : [];
+  if(!L.trim() || !slots.some(x => String(x||"").trim())) return { chordLine: "", lyricLine: L };
+  const len = Math.max(1, L.length);
+  let arr = Array(len).fill(" ");
+  for(let i=0;i<8;i++){
+    const ch = String(slots[i]||"").trim();
+    if(!ch) continue;
+    const col = Math.max(0, Math.min(len-1, Math.round(i * (len-1) / 7)));
+    for(let k=0;k<ch.length && col+k < len;k++){
+      arr[col+k] = ch[k];
+    }
+  }
+  return { chordLine: arr.join(""), lyricLine: L };
 }
 
 function buildFullPreviewText(){
   const out = [];
-
-  // ✅ Export header (requested)
-  const projName = String(state.project?.name || "Untitled").trim() || "Untitled";
-  const bpm = clamp(Number(state.bpm || 95), 40, 220);
-  const capo = clamp(Number(state.capo || 0), 0, 12);
-  const key = (el && el.keyOutput && String(el.keyOutput.value||"").trim()) ? String(el.keyOutput.value).trim() : "—";
-
-  out.push(`PROJECT: ${projName}`);
-  out.push(`BPM: ${bpm}    CAPO: ${capo}    KEY: ${key}`);
-  out.push("");
-
   let any = false;
 
-  getFullEditSections().forEach(sec => {
+  SECTIONS.filter(s => s !== "Full").forEach(sec => {
     const arr = state.project.sections[sec] || [];
 
     const hasAny = arr.some(line => {
       const lyr = String(line?.lyrics || "").trim();
-      const notes = Array.isArray(line?.notes) ? line.notes : [];
+      const notesRaw = Array.isArray(line?.notes) ? line.notes : [];
       const beats = Array.isArray(line?.beats) ? line.beats : [];
-      const hasNotes = notes.some(n => String(n||"").trim());
+      const hasNotes = notesRaw.some(n => String(n||"").trim());
       const hasBeats = beats.some(b => String(b||"").trim());
       return !!lyr || hasNotes || hasBeats;
     });
     if(!hasAny) return;
 
     any = true;
-    out.push(sec.toUpperCase());
+        const ttl = (state.project.sectionTitles && state.project.sectionTitles[sec]) ? String(state.project.sectionTitles[sec] || "").trim() : "";
+    out.push(ttl || sec.toUpperCase());
     out.push("");
 
     arr.forEach((line, idx) => {
@@ -4036,12 +4441,14 @@ function buildFullPreviewText(){
 
       if(!hasNotes && !hasBeats && !hasLyrics) return;
 
-      const aligned = buildAlignedLine(line, getTransposeSemis() || 0);
-
+      const semis = getTransposeSemis() || 0;
+      const notesT = (line.notes || []).map(n => transposeChordLabel(n, semis));
+      const { chordLine, lyricLine } = buildChordSheetLines(notesT, line.lyrics || "");
       out.push(`(${idx+1})`);
-      out.push(`    ${aligned.notesLine}`);
-      out.push(`    ${aligned.beatsLine}`);
+      if(chordLine.trim()) out.push(`    ${chordLine}`);
+      out.push(`    ${lyricLine}`);
       out.push("");
+
     });
 
     out.push("");
@@ -4051,8 +4458,33 @@ function buildFullPreviewText(){
 }
 
 function buildFullPreviewHtmlDoc(title){
-  const lines = [];
-  getFullEditSections().forEach(sec => {
+  // ✅ Export HTML that survives Google Docs / Word import:
+  // - uses <pre> (preserves spacing)
+  // - uses INLINE styles (Docs often strips <style> and class selectors)
+
+  const projectName = String(state.project?.name || "Song Rider Pro").trim() || "Song Rider Pro";
+  const bpmVal  = clamp(parseInt(state.bpm ?? el?.bpmInput?.value ?? 0, 10) || 0, 40, 220);
+  const capoRaw = parseInt(state.capo ?? el?.capoInput?.value ?? 0, 10);
+  const capoVal = isNaN(capoRaw) ? 0 : capoRaw;
+  const keyVal  = String(el?.keyOutput?.value || "").trim();
+
+  const metaParts = [];
+  if(bpmVal) metaParts.push(`BPM: ${bpmVal}`);
+  if(capoVal >= 1) metaParts.push(`Capo: ${capoVal}`);
+  if(keyVal) metaParts.push(`Key: ${keyVal}`);
+  const metaLine = metaParts.join("   ");
+
+  const blocks = [];
+
+  // ✅ Header: big project name + meta line (same size as lyrics)
+  blocks.push(
+    `<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:0 0 18px 0;">` +
+      `<div style="font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:34px;line-height:1.1;">${escapeHtml(projectName)}</div>` +
+      (metaLine ? `<div style="font-family:'Courier New',Courier,monospace;font-weight:400;font-size:16px;line-height:1.2;white-space:pre-wrap;">${escapeHtml(metaLine)}</div>` : ``) +
+    `</div>`
+  );
+
+  SECTIONS.filter(s => s !== "Full").forEach(sec => {
     const arr = state.project.sections[sec] || [];
 
     const hasAny = arr.some(line => {
@@ -4065,10 +4497,13 @@ function buildFullPreviewHtmlDoc(title){
     });
     if(!hasAny) return;
 
-    lines.push({ kind:"section", text: sec.toUpperCase() });
-    lines.push({ kind:"blank", text:"" });
-
-    arr.forEach((line, idx) => {
+    // Section heading (use editable page title when available)
+    const ttl = (state.project.sectionTitles && state.project.sectionTitles[sec]) ? String(state.project.sectionTitles[sec] || "").trim() : "";
+    const headingText = (ttl || sec || "").trim();
+    blocks.push(
+      `<div style="font-family:Arial,Helvetica,sans-serif;font-weight:900;margin:20px 0 8px;letter-spacing:.3px;">${escapeHtml(headingText)}</div>`
+    );
+arr.forEach((line, idx) => {
       const lyr = String(line?.lyrics || "").trim();
       const notes = Array.isArray(line?.notes) ? line.notes : [];
       const beats = Array.isArray(line?.beats) ? line.beats : [];
@@ -4078,44 +4513,32 @@ function buildFullPreviewHtmlDoc(title){
       const hasLyrics = !!lyr;
       if(!hasNotes && !hasBeats && !hasLyrics) return;
 
-      const aligned = buildAlignedLine(line,getTransposeSemis() || 0);
+      const aligned = buildAlignedLine(line, getTransposeSemis() || 0);
 
-      lines.push({ kind:"idx", text:`(${idx+1})` });
-      lines.push({ kind:"notes", text:`    ${aligned.notesLine}` });
-      lines.push({ kind:"lyrics", text:`    ${aligned.beatsLine}` });
-      lines.push({ kind:"blank", text:"" });
+      // Index line
+      blocks.push(
+        `<div style="font-family:Arial,Helvetica,sans-serif;font-weight:900;margin:8px 0 2px;">${escapeHtml(`(${idx+1})`)}</div>`
+      );
+
+      // Notes line (red, fixed width, spacing preserved)
+      blocks.push(
+        `<pre style="margin:0 0 0 0;font-family:'Courier New',Courier,monospace;font-weight:900;color:#7f1d1d;white-space:pre;">${escapeHtml(`    ${aligned.notesLine}`)}</pre>`
+      );
+
+      // Lyrics line (fixed width, spacing preserved)
+      blocks.push(
+        `<pre style="margin:0 0 10px 0;font-family:'Courier New',Courier,monospace;font-weight:400;color:#111;white-space:pre;">${escapeHtml(`    ${aligned.lyricsLine}`)}</pre>`
+      );
     });
 
-    lines.push({ kind:"blank", text:"" });
+    // spacer between sections
+    blocks.push(`<div style="height:12px;"></div>`);
   });
 
   const safeTitle = escapeHtml(title || "Song Rider Pro - Full Preview");
-
-
-  // ✅ Export header (requested)
-  const projName = String(state.project?.name || "Untitled").trim() || "Untitled";
-  const bpm = clamp(Number(state.bpm || 95), 40, 220);
-  const capo = clamp(Number(state.capo || 0), 0, 12);
-  const key = (el && el.keyOutput && String(el.keyOutput.value||"").trim()) ? String(el.keyOutput.value).trim() : "—";
-
-  const metaParts = [];
-  metaParts.push(`BPM: ${escapeHtml(String(bpm))}`);
-  if(Number(capo) >= 1) metaParts.push(`CAPO: ${escapeHtml(String(capo))}`);
-  metaParts.push(`KEY: ${escapeHtml(String(key))}`);
-
-  const metaHtml = `<div class="meta">
-    <div class="metaTitle">PROJECT: ${escapeHtml(projName)}</div>
-    <div class="metaRow">${metaParts.join(" &nbsp;&nbsp; ")}</div>
-  </div>`;
-  const bodyHtml = lines.length
-    ? lines.map(L => {
-        if(L.kind === "section") return `<div class="section">${escapeHtml(L.text)}</div>`;
-        if(L.kind === "idx") return `<div class="idx">${escapeHtml(L.text)}</div>`;
-        if(L.kind === "notes") return `<div class="notes">${escapeHtml(L.text)}</div>`;
-        if(L.kind === "lyrics") return `<div class="lyrics">${escapeHtml(L.text)}</div>`;
-        return `<div class="blank">${escapeHtml(L.text)}</div>`;
-      }).join("\n")
-    : `<div class="lyrics">(No lyrics/notes yet - start typing in a section)</div>`;
+  const bodyHtml = blocks.length
+    ? blocks.join("\n")
+    : `<div style="font-family:Arial,Helvetica,sans-serif;">(No lyrics/notes yet - start typing in a section)</div>`;
 
   return `<!doctype html>
 <html>
@@ -4123,45 +4546,8 @@ function buildFullPreviewHtmlDoc(title){
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${safeTitle}</title>
-<style>
-  :root{ --noteRed:#7f1d1d; }
-  body{
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    margin:24px;
-    color:#111;
-  }
-  .meta{
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
-    margin-bottom:18px;
-    padding-bottom:10px;
-    border-bottom:2px solid rgba(0,0,0,.10);
-  }
-  .metaTitle{
-    font-weight:1000;
-    font-size:28px;          /* Larger project title */
-    letter-spacing:.5px;
-    margin-bottom:4px;
-  }
-  .metaRow{
-    font-weight:900;
-    color:#111;
-  }
-  .section{
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
-    font-weight:900;
-    margin-top:20px;
-    margin-bottom:8px;
-    letter-spacing:.3px;
-  }
-  .idx{ font-weight:900; margin:8px 0 2px; }
-  .notes{ color: var(--noteRed); font-weight:900; white-space:pre; }
-  .lyrics{ color:#111; white-space:pre; }
-  .blank{ white-space:pre; height:10px; }
-  @media print{ body{ margin:0.5in; } }
-</style>
 </head>
-<body>
-${metaHtml}
+<body style="margin:24px;color:#111;">
 ${bodyHtml}
 </body>
 </html>`;
@@ -4177,6 +4563,7 @@ function updateFullIfVisible(){
 EXPORT
 ***********************/
 async function exportFullPreview(){
+  let lastErr = null;
   try{
     const plain = buildFullPreviewText();
     if(!plain || !String(plain).trim()){
@@ -4191,26 +4578,54 @@ async function exportFullPreview(){
     const htmlName = `${safeName} - Full Preview (Print).html`;
     const htmlDoc = buildFullPreviewHtmlDoc(`${safeName} - Full Preview`);
     const htmlBlob = new Blob([htmlDoc], { type:"text/html;charset=utf-8" });
-    const htmlFile = new File([htmlBlob], htmlName, { type:"text/html" });
 
+       // ✅ Most compatible on Android/PWA: download via <a download>
     try{
-      if(navigator.share && navigator.canShare && navigator.canShare({ files:[htmlFile] })){
-        await navigator.share({ title: safeName, files: [htmlFile] });
+      const downloadBlob = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+      };
+
+      // 2) HTML (printable with red notes)
+      downloadBlob(htmlBlob, htmlName);
+
+      return;
+    }catch(e){ lastErr = e; }
+
+    // ✅ Next: File System Access API (desktop Chromes + some Android builds)
+    try{
+      if(window.showSaveFilePicker){
+        const handle = await window.showSaveFilePicker({
+          suggestedName: htmlName,
+          types: [{ description: "HTML", accept: { "text/html": [".html"] } }]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(htmlBlob);
+        await writable.close();
         return;
       }
-    }catch{}
+    }catch(e){ lastErr = e; /* user cancel or unsupported */ }
 
-    const url = URL.createObjectURL(htmlBlob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = htmlName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 800);
+    // ✅ Last resort: open in a new tab so user can use Chrome menu → Download / Share
+    try{
+      const url = URL.createObjectURL(htmlBlob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      alert("Export opened in a new tab. Use Chrome menu → Download / Share to save it.");
+      return;
+    }catch(e){ lastErr = e; }
 
-  }catch{
-    alert("Export failed on this device/browser.");
+    throw lastErr || new Error("Unknown export failure.");
+  }catch(e){
+    const msg = (e && (e.message || String(e))) || "Unknown export failure.";
+    alert("Export failed.\n\n" + msg);
   }
 }
 
@@ -4218,382 +4633,63 @@ async function exportFullPreview(){
 Sheet rendering
 ***********************/
 function renderSheetActions(){
-  // Page header controls (+ next page, × delete blank page) — right aligned
-  if(!el.sheetActions) return;
-
-  el.sheetActions.innerHTML = "";
-  el.sheetActions.style.display = "flex";
-  el.sheetActions.style.justifyContent = "flex-end";
-  el.sheetActions.style.alignItems = "center";
-  el.sheetActions.style.gap = "10px";
-  el.sheetActions.style.width = "100%";
-
-  // helper: delete a page by name (blank only)
-  const doDeletePage = (sec, gotoAfter="Full") => {
-    if(!state.project) return;
-    if(!sec || sec === "Full") return;
-
-    if(sectionHasContent(sec)){
-      alert("Only blank pages can be deleted.");
-      return;
-    }
-    if(!confirm(`Delete page "${sec}"?`)) return;
-
-    editProject("deletePage", () => {
-      state.project.enabledSections = (state.project.enabledSections||[])
-        .filter(s => String(s).trim().toUpperCase() !== String(sec).trim().toUpperCase());
-
-      // Extra pages can be removed entirely
-      if(!SECTIONS.includes(sec)){
-        state.project.extraSections = (state.project.extraSections||[])
-          .filter(s => String(s).trim().toUpperCase() !== String(sec).trim().toUpperCase());
-        if(state.project.sections) delete state.project.sections[sec];
-      } else {
-        // Built-in pages: keep empty structure so nothing downstream breaks
-        state.project.sections = state.project.sections || {};
-        state.project.sections[sec] = [ newLine() ];
-
-      // ✅ mark built-in as hidden so + won't re-add it unless user types under its heading in Full
-      state.project.hiddenSections = Array.isArray(state.project.hiddenSections) ? state.project.hiddenSections : [];
-      if(!state.project.hiddenSections.map(x=>String(x).toUpperCase()).includes(String(sec).toUpperCase())){
-        state.project.hiddenSections.push(sec);
-      }
-      }
-
-      syncFullTextFromSections();
-      if(!String(state.project.fullText||"").trim()){
-        state.project.fullText = buildFullTemplate();
-      }
-    });
-
-    // always navigate somewhere safe
-    goToSection(gotoAfter || "Full");
-  };
-
-  // ✅ FULL PAGE also gets + and × on the right
-  if(state.currentSection === "Full"){
-    // + Add next page in sequence (VERSE 1 -> CHORUS 1 -> ... -> CHORUS 3, then extras)
-    const addBtn = document.createElement("button");
-    addBtn.className = "cardAdd";
-    addBtn.type = "button";
-    addBtn.textContent = "+";
-    addBtn.title = "Add the next page";
-    addBtn.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if(!state.project) return;
-
-      // IMPORTANT: Intro only appears when it has content, so we don't auto-add it here.
-      const seq = ["VERSE 1","CHORUS 1","VERSE 2","CHORUS 2","VERSE 3","BRIDGE","CHORUS 3"];
-
-      const enabled = (state.project.enabledSections||[]).map(s=>String(s).toUpperCase());
-      let lastIdx = 0; // VERSE 1 is always first
-      for(let i=0;i<seq.length;i++){
-        const sec = seq[i];
-        if(enabled.includes(sec.toUpperCase()) || sectionHasContent(sec)){
-          lastIdx = i;
-        }
-      }
-
-      let nextName = null;
-
-      // Candidate next titled page in sequence
-      if(lastIdx < seq.length - 1){
-        const candidate = seq[lastIdx + 1];
-        // ✅ if the next titled page was deleted (hidden) and still blank -> create an unnamed EXTRA instead
-        if(!(isHiddenBuiltIn(candidate) && !sectionHasContent(candidate))){
-          nextName = candidate;
-        }
-      }
-
-      if(nextName){
-        editProject("enablePage", () => {
-          state.project.enabledSections = (state.project.enabledSections||[]);
-          if(!state.project.enabledSections.includes(nextName)) state.project.enabledSections.push(nextName);
-        });
-      } else {
-        // After CHORUS 3 OR next titled is hidden -> create a new unnamed extra page
-        nextName = nextNewExtraName();
-        editProject("addExtraPage", () => {
-          state.project.sections = state.project.sections || {};
-          state.project.extraSections = (state.project.extraSections||[]);
-          state.project.enabledSections = (state.project.enabledSections||[]);
-
-          if(!state.project.extraSections.includes(nextName)) state.project.extraSections.push(nextName);
-          state.project.sections[nextName] = state.project.sections[nextName] || [newLine()];
-          if(!state.project.enabledSections.includes(nextName)) state.project.enabledSections.push(nextName);
-
-          syncFullTextFromSections();
-          if(!String(state.project.fullText||"").trim()){
-            state.project.fullText = buildFullTemplate();
-          }
-        });
-      }
-
-      if(nextName) goToSection(nextName);
-    });
-
-    // × Delete last blank page (prefers last extra, otherwise last blank built-in except VERSE 1)
-    const delBtn = document.createElement("button");
-    delBtn.className = "cardDel";
-    delBtn.type = "button";
-    delBtn.textContent = "×";
-    delBtn.title = "Delete last blank page";
-    delBtn.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if(!state.project) return;
-
-      const extras = (state.project.extraSections||[]);
-      // prefer deleting last extra
-      for(let i=extras.length-1;i>=0;i--){
-        const sec = extras[i];
-        if(!sectionHasContent(sec)){
-          doDeletePage(sec, "Full");
-          return;
-        }
-      }
-
-      const seq = ["CHORUS 3","BRIDGE","VERSE 3","CHORUS 2","VERSE 2","CHORUS 1"]; // reverse-ish, exclude VERSE 1
-      for(const sec of seq){
-        const enabled = (state.project.enabledSections||[]).map(s=>String(s).toUpperCase());
-        if(enabled.includes(sec.toUpperCase()) && !sectionHasContent(sec)){
-          doDeletePage(sec, "Full");
-          return;
-        }
-      }
-
-      alert("No blank pages to delete.");
-    });
-
-    el.sheetActions.appendChild(addBtn);
-    el.sheetActions.appendChild(delBtn);
-    return;
-  }
-// If this is a custom (extra) page, show an editable title input in the header
-  const isExtra = !SECTIONS.includes(state.currentSection) && state.currentSection !== "Full";
-  if(isExtra && el.sheetTitle){
-    el.sheetTitle.textContent = "";
-    const inp = document.createElement("input");
-    inp.type = "text";
-    inp.value = (String(state.currentSection).startsWith("__EXTRA_")) ? "" : state.currentSection;
-    inp.placeholder = "Page title";
-    inp.setAttribute("aria-label","Page title");
-    inp.style.maxWidth = "60vw";
-    inp.style.padding = "8px 10px";
-    inp.style.borderRadius = "14px";
-    inp.style.border = "1px solid #ddd";
-    inp.style.fontWeight = "700";
-
-    const commitRename = () => {
-      if(!state.project) return;
-      const raw = String(inp.value||"").trim();
-      if(!raw){
-        // allow unnamed extras to stay unnamed
-        if(String(state.currentSection).startsWith("__EXTRA_")) { inp.value = ""; return; }
-        inp.value = state.currentSection;
-        return;
-      }
-
-      const newName = raw;
-      const oldName = state.currentSection;
-
-      // prevent collisions with existing sections
-      const all = getAllSections().map(s=>String(s).toUpperCase());
-      if(String(oldName).toUpperCase() !== String(newName).toUpperCase() && all.includes(String(newName).toUpperCase())){
-        alert("That page title already exists.");
-        inp.value = oldName;
-        return;
-      }
-
-      editProject("renamePage", () => {
-        state.project.sections = state.project.sections || {};
-        state.project.sections[newName] = state.project.sections[oldName] || [newLine()];
-        delete state.project.sections[oldName];
-
-        state.project.extraSections = (state.project.extraSections||[]).map(s =>
-          (String(s).toUpperCase() === String(oldName).toUpperCase()) ? newName : s
-        );
-
-        state.project.enabledSections = (state.project.enabledSections||[]).map(s =>
-          (String(s).toUpperCase() === String(oldName).toUpperCase()) ? newName : s
-        );
-
-        syncFullTextFromSections();
-        if(!String(state.project.fullText||"").trim()){
-          state.project.fullText = buildFullTemplate();
-        }
-      });
-
-      state.currentSection = newName;
-      renderAll();
-    };
-
-    inp.addEventListener("change", commitRename);
-    inp.addEventListener("blur", commitRename);
-    inp.addEventListener("keydown", (e)=>{
-      if(e.key === "Enter"){
-        e.preventDefault();
-        commitRename();
-        inp.blur();
-      }
-    });
-
-    el.sheetTitle.appendChild(inp);
-  }
-
-  // + Add next page
-  const addBtn = document.createElement("button");
-  addBtn.className = "cardAdd";
-  addBtn.type = "button";
-  addBtn.textContent = "+";
-  addBtn.title = "Add the next page";
-  addBtn.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if(!state.project) return;
-
-    const order = getFullEditSections(); // INTRO..CHORUS 3 + extras (if any)
-    const cur = state.currentSection;
-    const i = order.indexOf(cur);
-
-    let nextName = null;
-
-    // Candidate next in sequence (if any)
-    if(i >= 0 && i < order.length - 1){
-      const candidate = order[i+1];
-      // ✅ if next is a deleted (hidden) built-in page and still blank -> make an unnamed EXTRA instead
-      if(!(isHiddenBuiltIn(candidate) && !sectionHasContent(candidate))){
-        nextName = candidate;
-      }
-    }
-
-    // If no valid titled page to add -> create a new unnamed extra page
-    if(!nextName){
-      nextName = nextNewExtraName();
-      editProject("addExtraPage", () => {
-        state.project.sections = state.project.sections || {};
-        state.project.extraSections = (state.project.extraSections||[]);
-        state.project.enabledSections = (state.project.enabledSections||[]);
-
-        if(!state.project.extraSections.includes(nextName)) state.project.extraSections.push(nextName);
-        state.project.sections[nextName] = state.project.sections[nextName] || [newLine()];
-        if(!state.project.enabledSections.includes(nextName)) state.project.enabledSections.push(nextName);
-
-        syncFullTextFromSections();
-        if(!String(state.project.fullText||"").trim()){
-          state.project.fullText = buildFullTemplate();
-        }
-      });
-    }
-
-    editProject("enablePage", () => {
-      state.project.enabledSections = (state.project.enabledSections||[]);
-      if(nextName && !state.project.enabledSections.includes(nextName)) state.project.enabledSections.push(nextName);
-    });
-
-    if(nextName) goToSection(nextName);
-  });
-
-  // × Delete current page (blank only)
-  const delBtn = document.createElement("button");
-  delBtn.className = "cardDel";
-  delBtn.type = "button";
-  delBtn.textContent = "×";
-  delBtn.title = "Delete this page (blank only)";
-  delBtn.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if(!state.project) return;
-
-    const sec = state.currentSection;
-    if(sec === "Full") return;
-
-    if(sectionHasContent(sec)){
-      alert("Only blank pages can be deleted.");
-      return;
-    }
-    if(!confirm(`Delete page "${sec}"?`)) return;
-
-    editProject("deletePage", () => {
-      state.project.enabledSections = (state.project.enabledSections||[])
-        .filter(s => String(s).trim().toUpperCase() !== String(sec).trim().toUpperCase());
-
-      // Extra pages can be removed entirely
-      if(!SECTIONS.includes(sec)){
-        state.project.extraSections = (state.project.extraSections||[])
-          .filter(s => String(s).trim().toUpperCase() !== String(sec).trim().toUpperCase());
-        if(state.project.sections) delete state.project.sections[sec];
-      } else {
-        // Built-in pages: keep empty structure so nothing downstream breaks
-        state.project.sections = state.project.sections || {};
-        state.project.sections[sec] = [ newLine() ];
-
-      // ✅ mark built-in as hidden so + won't re-add it unless user types under its heading in Full
-      state.project.hiddenSections = Array.isArray(state.project.hiddenSections) ? state.project.hiddenSections : [];
-      if(!state.project.hiddenSections.map(x=>String(x).toUpperCase()).includes(String(sec).toUpperCase())){
-        state.project.hiddenSections.push(sec);
-      }
-      }
-
-      syncFullTextFromSections();
-      if(!String(state.project.fullText||"").trim()){
-        state.project.fullText = buildFullTemplate();
-      }
-    });
-
-    // Move to a safe page that exists
-    let pages = [];
-    try{ pages = getSectionPages() || []; }catch{ pages = []; }
-    const idx = pages.indexOf(sec);
-    const fallback = pages[Math.max(0, idx - 1)] || pages[0] || "Full";
-    goToSection(fallback);
-  });
-
-  el.sheetActions.appendChild(addBtn);
-  el.sheetActions.appendChild(delBtn);
+  // ✅ We moved the page (+ / ✕) controls into the title bar (renderSheetTitleBar).
+  // This area used to show duplicate buttons under the title. Keep it empty.
+  if(el.sheetActions) el.sheetActions.innerHTML = "";
+  return;
 }
+
 function buildFullTemplate(){
-  return `INTRO
+  // (Kept for legacy comparisons; we no longer seed this template automatically)
+  return `${BREAK_LINE}
 
-VERSE 1
-Type your lyrics here (line 1)
-Type your lyrics here (line 2)
+${BREAK_LINE}
 
-CHORUS 1
-Type your chorus here
+${BREAK_LINE}
 
-VERSE 2
+${BREAK_LINE}
 
-CHORUS 2
+${BREAK_LINE}
 
-VERSE 3
+${BREAK_LINE}
 
-BRIDGE
+${BREAK_LINE}
 
-CHORUS 3
+${BREAK_LINE}
+
+${BREAK_LINE}
+
+${BREAK_LINE}
 `;
 }
-  function buildFullScaffold(){
-  // headings only, spaced for “type under heading”
-  return getFullEditSections().map(h => `${h}\n`).join("\n");
-}
 
+function buildFullScaffold(){
+  // ✅ Start with ONE section by default.
+  // Additional sections are created by the user tapping the + button inside Full.
+  return `${BREAK_LINE}
+
+`;
+}
 // Adds any missing headings back in (does NOT reorder your content)
-function ensureFullHeadingsPresent(fullText){
+function ensureFullBreaksPresent(fullText){
   const text = normalizeLineBreaks(fullText || "");
   const lines = text.split("\n");
 
-  const present = new Set();
-  for(const line of lines){
-    const h = isSectionHeadingLine(line);
-    if(h) present.add(h);
-  }
+  // ✅ treat ANY valid break (raw BREAK_LINE, "_" or "____Title") as a present break.
+  // This prevents a stray blank "Song Part" from being injected at the top when we
+  // emit inline-title breaks like:  ________Verse 1
+  const hasAnyBreak = lines.some(l => !!_parseBreakLine(l));
+  if(hasAnyBreak) return text;
 
-  const missing = getFullEditSections().filter(h => !present.has(h));
-  if(!missing.length) return text;
+  // If user pasted lyrics with no breaks, insert a single break at the top.
+  const prefix = `${BREAK_LINE}\n\n`;
+  return prefix + text.replace(/^\s+/, "");
+}
 
-  const suffix =
-    (text.trim().length ? "\n\n" : "") +
-    missing.map(h => `${h}\n`).join("\n");
 
-  return text.replace(/\s*$/, "") + suffix;
+// legacy name (older code paths)
+function ensureFullHeadingsPresent(fullText){
+  return ensureFullBreaksPresent(fullText);
 }
   /***********************
 Cards -> FullText sync
@@ -4609,65 +4705,554 @@ function syncFullTextFromSections(){
   _fullSyncLock = true;
   try{
     const out = [];
+    const semis = getTransposeSemis() || 0;
 
-    // Build headings + lyrics (blank line between cards)
-    getFullEditSections().forEach(sec => {
-      out.push(sec);
+    // Build break-line sections
+    // IMPORTANT: Only emit sections that are visible (enabled or have content).
+    // Using getAllSectionOrder() here caused Full view to suddenly sprout many
+    // empty pages when the user tapped + on a card page.
+    getVisibleSectionPages().filter(s => s !== "Full").forEach(sec => {
+      const ttl = (state.project.sectionTitles && state.project.sectionTitles[sec])
+        ? String(state.project.sectionTitles[sec] || "").trim()
+        : "";
+      // ✅ Title appears to the RIGHT of the break line:  ________Verse 1
+      out.push(BREAK_LINE + (ttl ? ttl : ""));
+
+      // ✅ Always keep at least one blank line under the pill so it never blocks lyrics
+      out.push("");
 
       const arr = (state.project.sections && state.project.sections[sec]) ? state.project.sections[sec] : [];
 
       let wroteAny = false;
+
       for(const line of arr){
-        const lyr = String(line?.lyrics || "").trim();
+        const lyrRaw = String(line?.lyrics || "");
+        const lyr = lyrRaw.trim();
+
+        const notesRaw = Array.isArray(line?.notes) ? line.notes : [];
+        const hasNotes = notesRaw.some(n => String(n || "").trim());
+
+        // If the card has chords but no lyrics, still show chords in Full view (copy/paste use case)
+        if(!lyr && hasNotes){
+          const notesT = notesRaw.map(n => transposeChordLabel(n, semis)).filter(Boolean).join(" ").trim();
+          if(notesT){
+            wroteAny = true;
+            out.push(notesT);
+            out.push(""); // blank line = next card
+          }
+          continue;
+        }
+
         if(!lyr) continue;
+
+        const notesT = notesRaw.map(n => transposeChordLabel(n, semis));
+        const { chordLine, lyricLine } = buildChordSheetLines(notesT, lyrRaw);
+
         wroteAny = true;
-        out.push(lyr);
+        if(String(chordLine || "").trim()) out.push(chordLine);
+        out.push(String(lyricLine || "").trimRight());
         out.push(""); // blank line = next card
       }
 
-      // Keep at least one empty line under heading so user can type later
       if(!wroteAny) out.push("");
 
-      // Extra spacing between sections
+      // spacing between pages
       out.push("");
     });
 
-    // Clean trailing blank lines (keep file neat)
     while(out.length && out[out.length - 1] === "") out.pop();
 
     let text = out.join("\n") + "\n";
-    text = ensureFullHeadingsPresent(text);
+    text = ensureFullBreaksPresent(text);
 
     state.project.fullText = text;
-// ✅ do NOT save here — caller decides when to save/commit history
-
-    // If Full page is currently open, update the textarea too
-    if(state.currentSection === "Full"){
-      const ta = document.querySelector("textarea.fullBox");
-      if(ta){
-        const s = ta.selectionStart, e = ta.selectionEnd;
-        ta.value = state.project.fullText || "";
-        try{ ta.selectionStart = s; ta.selectionEnd = e; }catch{}
-      }
-    }
-  } finally {
+  }finally{
     _fullSyncLock = false;
   }
 }
 
+
+function renderSheetTitleBar(){
+  if(!el.sheetTitle) return;
+  ensurePageMeta();
+
+  // clear
+  el.sheetTitle.innerHTML = "";
+  el.sheetTitle.style.display = "flex";
+  el.sheetTitle.style.width = "100%";
+  el.sheetTitle.style.boxSizing = "border-box";
+  el.sheetTitle.style.alignItems = "center";
+  el.sheetTitle.style.justifyContent = "space-between";
+  el.sheetTitle.style.flexWrap = "nowrap";
+  el.sheetTitle.style.gap = "10px";
+
+  const left = document.createElement("div");
+  left.style.display = "flex";
+  left.style.alignItems = "center";
+  left.style.gap = "10px";
+  left.style.flex = "1 1 auto";
+  left.style.minWidth = "0";
+
+  // ✅ Keep the Full-page header hint on the LEFT, in the same header row.
+  // (We don't rely on #sheetHint, since it's outside the title bar.)
+  const leftHint = document.createElement("div");
+  leftHint.style.fontSize = "12px";
+  leftHint.style.fontWeight = "900";
+  leftHint.style.color = "#666";
+  leftHint.style.whiteSpace = "nowrap";
+  leftHint.style.overflow = "hidden";
+  leftHint.style.textOverflow = "ellipsis";
+  leftHint.style.lineHeight = "1";
+
+  // Is this an EXTRA page? (internal section key like "EXTRA 1", "EXTRA 2", etc.)
+  const isExtraPage = (state.project && Array.isArray(state.project.extraSections) && state.project.extraSections.includes(state.currentSection))
+    || /^EXTRA\b/i.test(String(state.currentSection||""));
+
+  const name = document.createElement("div");
+  name.style.display = "none"; // no more preset page titles
+  left.appendChild(name);
+
+  // Title input for EVERY non-Full page
+  let titleInput = null;
+  if(state.currentSection !== "Full"){
+
+    titleInput = document.createElement("input");
+    titleInput.type = "text";
+    titleInput.placeholder = "Title (optional)…";
+    titleInput.className = "songPartPill headingPill";
+    titleInput.value = (state.project.sectionTitles && state.project.sectionTitles[state.currentSection]) ? String(state.project.sectionTitles[state.currentSection] || "") : "";
+    titleInput.style.flex = "1 1 0";
+    titleInput.style.minWidth = "90px";
+    titleInput.style.maxWidth = "420px";
+    titleInput.style.borderRadius = "12px";
+    titleInput.style.border = "1px solid rgba(0,0,0,.18)";
+    titleInput.style.padding = "6px 10px";
+    titleInput.style.background = "var(--hiYellow)";
+    titleInput.style.border = "1px solid rgba(0,0,0,.22)";
+    titleInput.style.fontWeight = "900";
+    titleInput.addEventListener("keydown", (e) => {
+      if(e.key === "Enter"){ e.preventDefault(); titleInput.blur(); }
+    });
+
+    let tmr = null;
+    titleInput.addEventListener("input", () => {
+      if(tmr) clearTimeout(tmr);
+      tmr = setTimeout(() => {
+        const val = String(titleInput.value || "").trim();
+        editProject("sectionTitle", () => {
+          ensurePageMeta();
+          if(val) state.project.sectionTitles[state.currentSection] = val;
+          else { try{ delete state.project.sectionTitles[state.currentSection]; }catch{} }
+          syncFullTextFromSections();
+        });
+        updateFullIfVisible();
+      }, 220);
+    });
+
+    left.appendChild(titleInput);
+  }else{
+    // ✅ Single-line hint on Full, left-aligned
+    leftHint.textContent = "Full Song View";
+    left.appendChild(leftHint);
+  }
+
+  const right = document.createElement("div");
+  right.style.display = "flex";
+  right.style.alignItems = "center";
+  right.style.gap = "8px";
+  right.style.flex = "0 0 auto";
+
+
+  if(state.currentSection === "Full"){
+    // ✅ Full page gets + / ✕ to add/remove pages without leaving Full view
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn secondary";
+    addBtn.textContent = "+";
+    addBtn.title = "Add next page";
+    addBtn.style.width = "38px";
+    addBtn.style.height = "34px";
+    addBtn.style.borderRadius = "999px";
+    addBtn.style.fontWeight = "1100";
+    addBtn.addEventListener("click", () => {
+      if(sheetHeaderBtnLock) return;
+      sheetHeaderBtnLock = true; setTimeout(()=>{sheetHeaderBtnLock=false;}, 220);
+      // Add based on the LAST visible page (excluding Full)
+      const vis = getVisibleSectionPages().filter(s => s !== "Full");
+      const last = vis.length ? vis[vis.length-1] : "PAGE 1";
+      const next = findNextSectionToEnable(last);
+
+      let target = null;
+      editProject("addPageFull", () => {
+        if(next === "__CREATE_EXTRA__"){
+          target = createExtraSection();
+        }else{
+          enableSection(next);
+          target = next;
+        }
+        syncFullTextFromSections();
+      });
+
+      if(!target){
+        alert("Could not create an extra page.");
+        return;
+      }
+      // stay on Full
+      render();
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn secondary";
+    delBtn.textContent = "✕";
+    delBtn.title = "Delete last page";
+    delBtn.style.width = "38px";
+    delBtn.style.height = "34px";
+    delBtn.style.borderRadius = "999px";
+    delBtn.style.fontWeight = "1100";
+
+    delBtn.addEventListener("click", () => {
+      if(sheetHeaderBtnLock) return;
+      sheetHeaderBtnLock = true; setTimeout(()=>{sheetHeaderBtnLock=false;}, 220);
+      const pages = getVisibleSectionPages().filter(s => s !== "Full");
+      // don't allow deleting the first Verse 1 base page
+      const candidates = pages.filter(s => !BASE_PAGES.includes(s));
+      const sec = candidates.length ? candidates[candidates.length-1] : null;
+      if(!sec){
+        alert("Nothing to delete (base pages remain; only extra pages can be removed).");
+        return;
+      }
+      if(!confirm(`Delete page "${sec}"? This clears its cards and hides the page.`)) return;
+
+      editProject("deletePageFull", () => {
+        deleteSectionPage(sec);
+        syncFullTextFromSections();
+      });
+
+      render();
+    });
+
+    right.appendChild(addBtn);
+    right.appendChild(delBtn);
+  }else{
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn secondary";
+    addBtn.textContent = "+";
+    addBtn.title = "Add next page";
+    addBtn.style.width = "38px";
+    addBtn.style.height = "34px";
+    addBtn.style.borderRadius = "999px";
+    addBtn.style.fontWeight = "1100";
+   addBtn.addEventListener("click", () => {
+  if(sheetHeaderBtnLock) return;
+  sheetHeaderBtnLock = true; setTimeout(()=>{sheetHeaderBtnLock=false;}, 220);
+  const next = findNextSectionToEnable(state.currentSection);
+
+  let target = null;
+
+  editProject("addPage", () => {
+    if(next === "__CREATE_EXTRA__"){
+      target = createExtraSection();     // ✅ makes EXTRA 1 / EXTRA 2 / ...
+    }else{
+      enableSection(next);               // ✅ base page enable
+      target = next;
+    }
+
+    // keep Full page synced
+    syncFullTextFromSections();
+  });
+
+  if(!target){
+    alert("Could not create an extra page.");
+    return;
+  }
+
+  goToSection(target);
+});
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn secondary";
+    delBtn.textContent = "✕";
+    delBtn.title = "Delete this page";
+    delBtn.style.width = "38px";
+    delBtn.style.height = "34px";
+    delBtn.style.borderRadius = "999px";
+    delBtn.style.fontWeight = "1100";
+    delBtn.addEventListener("click", () => {
+      if(sheetHeaderBtnLock) return;
+      sheetHeaderBtnLock = true; setTimeout(()=>{sheetHeaderBtnLock=false;}, 220);
+      const sec = state.currentSection;
+      if(!confirm(`Delete page "${sec}"? This clears its cards and hides the page.`)) return;
+
+      editProject("deletePage", () => {
+        deleteSectionPage(sec);
+        syncFullTextFromSections();
+      });
+
+      // move somewhere safe
+      const pages = getVisibleSectionPages();
+      const idx = pages.indexOf(sec);
+      const fallback = pages[(idx+1) % pages.length] || "Full";
+      goToSection(fallback === sec ? "Full" : fallback);
+    });
+
+    right.appendChild(addBtn);
+    right.appendChild(delBtn);
+  }
+
+
+  el.sheetTitle.appendChild(left);
+  el.sheetTitle.appendChild(right);
+}
+
+
 function renderSheet(){
-  try{
-  el.sheetTitle.textContent = state.currentSection;
+  renderSheetTitleBar();
   renderSheetActions();
 
   state.playCardIndex = null;
 
 if(state.currentSection === "Full"){
-  el.sheetHint.textContent = 'Paste + edit. Use headings: ' + getFullEditSections().join(', ') + '. Blank line = next card.';
-(el.sheetInner || el.sheetBody).innerHTML = "";
+  // ✅ Full page editor is now SECTION BLOCKS (no overlay), so:
+  // - No black break lines are visible
+  // - Yellow pill + buttons never overlap lyrics
+  if(el.sheetHint) el.sheetHint.textContent = "";
+  (el.sheetInner || el.sheetBody).innerHTML = "";
+
+  // Ensure at least one section exists
+  if(!String(state.project.fullText || "").trim()){
+    state.project.fullText = `${BREAK_LINE}\n\n`;
+    upsertProject(state.project);
+  }
+
+  function splitBlocks(fullText){
+    const lines = String(fullText || "").replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+    const blocks = [];
+    let cur = null;
+    const flush = () => {
+      if(!cur) return;
+      while(cur.body.length && String(cur.body[0]||"").trim() === "") cur.body.shift();
+      while(cur.body.length && String(cur.body[cur.body.length-1]||"").trim() === "") cur.body.pop();
+      blocks.push(cur);
+      cur = null;
+    };
+    for(const raw of lines){
+      const br = _parseBreakLine(raw);
+      if(br){
+        flush();
+        cur = { title: String(br.title||"").trim(), body: [] };
+        continue;
+      }
+      if(!cur) continue;
+      cur.body.push(String(raw ?? ""));
+    }
+    flush();
+    if(!blocks.length) blocks.push({ title:"", body:[] });
+    return blocks;
+  }
+
+  function blocksToFullText(blocks){
+    const out = [];
+    for(const b of blocks){
+      const t = String(b.title||"").trim();
+      out.push(BREAK_LINE + (t ? t : ""));
+      out.push("");
+      const body = Array.isArray(b.body) ? b.body : [];
+      for(const ln of body) out.push(String(ln ?? ""));
+      out.push("");
+      out.push("");
+    }
+    while(out.length && out[out.length-1] === "") out.pop();
+    return out.join("\n") + "\n";
+  }
+
+  let blocks = splitBlocks(state.project.fullText || "");
+
+  // Ensure we have enough section names for block mapping
+  const pageOrder = getAllSectionOrder().filter(s => s !== "Full");
+  while(pageOrder.length < blocks.length){
+    editProject("ensureExtras", () => {
+      createExtraSection({ enable:false });
+    });
+    pageOrder.splice(0, pageOrder.length, ...getAllSectionOrder().filter(s => s !== "Full"));
+  }
+
+  const fullWrap = document.createElement("div");
+  fullWrap.className = "fullSectionEditor";
+
+  let commitTimer = null;
+  function commitNow(){
+    const newText = blocksToFullText(blocks);
+    editProject("fullBlocks", () => {
+      state.project.fullText = newText;
+      applyFullTextToProjectSections(state.project.fullText || "");
+      cleanupDeletedBaseSections();
+    });
+    renderTabs();
+    renderSheetTitleBar();
+    refreshDisplayedNoteCells();
+    updateKeyFromAllNotes();
+    saveCurrentProject();
+  }
+  function commitDebounced(){
+    if(commitTimer) clearTimeout(commitTimer);
+    commitTimer = setTimeout(() => {
+      commitNow();
+      refreshRhymesFromActive();
+    }, 160);
+  }
+
+  // ✅ Make + / × feel instant on mobile: update UI immediately, then do heavy sync in the debounce.
+  // Also guard against accidental double-taps.
+  let pillActionLock = false;
+  function withPillActionLock(fn){
+    if(pillActionLock) return;
+    pillActionLock = true;
+    try{ fn(); }finally{ setTimeout(()=>{ pillActionLock = false; }, 320); }
+  }
+
+  // ✅ Avoid mobile "double fire" (pointerup + click). Use ONE tap event.
+  function bindTap(elm, handler){
+    if(!elm) return;
+    const hasPointer = typeof window !== "undefined" && !!window.PointerEvent;
+    if(hasPointer){
+      // On some mobile browsers, a synthetic click can still fire after pointerup.
+      // We handle pointerup and explicitly swallow click to prevent double-add/delete.
+      elm.addEventListener("pointerup", (e)=>{ e.preventDefault(); e.stopPropagation(); handler(e); }, {passive:false});
+      elm.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); }, {capture:true});
+    }else{
+      elm.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); handler(e); });
+    }
+  }
+
+  function quickSaveFullText(){
+    // Persist immediately so refresh never loses newly added/removed blocks.
+    try{
+      const newText = blocksToFullText(blocks);
+      editProject("quickFullSave", () => { state.project.fullText = newText; });
+      saveCurrentProject();
+    }catch(err){ console.error(err); }
+  }
+
+  blocks.forEach((b, idx) => {
+    const sec = pageOrder[idx] || null;
+
+    const card = document.createElement("div");
+    card.className = "fullSectionCard";
+
+    const head = document.createElement("div");
+    head.className = "fullSectionHead";
+    const leftLine = document.createElement("div");
+    leftLine.className = "fullBreakLine";
+    const rightLine = document.createElement("div");
+    rightLine.className = "fullBreakLine";
+
+    const pill = document.createElement("input");
+    pill.type = "text";
+    pill.className = "songPartPill";
+    pill.placeholder = "Song Part";
+    pill.value = String(b.title || "");
+    pill.addEventListener("keydown", (e) => {
+      if(e.key === "Enter"){ e.preventDefault(); pill.blur(); }
+    });
+    pill.addEventListener("input", () => {
+      b.title = String(pill.value || "");
+      editProject("pillTitle", () => {
+        ensurePageMeta();
+        if(!state.project.sectionTitles) state.project.sectionTitles = {};
+        if(sec){
+          const v = String(b.title||"").trim();
+          if(v) state.project.sectionTitles[sec] = v;
+          else { try{ delete state.project.sectionTitles[sec]; }catch{} }
+        }
+      });
+      renderTabs();
+      renderSheetTitleBar();
+      commitDebounced();
+    });
+
+    head.appendChild(leftLine);
+    head.appendChild(pill);
+    head.appendChild(rightLine);
+
+    const ta = document.createElement("textarea");
+    ta.className = "fullSectionText";
+    ta.placeholder = "Lyrics / chords...";
+    ta.value = Array.isArray(b.body) ? b.body.join("\n") : "";
+    autosizeTextarea(ta);
+    ta.addEventListener("focus", () => { lastLyricsTextarea = ta; refreshRhymesFromActive(); });
+    ta.addEventListener("click", () => { lastLyricsTextarea = ta; refreshRhymesFromActive(); });
+    ta.addEventListener("input", () => {
+      autosizeTextarea(ta);
+      b.body = String(ta.value || "").replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+      commitDebounced();
+    });
+    ta.addEventListener("paste", () => setTimeout(() => autosizeTextarea(ta), 0));
+
+    const actions = document.createElement("div");
+    actions.className = "fullSectionActions";
+    const addBtn = document.createElement("button");
+    addBtn.className = "pillBtn";
+    addBtn.textContent = "+";
+    addBtn.title = "Add song part";
+    addBtn.type = "button";
+    bindTap(addBtn, () => {
+      withPillActionLock(() => {
+        blocks.splice(idx + 1, 0, { title:"", body:[] });
+        state.project.fullText = blocksToFullText(blocks);
+        quickSaveFullText();
+        renderSheet();
+        commitDebounced();
+      });
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "pillBtn";
+    delBtn.textContent = "×";
+    delBtn.title = "Delete this song part";
+    delBtn.type = "button";
+    const doDelete = () => {
+      if(!confirm("Delete this song part section?")) return;
+      if(blocks.length <= 1){
+        blocks = [{ title:"", body:[] }];
+      }else{
+        blocks.splice(idx, 1);
+      }
+      // Remove the corresponding page/card immediately (if it exists)
+      if(sec){
+        try{ deleteSectionPage(sec); }catch{}
+      }
+      state.project.fullText = blocksToFullText(blocks);
+      quickSaveFullText();
+      renderSheet();
+      commitDebounced();
+    };
+    bindTap(delBtn, () => {
+      withPillActionLock(doDelete);
+    });
+    actions.appendChild(addBtn);
+    actions.appendChild(delBtn);
+
+    card.appendChild(head);
+    card.appendChild(ta);
+    card.appendChild(actions);
+    fullWrap.appendChild(card);
+  });
+
+  (el.sheetInner || el.sheetBody).appendChild(fullWrap);
+  requestAnimationFrame(() => {
+    try{ fullWrap.querySelectorAll("textarea.fullSectionText").forEach(autosizeTextarea); }catch{}
+  });
+  return;
 
   const wrap = document.createElement("div");
   wrap.className = "fullBoxWrap";
+
+  // ✅ Break title pills now live INSIDE the Full textarea at every break line.
+  //    We render an overlay that aligns pills to the break-line rows in the textarea.
+  const pillPages = getAllSectionOrder().filter(s => s !== "Full");
+
+
+  const host = document.createElement("div");
+  host.className = "fullPillHost";
 
   const ta = document.createElement("textarea");
   ta.className = "fullBox";
@@ -4680,14 +5265,13 @@ ta.addEventListener("click", () => {
   refreshRhymesFromActive();
 });
   ta.readOnly = false;
-  ta.placeholder =
-`VERSE 1
+  ta.placeholder = `__________Page name
 Line 1
 Line 2
 
 (blank line = new card)
 
-CHORUS 1
+__________
 ...`;
 
   // ✅ STOP AUTO-POPULATING FULL TEXT
@@ -4711,51 +5295,341 @@ if(!String(state.project.fullText || "").trim()){
 }
 ta.value = state.project.fullText || "";
 
+  const overlay = document.createElement("div");
+  overlay.className = "fullPillOverlay";
+  host.appendChild(ta);
+  host.appendChild(overlay);
+
 
   // Fill the available space better (no index.html edits required)
   ta.style.width = "100%";
   ta.style.minHeight = "calc(100vh - 220px)";
   ta.style.resize = "none";
-  // ✅ make Full textarea visible + prevent it from overlaying header/taps
-  ta.style.boxSizing = "border-box";
-  ta.style.border = "1px solid #ddd";
-  ta.style.borderRadius = "14px";
-  ta.style.padding = "12px";
-  ta.style.fontSize = "16px";
-  ta.style.lineHeight = "1.4";
-  ta.style.background = "#fff";
-  ta.style.color = "#111";
-  ta.style.position = "relative";
-  ta.style.zIndex = "0";
-  wrap.style.position = "relative";
-  wrap.style.zIndex = "0";
-  wrap.style.padding = "8px 0";
 
+  // ---------- Break-pill overlay helpers ----------
+  function parseBreakLinesFromText(text){
+    const lines = String(text || "").replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+    const breaks = [];
+    for(let i=0;i<lines.length;i++){
+      const raw = String(lines[i] ?? "");
+      const t = raw.trim();
+      if(!t) continue;
+      if(t === BREAK_LINE || t === "_"){
+        breaks.push({ lineIndex:i, title:"" });
+        continue;
+      }
+      if(t[0] === "_"){
+        const m = t.match(/^_{1,}\s*(.+)?$/);
+        const title = (m && m[1]) ? String(m[1] || "").trim() : "";
+        breaks.push({ lineIndex:i, title });
+      }
+    }
+    return { lines, breaks };
+  }
 
-  let tmr = null;
-  ta.addEventListener("input", () => {
-  // keep live text in memory immediately (no history yet)
-  state.project.fullText = ta.value;
+  function setBreakLineTitleByOccurrence(occIdx, title){
+    const parsed = parseBreakLinesFromText(ta.value);
+    const b = parsed.breaks[occIdx];
+    if(!b) return;
 
-  // debounce so it doesn’t lag while typing
-  if(tmr) clearTimeout(tmr);
-  tmr = setTimeout(() => {
-    // ✅ snapshot BEFORE changes (Undo works)
-    editProject("fullText", () => {
+    const lines = parsed.lines.slice();
+    const t = String(title || "").trim();
+    // Force canonical inline title form: ________Title
+    lines[b.lineIndex] = BREAK_LINE + (t ? t : "");
+    const newText = lines.join("\n");
+
+    if(newText === ta.value) return;
+
+    // Preserve cursor as best we can (keep it close)
+    const selStart = ta.selectionStart;
+    const selEnd = ta.selectionEnd;
+    ta.value = newText;
+    try{
+      ta.selectionStart = clamp(selStart, 0, ta.value.length);
+      ta.selectionEnd = clamp(selEnd, 0, ta.value.length);
+    }catch{}
+
+    // Commit via the same pipeline used by typing in Full
+    onFullTextareaInput();
+  }
+  function insertSectionAfterOccurrence(occIdx){
+    const parsed = parseBreakLinesFromText(ta.value);
+    const lines = parsed.lines.slice();
+    const breaks = parsed.breaks;
+
+    if(!breaks.length) return;
+
+    // insertion point is right BEFORE the next break, or end of text
+    let insertAt = (occIdx + 1 < breaks.length) ? breaks[occIdx + 1].lineIndex : lines.length;
+
+    // Ensure at least one blank line before the new break (so + / × feels "under" the section)
+    if(insertAt > 0 && String(lines[insertAt - 1] || "").trim() !== ""){
+      lines.splice(insertAt, 0, "");
+      insertAt += 1;
+    }
+
+    // Insert new break + a blank line for typing
+    lines.splice(insertAt, 0, BREAK_LINE, "");
+
+    ta.value = lines.join("\n");
+    state.project.fullText = ta.value;
+
+    // Move cursor to the blank line right after the inserted break
+    try{
+      const targetLine = insertAt + 1; // the blank line after BREAK_LINE
+      let idx = 0;
+      for(let i=0;i<lines.length;i++){
+        if(i === targetLine){ break; }
+        idx += lines[i].length + 1;
+      }
+      ta.focus();
+      ta.setSelectionRange(idx, idx);
+    }catch{}
+
+    onFullTextareaInput();
+    positionOverlayPills();
+  }
+
+  function deleteSectionByOccurrence(occIdx){
+    const parsed = parseBreakLinesFromText(ta.value);
+    const lines = parsed.lines.slice();
+    const breaks = parsed.breaks;
+
+    if(!breaks.length) return;
+
+    // If this is the only section, just clear its content (keep one break)
+    if(breaks.length <= 1){
+      ta.value = `${BREAK_LINE}\n\n`;
       state.project.fullText = ta.value;
-      applyFullTextToProjectSections(state.project.fullText || "");
+      onFullTextareaInput();
+      positionOverlayPills();
+      return;
+    }
+
+    const startLine = breaks[occIdx].lineIndex;
+    const endLine = (occIdx + 1 < breaks.length) ? breaks[occIdx + 1].lineIndex : lines.length;
+
+    lines.splice(startLine, Math.max(0, endLine - startLine));
+
+    // Always ensure the text begins with a break line
+    if(String(lines[0] || "").trim() !== BREAK_LINE){
+      lines.unshift(BREAK_LINE, "");
+    }
+
+    ta.value = lines.join("\n");
+    state.project.fullText = ta.value;
+
+    onFullTextareaInput();
+    positionOverlayPills();
+  }
+
+
+  function positionOverlayPills(){
+    overlay.innerHTML = "";
+
+    const parsed = parseBreakLinesFromText(ta.value);
+    const breaks = parsed.breaks;
+    if(!breaks.length) return;
+
+    const cs = getComputedStyle(ta);
+    const lineH = parseFloat(cs.lineHeight) || 18;
+    const padT = parseFloat(cs.paddingTop) || 0;
+    const padB = parseFloat(cs.paddingBottom) || 0;
+    const scrollTop = ta.scrollTop || 0;
+    const viewH = ta.clientHeight || 0;
+
+    // Visual sizes for overlay elements
+    const pillH = 34;
+    const rowH  = Math.max(pillH + 8, lineH + 10); // also masks the raw break-line text
+
+    const pages = pillPages.slice();
+    for(let i=0;i<breaks.length;i++){
+      const sec = pages[i] || null;
+      if(!sec) break;
+
+      const y = padT + (breaks[i].lineIndex * lineH) - scrollTop;
+
+      // Only render if near viewport (small buffer)
+      if(y < -80 || y > viewH + 80) continue;
+
+      const row = document.createElement("div");
+      row.className = "breakRow";
+      // Center the pill over the break-line, and mask the literal "__________TITLE" text behind it
+      row.style.top = `${Math.max(0, Math.round(y - ((rowH - lineH) / 2)))}px`;
+      row.style.height = `${Math.round(rowH)}px`;
+      // Allow editing the pill input (row acts as a mask, input handles the interaction)
+      row.style.pointerEvents = "auto";
+      row.style.background = "#fff";
+      row.style.borderRadius = "16px";
+
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.className = "songPartPill";
+      inp.placeholder = "Song Part";
+
+      // Two-way: prefer explicit project title, else derive from Full break line
+      const stored = (state.project.sectionTitles && state.project.sectionTitles[sec])
+        ? String(state.project.sectionTitles[sec] || "").trim()
+        : "";
+      const derived = String(breaks[i].title || "").trim();
+      inp.value = stored || derived;
+
+      inp.addEventListener("keydown", (e) => {
+        if(e.key === "Enter"){ e.preventDefault(); inp.blur(); }
+      });
+
+      // keep the pill sized so it doesn't block lyrics (lyrics start beneath a blank line)
+      inp.style.height = `${pillH}px`;
+
+      let tmrP = null;
+      inp.addEventListener("input", () => {
+        if(tmrP) clearTimeout(tmrP);
+        tmrP = setTimeout(() => {
+          const val = String(inp.value || "").trim();
+          editProject("fullBreakTitle", () => {
+            ensurePageMeta();
+            if(val) state.project.sectionTitles[sec] = val;
+            else { try{ delete state.project.sectionTitles[sec]; }catch{} }
+          });
+
+          // Update the actual break line text for this occurrence so parsing/sync stays correct
+          setBreakLineTitleByOccurrence(i, val);
+
+          // Keep pages + Full synced
+          editProject("syncAfterFullBreakTitle", () => {
+            syncFullTextFromSections();
+          });
+          updateFullIfVisible();
+        }, 180);
+      });
+
+      row.appendChild(inp);
+      overlay.appendChild(row);
+
+      // + / × action row UNDER this section's text (not on top of lyrics)
+      try{
+        const endLine = (i + 1 < breaks.length) ? breaks[i + 1].lineIndex : parsed.lines.length;
+
+        // Find last non-empty line within this section (between this break and the next break)
+        let last = breaks[i].lineIndex;
+        for(let k=endLine-1;k>breaks[i].lineIndex;k--){
+          const t = String(parsed.lines[k] || "").trim();
+          if(t){ last = k; break; }
+        }
+
+        let yBtn = padT + ((last + 1) * lineH) - scrollTop + 6;
+
+        // Keep the controls at least under the pill area
+        yBtn = Math.max(y + rowH + 6, yBtn);
+
+        // Clamp above next pill to prevent collisions
+        if(i + 1 < breaks.length){
+          const yNext = padT + (breaks[i + 1].lineIndex * lineH) - scrollTop;
+          yBtn = Math.min(yBtn, yNext - rowH - 8);
+        }
+
+        if(yBtn >= -80 && yBtn <= viewH + 80){
+          const act = document.createElement("div");
+          act.className = "breakActions";
+          act.style.top = `${Math.max(0, Math.round(yBtn))}px`;
+          act.style.pointerEvents = "auto";
+
+          const bAdd = document.createElement("button");
+          bAdd.type = "button";
+          bAdd.className = "breakActBtn";
+          bAdd.textContent = "+";
+          bAdd.addEventListener("click", (e) => {
+            e.preventDefault(); e.stopPropagation();
+            insertSectionAfterOccurrence(i);
+          });
+
+          const bDel = document.createElement("button");
+          bDel.type = "button";
+          bDel.className = "breakActBtn";
+          bDel.textContent = "×";
+          bDel.addEventListener("click", (e) => {
+            e.preventDefault(); e.stopPropagation();
+            deleteSectionByOccurrence(i);
+          });
+
+          act.appendChild(bAdd);
+          act.appendChild(bDel);
+          overlay.appendChild(act);
+        }
+      }catch{}
+
+    }
+
+    // prevent overlay from blocking textarea bottom taps
+    overlay.style.paddingBottom = `${padB}px`;
+  }
+
+  // Debounced Full input handler (shared by typing and pill edits)
+  let tmr = null;
+  function onFullTextareaInput(){
+    // keep live text in memory immediately (no history yet)
+    state.project.fullText = ta.value;
+
+    if(tmr) clearTimeout(tmr);
+    tmr = setTimeout(() => {
+      editProject("fullText", () => {
+        state.project.fullText = ta.value;
+        // Apply changes -> sections/cards
+        applyFullTextToProjectSections(state.project.fullText || "");
+        // Ensure we keep enough breaks for stable UI
+        state.project.fullText = ensureFullBreaksPresent(state.project.fullText || "");
+      });
+      updateFullIfVisible();
+      refreshKeyUI();
+      // re-align pills after parsing may normalize break lines
+      positionOverlayPills();
+    }, 220);
+  }
+
+  // Keep overlay aligned while scrolling
+  ta.addEventListener("scroll", () => positionOverlayPills(), { passive:true });
+
+  // Rebuild overlay as the user types
+  ta.addEventListener("input", () => {
+    onFullTextareaInput();
+    positionOverlayPills();
+  });
+
+  // Initial overlay build
+  queueMicrotask(() => positionOverlayPills());
+
+  wrap.appendChild(host);
+
+  // (the rest of the Full-view render continues below)
+
+  // ✅ On first open: optionally seed sections from Full text ONCE (prevents freezes)
+  if(!didInitialFullApply){
+    didInitialFullApply = true;
+
+    const ft = String(state.project?.fullText || "");
+    // Only auto-apply if sections are essentially empty (otherwise preserve existing cards)
+    const hasAnyCards = FULL_EDIT_SECTIONS.some(sec => {
+      const arr = state.project?.sections?.[sec] || [];
+      return Array.isArray(arr) && arr.some(lineHasContent);
     });
 
-    updateKeyFromAllNotes();
-    // don’t renderSheet() here (would move cursor)
-  }, 180);
-});
+    if(ft.trim() && !hasAnyCards){
+      // defer so UI can paint first
+      setTimeout(()=>{
+        try{
+          applyFullTextToProjectSections(ft);
+          upsertProject(state.project); // ok to keep (no history needed on first open)
+          // re-render after seeding
+          try{ renderAllSections?.(); }catch{}
+          try{ renderAll?.(); }catch{}
+        }catch(e){
+          console.error("Full->cards seed failed:", e);
+        }
+      }, 0);
+    }
+  }
 
-  // On first open, make sure cards match the full text once
-  applyFullTextToProjectSections(state.project.fullText || "");
-upsertProject(state.project); // ok to keep (no history needed on first open)
-
-  wrap.appendChild(ta);
+  // textarea is inside `host` (so overlay can sit on top)
 (el.sheetInner || el.sheetBody).appendChild(wrap);
   return;
 }
@@ -4775,7 +5649,27 @@ upsertProject(state.project); // ok to keep (no history needed on first open)
 const card = document.createElement("div");
 card.className = "card";
 
-/* ✅ Add button (top-right, left of X) */
+/* ✅ Card top bar: number + syllables on the SAME top line, with + / × on the right */
+const top = document.createElement("div");
+top.className = "cardTop";
+
+const topLeft = document.createElement("div");
+topLeft.className = "cardTopLeft";
+
+const topRight = document.createElement("div");
+topRight.className = "cardTopRight";
+
+/* Card number */
+const num = document.createElement("div");
+num.className = "cardNum";
+num.textContent = String(idx + 1);
+
+/* Syllable pill */
+const syll = document.createElement("div");
+syll.className = "syllPill";
+updateSyllPill(syll, line.lyrics || "");
+
+/* ✅ Add button (right side) */
 const addBtn = document.createElement("button");
 addBtn.className = "cardAdd";
 addBtn.type = "button";
@@ -4789,10 +5683,10 @@ addBtn.addEventListener("click", (e) => {
   const insertAt = idx + 1;
   const nl = newLine();
   editProject("addCard", () => {
-  arr.splice(insertAt, 0, nl);
-  // ✅ keep Full in sync
-  syncFullTextFromSections();
-});
+    arr.splice(insertAt, 0, nl);
+    // ✅ keep Full in sync
+    syncFullTextFromSections();
+  });
   renderSheet();
   updateFullIfVisible();
   updateKeyFromAllNotes();
@@ -4808,9 +5702,7 @@ addBtn.addEventListener("click", (e) => {
   }, 0);
 });
 
-card.appendChild(addBtn);
-
-/* ✅ Delete button (top-right) */
+/* ✅ Delete button (right side) */
 const delBtn = document.createElement("button");
 delBtn.className = "cardDel";
 delBtn.type = "button";
@@ -4830,8 +5722,8 @@ delBtn.addEventListener("click", (e) => {
   }
 
   editProject("deleteCard", () => {
-  syncFullTextFromSections();
-});
+    syncFullTextFromSections();
+  });
   renderSheet();
   updateFullIfVisible();
   updateKeyFromAllNotes();
@@ -4840,24 +5732,14 @@ delBtn.addEventListener("click", (e) => {
   refreshRhymesFromActive();
 });
 
-card.appendChild(delBtn);
+topLeft.appendChild(num);
+topLeft.appendChild(syll);
+topRight.appendChild(addBtn);
+topRight.appendChild(delBtn);
 
-
-    const top = document.createElement("div");
-    top.className = "cardTop";
-
-    const num = document.createElement("div");
-    num.className = "cardNum";
-    num.textContent = String(idx + 1);
-    
-
-    const syll = document.createElement("div");
-    syll.className = "syllPill";
- updateSyllPill(syll, line.lyrics || "");
-
-
-    top.appendChild(num);
-    top.appendChild(syll);
+top.appendChild(topLeft);
+top.appendChild(topRight);
+card.appendChild(top);
 
     const notesRow = document.createElement("div");
     notesRow.className = "notesRow";
@@ -5017,51 +5899,427 @@ card.appendChild(delBtn);
   clearTick(); applyTick();
 
   refreshDisplayedNoteCells();
-
-  }catch(err){
-    console.error(err);
-    // ✅ Recover if a bad delete/rename left state inconsistent
-    try{
-      if(state && state.project){
-        if(!state.project.fullText) state.project.fullText = buildFullTemplate();
-        if(!state.project.sections) state.project.sections = {};
-        state.currentSection = "Full";
-      }
-    }catch{}
-    try{ renderTabs(); }catch{}
-    try{
-      // attempt to re-render Full view so the app stays usable
-      el.sheetTitle && (el.sheetTitle.textContent = "Full");
-    }catch{}
-    try{ (el.sheetInner || el.sheetBody).innerHTML = ""; }catch{}
-  }
 }
 async function uploadAudioFile(){
+  // ✅ One button supports:
+  // - Audio files (mp3/wav/m4a): same behavior as before (adds to recordings + can sync)
+  // - PDF files: extracts text -> drops it into Full -> populates cards + chords
+  // - Text files: reads text -> drops it into Full -> populates cards + chords
   const inp = document.createElement("input");
   inp.type = "file";
-  inp.accept = "audio/*"; // mp3, wav, m4a (browser dependent)
+  inp.accept = "audio/*,application/pdf,text/plain,.pdf,.txt";
   inp.click();
 
   inp.onchange = async () => {
     const file = inp.files && inp.files[0];
     if(!file) return;
 
-    const item = {
-      id: uuid(),
-      projectId: state.project?.id || "",
-      kind: "upload",
-      createdAt: now(),
-      title: file.name || "Audio",
-      blob: file,          // File is a Blob
-      offsetSec: 0         // you’ll want a Beat-1 marker button for this
+    const type = String(file.type || "").toLowerCase();
+    const name = String(file.name || "").toLowerCase();
+
+    const isPdf = type === "application/pdf" || name.endsWith(".pdf");
+    const isText = type.startsWith("text/") || name.endsWith(".txt");
+    const isAudio = type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg)$/i.test(name);
+
+    if(isPdf){
+      await importPdfToFull(file);
+      return;
+    }
+    if(isText){
+      const txt = await file.text();
+      await importTextToFull(txt);
+      return;
+    }
+    if(isAudio){
+      const item = {
+        id: uuid(),
+        projectId: state.project?.id || "",
+        kind: "upload",
+        createdAt: now(),
+        title: file.name || "Audio",
+        blob: file,
+        offsetSec: 0
+      };
+
+      await dbPut(item);
+      await renderRecordings();
+
+      // optional: auto-start sync immediately after upload
+      await startAudioSyncFromRec(item);
+      return;
+    }
+
+    alert("Unsupported file. Upload an audio file (.mp3/.wav/.m4a), a .pdf, or a .txt");
+  };
+}
+
+// ----------------------
+// ✅ IMPORT: Text -> Full -> Cards (with chord parsing)
+// ----------------------
+async function importTextToFull(text){
+  if(!state.project) return;
+
+  const cleaned = normalizeLineBreaks(String(text || "")).trim();
+  if(!cleaned){
+    alert("No text found to import.");
+    return;
+  }
+
+  editProject("importText", () => {
+    state.project.fullText = cleaned;
+    applyFullTextToProjectSections(state.project.fullText || "");
+  });
+
+  updateKeyFromAllNotes();
+  renderAll();
+  goToSection("Full");
+}
+
+// ----------------------
+// ✅ IMPORT: PDF -> extract text -> Full -> Cards (with chord parsing)
+// Requires PDF.js (pdfjsLib global)
+// ----------------------
+async function importPdfToFull(file){
+  try{
+    const text = await extractTextFromPdfFile(file);
+    if(!String(text||"").trim()){
+      alert("PDF imported, but no selectable text was found.\n\nThis usually means the PDF is a scanned image (picture-only). Export a text-based PDF (not scanned), or save as .txt and import that.");
+      return;
+    }
+    await importTextToFull(text);
+    // ✅ After PDF import, jump straight to VERSE 1 cards
+    try{ goToSection("VERSE 1"); renderTabs(); renderSheet(); }catch{}
+}catch(err){
+    console.error(err);
+    const online = (typeof navigator !== "undefined" && "onLine" in navigator) ? navigator.onLine : "unknown";
+    const details = [
+      `name: ${err?.name || "?"}`,
+      `message: ${err?.message || String(err || "?")}`,
+      (err && "code" in err) ? `code: ${err.code}` : null
+    ].filter(Boolean).join("\n");
+
+    alert(
+      "PDF import failed.\n\n" +
+      `Online: ${online}\n\n` +
+      "This is NOT a Wi‑Fi issue most of the time.\n" +
+      "Common causes:\n" +
+      "• PDF.js script blocked by network/caching\n" +
+      "• PDF is password-protected\n" +
+      "• PDF has no selectable text (scanned image)\n\n" +
+      "Error details:\n" + details
+    );
+  }
+}
+
+
+function fixPdfLetterSpacing(text){
+  // Fix common PDF extraction artifact: letters separated by spaces, e.g. "T u r n" -> "Turn"
+  // Only merges when it looks like a "spelled out" word (3+ spaced letters in a row).
+  return String(text || "").split("\n").map(line => {
+    let s = String(line || "");
+    // Merge sequences of spaced letters inside the line
+    s = s.replace(/(?:\b[A-Za-z]\s){2,}[A-Za-z]\b/g, (m)=>m.replace(/\s+/g,""));
+    // Clean up excessive spaces
+    s = s.replace(/[ \t]+\n/g,"\n");
+    return s.replace(/[ \t]{2,}/g," ").trimEnd();
+  }).join("\n");
+}
+
+async function extractTextFromPdfFile(file){
+  // ✅ Bulletproof PDF import for Android Chrome + GitHub Pages
+  // Strategy:
+  // 1) Load PDF.js *legacy* build via <script> (best compatibility).
+  // 2) Prefer local ./pdf.min.js (recommended), then fall back to CDNs.
+  // 3) Always parse with disableWorker:true (workers often fail on mobile/CDN/SW).
+  // 4) Handle password-protected PDFs (prompt).
+  //
+  // NOTE: For best reliability + offline, add these to your repo root:
+  //   - pdf.min.js
+  //   - pdf.worker.min.js (optional when disableWorker:true, but nice to have)
+
+  const withTimeout = (p, ms, label) => new Promise((res, rej) => {
+    const t = setTimeout(()=>rej(new Error(label + " (timeout)")), ms);
+    p.then(v=>{ clearTimeout(t); res(v); }).catch(e=>{ clearTimeout(t); rej(e); });
+  });
+
+  const fetchOk = async (url) => {
+    // Try a quick HEAD/GET to verify the file exists and isn't returning an HTML error page.
+    try{
+      const r = await fetch(url, { method:"GET", cache:"no-store" });
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      return !!(r.ok && (ct.includes("javascript") || ct.includes("ecmascript") || ct.includes("text/plain") || ct.includes("application/octet-stream")));
+    }catch{
+      return false;
+    }
+  };
+
+  const loadScript = (src) => withTimeout(new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.crossOrigin = "anonymous";
+    s.onload = () => res(true);
+    s.onerror = () => rej(new Error("Failed to load script: " + src));
+    document.head.appendChild(s);
+  }), 15000, "Failed to load script: " + src);
+
+  async function ensurePdfJs(){
+    // ✅ Reliable PDF.js loader for GitHub Pages + Android Chrome/PWA
+    // We intentionally prefer the CLASSIC build (pdf.min.js + pdf.worker.min.js)
+    // because ESM (pdf.mjs) requires a matching pdf.worker.mjs which most repos don't include.
+    if(window.pdfjsLib?.getDocument) return;
+
+    const base = document.baseURI || location.href;
+    const stamp = String(Date.now());
+    const asUrl = (p)=> new URL(p, base).toString();
+
+    const localClassicCandidates = [
+      asUrl("pdf.min.js?v="+stamp),
+      asUrl("./pdf.min.js?v="+stamp),
+      asUrl("../pdf.min.js?v="+stamp),
+      // some users keep it in /lib
+      asUrl("lib/pdf.min.js?v="+stamp),
+      asUrl("./lib/pdf.min.js?v="+stamp),
+    ];
+
+    // CDN fallbacks (classic / legacy builds)
+    const cdnClassicCandidates = [
+      { js:"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.js", worker:"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js" },
+      { js:"https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.min.js", worker:"https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/pdf.worker.min.js" },
+      { js:"https://unpkg.com/pdfjs-dist@4.10.38/legacy/build/pdf.min.js", worker:"https://unpkg.com/pdfjs-dist@4.10.38/legacy/build/pdf.worker.min.js" },
+    ];
+
+    const fetchOk = async (url) => {
+      try{
+        const r = await fetch(url, { method:"GET", cache:"no-store" });
+        const ct = (r.headers.get("content-type") || "").toLowerCase();
+        return !!(r.ok && (ct.includes("javascript") || ct.includes("ecmascript") || ct.includes("text/plain") || ct.includes("application/octet-stream")));
+      }catch{
+        return false;
+      }
     };
 
-    await dbPut(item);
-    await renderRecordings();
+    const loadScript = (src) => withTimeout(new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.crossOrigin = "anonymous";
+      s.onload = () => res(true);
+      s.onerror = () => rej(new Error("Failed to load script: " + src));
+      document.head.appendChild(s);
+    }), 15000, "Failed to load script: " + src);
 
-    // optional: auto-start sync immediately after upload
-    await startAudioSyncFromRec(item);
-  };
+    async function setWorkerSrc(preferred){
+      try{
+        const lib = window.pdfjsLib;
+        if(!lib) return false;
+        if(lib.GlobalWorkerOptions && lib.GlobalWorkerOptions.workerSrc) return true;
+
+        const workerCandidates = [
+          // repo root
+          asUrl("pdf.worker.min.js?v="+stamp),
+          asUrl("./pdf.worker.min.js?v="+stamp),
+          asUrl("../pdf.worker.min.js?v="+stamp),
+          // /lib folder
+          asUrl("lib/pdf.worker.min.js?v="+stamp),
+          asUrl("./lib/pdf.worker.min.js?v="+stamp),
+          // ESM worker (only if you have it)
+          asUrl("pdf.worker.mjs?v="+stamp),
+          asUrl("./pdf.worker.mjs?v="+stamp),
+          asUrl("lib/pdf.worker.mjs?v="+stamp),
+        ];
+
+        for(const u of workerCandidates){
+          if(await fetchOk(u)){
+            lib.GlobalWorkerOptions = lib.GlobalWorkerOptions || {};
+            lib.GlobalWorkerOptions.workerSrc = u;
+            return true;
+          }
+        }
+
+        if(preferred){
+          lib.GlobalWorkerOptions = lib.GlobalWorkerOptions || {};
+          lib.GlobalWorkerOptions.workerSrc = preferred;
+          return true;
+        }
+      }catch(e){}
+      return false;
+    }
+
+    // 1) Local classic
+    for(const jsUrl of localClassicCandidates){
+      const ok = await fetchOk(jsUrl);
+      if(!ok) continue;
+      try{
+        await loadScript(jsUrl);
+        if(window.pdfjsLib?.getDocument){
+          // ensure workerSrc exists (some builds throw if missing)
+          await setWorkerSrc(null);
+          return;
+        }
+      }catch(e){}
+    }
+
+    // 2) CDN classic with known worker URL pair
+    for(const cdn of cdnClassicCandidates){
+      const ok = await fetchOk(cdn.js);
+      if(!ok) continue;
+      try{
+        await loadScript(cdn.js);
+        if(window.pdfjsLib?.getDocument){
+          await setWorkerSrc(cdn.worker);
+          return;
+        }
+      }catch(e){}
+    }
+
+    throw new Error("PDF.js failed to load. Ensure `pdf.min.js` + `pdf.worker.min.js` are present in your repo root (recommended).");
+  }
+await ensurePdfJs();
+  const pdfjsLib = window.pdfjsLib;
+  if(!pdfjsLib?.getDocument) throw new Error("pdfjsLib.getDocument missing");
+
+  // Always disable worker (most reliable on mobile/PWA/CDN)
+  const ab = await file.arrayBuffer();
+
+  // Support password-protected PDFs
+  const loadPdf = (password) => pdfjsLib.getDocument({
+    data: ab,
+    disableWorker: true,
+    password
+  }).promise;
+
+  let pdf;
+  try{
+    pdf = await loadPdf(undefined);
+  }catch(err){
+    // Password protected
+    if(err?.name === "PasswordException"){
+      const pw = prompt("This PDF is password-protected. Enter password to import:");
+      if(pw == null) throw err; // user cancelled
+      pdf = await loadPdf(pw);
+    }else{
+      throw err;
+    }
+  }
+
+  let out = [];
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+
+    const items = (content.items || []).map(it => ({
+      str: String(it.str || ""),
+      x: (it.transform && it.transform[4]) ? it.transform[4] : 0,
+      y: (it.transform && it.transform[5]) ? it.transform[5] : 0
+    })).filter(it => it.str.trim());
+
+    // ---- Better layout reconstruction (keeps chord-over-lyric alignment much better)
+    // 1) group into lines by Y
+    // 2) within a line, place tokens by X into a fixed-width string
+    items.sort((a,b) => (b.y - a.y) || (a.x - b.x));
+
+    const yTol = 3.5; // PDF units; tweakable
+    const lines = [];
+    let curY = null;
+    let cur = [];
+    const pushCur = () => {
+      if(cur.length) lines.push(cur);
+      cur = [];
+    };
+
+    for(const it of items){
+      if(curY === null){
+        curY = it.y;
+        cur.push(it);
+        continue;
+      }
+      if(Math.abs(it.y - curY) > yTol){
+        pushCur();
+        curY = it.y;
+      }
+      cur.push(it);
+    }
+    pushCur();
+
+    const median = (arr) => {
+      if(!arr.length) return null;
+      const a = arr.slice().sort((x,y)=>x-y);
+      const mid = Math.floor(a.length/2);
+      return (a.length % 2) ? a[mid] : (a[mid-1] + a[mid]) / 2;
+    };
+
+    const buildAlignedLine = (lineItems) => {
+      const li = lineItems.slice().sort((a,b)=>a.x-b.x);
+      if(!li.length) return "";
+
+      const minX = li[0].x;
+
+      // estimate an average "character width" for this line
+      const samples = [];
+      for(let i=0;i<li.length-1;i++){
+        const dx = li[i+1].x - li[i].x;
+        const len = Math.max(1, String(li[i].str||"").length);
+        if(dx > 1) samples.push(dx / len);
+      }
+      let charW = median(samples);
+      if(!charW || !isFinite(charW)) charW = 4; // fallback
+      charW = Math.max(2, Math.min(12, charW));
+
+      let s = "";
+      let cursor = 0;
+      for(const it of li){
+        const col = Math.max(0, Math.round((it.x - minX) / charW));
+        if(col > cursor) s += " ".repeat(col - cursor);
+        const t = String(it.str || "");
+        s += t;
+        cursor = col + t.length;
+      }
+      return s.replace(/\s+$/,"");
+    };
+
+    for(const lineItems of lines){
+      const s = buildAlignedLine(lineItems).trimEnd();
+      if(s) out.push(s);
+    }
+
+    if(p !== pdf.numPages) out.push("");
+  }
+
+  let txt = out.join("\n").trim();
+  txt = fixPdfLetterSpacing(txt);
+  return txt;
+}
+
+
+// ----------------------
+// ✅ CLIPBOARD IMPORT
+// - paste a PDF anywhere (Ctrl+V / iOS paste) -> imports
+// - normal text paste continues to work (we do NOT preventDefault)
+// ----------------------
+function installClipboardImport(){
+  document.addEventListener("paste", async (e) => {
+    try{
+      const items = e.clipboardData && e.clipboardData.items ? Array.from(e.clipboardData.items) : [];
+      if(!items.length) return;
+
+      // Prefer PDF file if present
+      for(const it of items){
+        const file = it.getAsFile && it.getAsFile();
+        if(!file) continue;
+
+        const type = String(file.type || "").toLowerCase();
+        const name = String(file.name || "").toLowerCase();
+        const isPdf = type === "application/pdf" || name.endsWith(".pdf");
+        if(isPdf){
+          await importPdfToFull(file);
+          return;
+        }
+      }
+    }catch(err){
+      console.error(err);
+    }
+  });
 }
 
 /***********************
@@ -5072,8 +6330,21 @@ function fmtDate(ms){
 }
 
 async function renderRecordings(){
-  const all = await dbGetAll();
-
+  let all = [];
+  try{
+    all = await dbGetAll();
+  }catch(e){
+    console.warn('Recordings unavailable (IndexedDB blocked or failed):', e);
+    if(el.recordingsList){
+      el.recordingsList.innerHTML = "";
+      const d = document.createElement('div');
+      d.style.color = '#666';
+      d.style.fontWeight = '900';
+      d.textContent = 'Recordings unavailable in this browser session.';
+      el.recordingsList.appendChild(d);
+    }
+    return;
+  }
   const pid = state.project?.id || "";
   const mine = all
     .filter(r => String(r.projectId || "") === pid)   // ✅ ONLY this project
@@ -5669,10 +6940,66 @@ function getLastWord(text){
 function getSeedFromTextarea(ta){
   if(!ta) return "";
 
-  // ✅ FULL view: seed from text before cursor (last word)
+  // Helper: skip chord-only / chord-input lines in Full view
+  function looksLikeChordInputLine(line){
+    const s = String(line || "").replace(/\u00A0/g," ").trim();
+    if(!s) return false;
+
+    // your break markers / separators
+    if(s === BREAK_LINE || s === "_") return true;
+
+    // explicit position-chord format: "1Am 5Dm" / "1E7 5Am"
+    if(/^[1-8]\s*[A-Ga-g]/.test(s)) return true;
+
+    const CH = /^[A-G](?:#|b)?(?:maj|min|m|dim|aug|\+|sus|add)?(?:2|4|5|6|7|9|11|13)?(?:maj7|M7|m7|m9|m11|m13|sus2|sus4|add9|add11|add13|dim7|hdim7|m7b5)?(?:b5|#5|b9|#9|b11|#11|b13|#13)?(?:\/[A-G](?:#|b)?)?$/i;
+
+    const toks = s.split(/[\s|,]+/).map(t=>t.trim()).filter(Boolean);
+    if(!toks.length) return false;
+
+    let chordish = 0, other = 0;
+    for(let t of toks){
+      t = t.replace(/^[\[\(\{]+/,"").replace(/[\]\)\}]+$/,"");
+      t = t.replace(/♯/g,"#").replace(/♭/g,"b");
+      t = t.replace(/[\.,;:]+$/,"");
+      t = t.replace(/^\d+/,""); // remove leading position digits (1..8)
+      t = t.trim();
+      if(!t) continue;
+
+      if(CH.test(t) || /^N\.?C\.?$/i.test(t)) chordish++;
+      else other++;
+    }
+
+    const total = chordish + other;
+    if(chordish === 0) return false;
+
+    // Strongly chord-ish line
+    if(other === 0 && chordish >= 1) return true;
+    if(chordish >= 2 && (chordish / Math.max(1,total)) >= 0.75 && other <= 1) return true;
+
+    return false;
+  }
+
+  // ✅ FULL view: use the previous LYRIC line's last word (skip chord lines)
   if(ta.classList && ta.classList.contains("fullBox")){
     const pos = (typeof ta.selectionStart === "number") ? ta.selectionStart : (ta.value || "").length;
     const before = String(ta.value || "").slice(0, pos);
+    const lines = normalizeLineBreaks(before).split("\n");
+    const curIdx = lines.length - 1;
+
+    for(let i = curIdx - 1; i >= 0; i--){
+      const raw = String(lines[i] || "");
+      const t = raw.trim();
+      if(!t) continue;
+
+      // skip headings + breaks + chord-input lines
+      if(isSectionHeadingLine(t)) continue;
+      if(looksLikeChordInputLine(t)) continue;
+
+      const w = getLastWord(t);
+      if(w) return w;
+    }
+
+    // fallback: last word before cursor
     return getLastWord(before) || "";
   }
 
@@ -5680,7 +7007,7 @@ function getSeedFromTextarea(ta){
   const card = ta.closest(".card");
   if(card){
     const root = el.sheetInner || el.sheetBody;
-const allCards = root ? Array.from(root.querySelectorAll(".card")) : [];
+    const allCards = root ? Array.from(root.querySelectorAll(".card")) : [];
     const idx = allCards.indexOf(card);
     const prev = allCards[idx - 1];
     if(prev){
@@ -5762,6 +7089,18 @@ const first = root ? (root.querySelector("textarea.lyrics") || root.querySelecto
 async function renderRhymes(seed){
   const word = normalizeWord(seed);
 
+  // ✅ allow horizontal swipe for suggestions
+  try{
+    el.rhymeWords.style.display = "flex";
+    el.rhymeWords.style.flexWrap = "nowrap";
+    el.rhymeWords.style.gap = "10px";
+    el.rhymeWords.style.overflowX = "auto";
+    el.rhymeWords.style.overflowY = "hidden";
+    el.rhymeWords.style.webkitOverflowScrolling = "touch";
+    el.rhymeWords.style.scrollBehavior = "smooth";
+    el.rhymeWords.style.paddingBottom = "6px";
+  }catch{}
+
   el.rhymeWords.innerHTML = "";
   el.rhymeTitle.textContent = word ? `Rhymes: ${word}` : "Rhymes";
 
@@ -5790,6 +7129,8 @@ async function renderRhymes(seed){
   list.forEach(w => {
     const b = document.createElement("div");
     b.className = "rWord";
+    b.style.flex = "0 0 auto";
+    b.style.whiteSpace = "nowrap";
     b.textContent = w;
     b.addEventListener("click", () => insertWordIntoLyrics(w));
     el.rhymeWords.appendChild(b);
@@ -5824,19 +7165,7 @@ function updateAudioButtonsUI(){
 
   }
 }
-  function ensureSafeCurrentSection(){
-  try{
-    const pages = getSectionPages();
-    if(!Array.isArray(pages) || pages.length === 0) return;
-    const cur = state.currentSection;
-    if(!cur || !pages.includes(cur)){
-      state.currentSection = pages[0] || "Full";
-    }
-  }catch{}
-}
-
-function renderAll(){
-  ensureSafeCurrentSection();
+  function renderAll(){
   renderProjectsDropdown();
   renderTabs();
   renderSheet();
@@ -5858,9 +7187,202 @@ function renderAll(){
 }
 /***********************
 SECTION paging (swipe left/right)
-Order loops back to Full after CHORUS 3
++ Dynamic EXTRA pages
 ***********************/
-const SECTION_PAGES = () => getSectionPages(); // dynamic pages (Full + enabled/content + extras)
+const BASE_SECTION_ORDER = SECTIONS.slice(); // stable base, includes "Full" first
+
+function ensurePageMeta(){
+  if(!state.project) return;
+  if(!Array.isArray(state.project.enabledSections)) state.project.enabledSections = [];
+  if(!state.project.sectionTitles || typeof state.project.sectionTitles !== "object") state.project.sectionTitles = {};
+  if(!Array.isArray(state.project.extraSections)) state.project.extraSections = []; // ✅ NEW
+  if(!Array.isArray(state.project.deletedBaseSections)) state.project.deletedBaseSections = []; // ✅ NEW
+}
+
+// ✅ Full order = base order + extras appended (extras are project-specific)
+function getAllSectionOrder(){
+  ensurePageMeta();
+  const extras = (state.project.extraSections || []).filter(Boolean);
+  // Keep "Full" first, then base sections, then extras
+  return [...BASE_SECTION_ORDER, ...extras.filter(x => x !== "Full" && !BASE_SECTION_ORDER.includes(x))];
+}
+
+function nextExtraSectionName(){
+  ensurePageMeta();
+  const used = new Set([...(state.project.extraSections || [])]);
+  let n = 1;
+  while(used.has(`EXTRA ${n}`)) n++;
+  return `EXTRA ${n}`;
+}
+
+function _normTitleKey(t){
+  return String(t||"").trim().toUpperCase().replace(/\s+/g," ");
+}
+
+// Create or reuse an EXTRA page for a heading title like "OUTRO" or "VERSE 4"
+function getOrCreateExtraSectionForTitle(title){
+  if(!state.project) return null;
+  ensurePageMeta();
+
+  const want = _normTitleKey(title);
+  if(!want) return null;
+
+  // 1) reuse existing extra with same stored title
+  try{
+    const titles = state.project.sectionTitles || {};
+    for(const sec of (state.project.extraSections || [])){
+      const v = titles[sec];
+      if(v && _normTitleKey(v) === want) return sec;
+    }
+  }catch{}
+
+  // 2) create a new extra
+  const sec = nextExtraSectionName();
+  if(!state.project.sections) state.project.sections = {};
+  if(!Array.isArray(state.project.sections[sec])) state.project.sections[sec] = [newLine()];
+  if(!state.project.extraSections.includes(sec)) state.project.extraSections.push(sec);
+  if(!state.project.sectionTitles) state.project.sectionTitles = {};
+  state.project.sectionTitles[sec] = String(title||"").trim();
+
+  // show it (even if currently blank) - but it will have content soon
+  if(!state.project.enabledSections.includes(sec)) state.project.enabledSections.push(sec);
+
+  return sec;
+}
+
+
+
+function createExtraSection(opts={}){
+  if(!state.project) return null;
+  ensurePageMeta();
+
+  // default behavior: if the user adds a page via +, it should appear immediately.
+  // But when extras are created implicitly during parsing, we can keep them hidden
+  // unless they end up with content.
+  const shouldEnable = (typeof opts.enable === "boolean") ? opts.enable : true;
+
+  const sec = nextExtraSectionName();
+
+  if(!state.project.sections) state.project.sections = {};
+  if(!Array.isArray(state.project.sections[sec])) state.project.sections[sec] = [newLine()];
+
+  // Visible even if blank (because user added it)
+  if(shouldEnable && !state.project.enabledSections.includes(sec)) state.project.enabledSections.push(sec);
+
+  // Persist the page in the project’s dynamic list
+  if(!state.project.extraSections.includes(sec)) state.project.extraSections.push(sec);
+
+  return sec;
+}
+
+function lineHasAnyContent(line){
+  if(!line) return false;
+  const lyr = String(line.lyrics || "").trim();
+  const notes = Array.isArray(line.notes) ? line.notes.join("").trim() : "";
+  const beats = Array.isArray(line.beats) ? line.beats.join("").trim() : "";
+  return !!(lyr || notes || beats);
+}
+
+function sectionHasAnyContent(sec){
+  if(!state.project) return false;
+  const arr = (state.project.sections && state.project.sections[sec]) ? state.project.sections[sec] : [];
+  for(const line of arr){
+    if(lineHasAnyContent(line)) return true;
+  }
+  return false;
+}
+
+function isSectionVisible(sec){
+  if(sec === "Full") return true;
+  ensurePageMeta();
+  if(sectionHasAnyContent(sec)) return true;              // appears when content exists
+  return state.project.enabledSections.includes(sec);     // or when user added via +
+}
+
+function getVisibleSectionPages(){
+  ensurePageMeta();
+  const pages = ["Full"];
+  for(const sec of getAllSectionOrder()){
+    if(sec === "Full") continue;
+    if(isSectionVisible(sec)) pages.push(sec);
+  }
+  return pages.length ? pages : ["Full"];
+}
+
+function findNextSectionToEnable(fromSec){
+  // ✅ Sequential add (NO wrap):
+  // - Adds the NEXT hidden base page AFTER fromSec (in base order)
+  // - If that next base page was manually deleted (and still has no content),
+  //   create an EXTRA page instead.
+  // - If there is no remaining hidden base page ahead, create an EXTRA page.
+
+  const base = BASE_SECTION_ORDER.filter(s => s !== "Full");
+  const curIdx = Math.max(0, base.indexOf(fromSec));
+
+  for(let i = curIdx + 1; i < base.length; i++){
+    const sec = base[i];
+
+    // already visible? keep looking forward
+    if(isSectionVisible(sec)) continue;
+
+    const deleted = (state.project?.deletedBaseSections || []).includes(sec);
+    if(deleted && !sectionHasAnyContent(sec)){
+      return "__CREATE_EXTRA__";
+    }
+    return sec;
+  }
+
+  return "__CREATE_EXTRA__";
+}
+
+
+function enableSection(sec){
+  if(!state.project) return;
+  ensurePageMeta();
+  if(!sec || sec === "Full") return;
+
+  // allow base pages and extras
+  const isBase = BASE_SECTION_ORDER.includes(sec);
+  const isExtra = (state.project.extraSections || []).includes(sec);
+
+  if(!isBase && !isExtra) return;
+
+  // ✅ Don't resurrect a manually-deleted BASE page via "+" unless it has content.
+  if(isBase){
+    const deleted = (state.project.deletedBaseSections || []).includes(sec);
+    if(deleted && !sectionHasAnyContent(sec)) return;
+  }
+
+  if(!state.project.sections) state.project.sections = {};
+  if(!Array.isArray(state.project.sections[sec])) state.project.sections[sec] = [newLine()];
+  if(!state.project.enabledSections.includes(sec)) state.project.enabledSections.push(sec);
+}
+function deleteSectionPage(sec){
+  if(!state.project) return;
+  ensurePageMeta();
+  if(!sec || sec === "Full") return;
+
+  const isBase = BASE_SECTION_ORDER.includes(sec);
+
+  // clear its cards
+  if(!state.project.sections) state.project.sections = {};
+  state.project.sections[sec] = [newLine()];
+
+  // remove title
+  try{ delete state.project.sectionTitles[sec]; }catch{}
+
+  if(isBase){
+    // Base pages always remain (we just clear them)
+    return;
+  }
+
+  // EXTRA pages: remove the page itself
+  state.project.enabledSections = (state.project.enabledSections || []).filter(x => x !== sec);
+  state.project.extraSections = (state.project.extraSections || []).filter(x => x !== sec);
+}
+
+
+
 
 function isEditableEl(target){
   if(!target) return false;
@@ -5871,18 +7393,9 @@ function isEditableEl(target){
 }
 
 function goToSection(sec){
-  if(!sec) return;
-
-  // ✅ never navigate to a page that doesn't exist (can happen after deleting/renaming pages)
-  let pages = [];
-  try{ pages = getSectionPages() || []; }catch{ pages = []; }
-  if(!pages.length) pages = ["Full"];
-
-  if(!pages.includes(sec)){
-    sec = pages[0] || "Full";
-  }
-
-  if(sec === state.currentSection) return;
+  if(!sec || sec === state.currentSection) return;
+  // prevent landing on a hidden/unused page
+  if(sec !== "Full" && !isSectionVisible(sec)) sec = "Full";
 
   state.currentSection = sec;
   state.playCardIndex = null;
@@ -5899,18 +7412,20 @@ function goToSection(sec){
   refreshDisplayedNoteCells();
   updateFullIfVisible();
 
-  scrollToTopOfSheet();
+scrollToTopOfSheet();
 }
 
 function nextSection(){
-  const i = SECTION_PAGES().indexOf(state.currentSection);
-  const next = SECTION_PAGES()[(i + 1) % SECTION_PAGES().length];
+  const pages = getVisibleSectionPages();
+  const i = pages.indexOf(state.currentSection);
+  const next = pages[(i + 1) % pages.length];
   goToSection(next);
 }
 
 function prevSection(){
-  const i = SECTION_PAGES().indexOf(state.currentSection);
-  const prev = SECTION_PAGES()[(i - 1 + SECTION_PAGES().length) % SECTION_PAGES().length];
+  const pages = getVisibleSectionPages();
+  const i = pages.indexOf(state.currentSection);
+  const prev = pages[(i - 1 + pages.length) % pages.length];
   goToSection(prev);
 }
 
@@ -5920,6 +7435,7 @@ Swipe detection (horizontal)
 function installSectionSwipe(){
   let sx=0, sy=0, t0=0, tracking=false, locked=false;
   let lastFire = 0;
+  let startedOnEditable = false;
 
   const MIN_X = 60;
   const MAX_MS = 800;
@@ -5931,8 +7447,12 @@ function installSectionSwipe(){
     const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
     const target = e.target;
 
-    // don’t page-switch when starting on controls or inside the panel
-    if(isEditableEl(target) || (target && target.closest && target.closest("#panelBody"))) return;
+    // don’t page-switch when starting inside the panel
+    if(target && target.closest && target.closest("#panelBody")) return;
+
+    // ✅ Allow starting a swipe on textboxes (lyrics/beat/note inputs).
+    // We only "take over" if the gesture is clearly horizontal.
+    startedOnEditable = !!isEditableEl(target);
 
     sx = pt.clientX; sy = pt.clientY; t0 = performance.now();
     tracking = true;
@@ -5953,6 +7473,12 @@ function installSectionSwipe(){
         tracking = false;
         return;
       }
+    }
+
+    // If the user started on a textarea/input and the gesture is locked horizontal,
+    // prevent the element from capturing the touch (so the page swipe works everywhere).
+    if(locked && startedOnEditable){
+      try{ e.preventDefault(); }catch{}
     }
   }
 
@@ -5977,13 +7503,18 @@ function installSectionSwipe(){
     else prevSection();
   }
 
-  document.addEventListener("touchstart", onStart, { passive:true });
-  document.addEventListener("touchmove", onMove, { passive:true });
-  document.addEventListener("touchend", onEnd, { passive:true });
+  // ✅ Bind swipe to the LOWER panel so it feels consistent.
+  // (Fallback to document if the element isn't present.)
+  const root = el.sheetBody || document;
 
-  document.addEventListener("pointerdown", onStart, { passive:true });
-  document.addEventListener("pointermove", onMove, { passive:true });
-  document.addEventListener("pointerup", onEnd, { passive:true });
+  root.addEventListener("touchstart", onStart, { passive:true });
+  // passive:false so we can preventDefault when a horizontal swipe starts on textboxes
+  root.addEventListener("touchmove", onMove, { passive:false });
+  root.addEventListener("touchend", onEnd, { passive:true });
+
+  root.addEventListener("pointerdown", onStart, { passive:true });
+  root.addEventListener("pointermove", onMove, { passive:true });
+  root.addEventListener("pointerup", onEnd, { passive:true });
 
   // Desktop arrow keys (when not typing)
   document.addEventListener("keydown", (e)=>{
@@ -5997,10 +7528,13 @@ function installSectionSwipe(){
 Wiring
 ***********************/
 function wire(){
-  el.togglePanelBtn.addEventListener("click", () => {
-    const hidden = !el.panelBody.classList.contains("hidden");
-    setPanelHidden(hidden);
-  });
+  // Guard: if any required element is missing in index.html, don't hard-crash the whole app.
+  if(el.togglePanelBtn && el.panelBody){
+    el.togglePanelBtn.addEventListener("click", () => {
+      const hidden = !el.panelBody.classList.contains("hidden");
+      setPanelHidden(hidden);
+    });
+  }
 
   // ✅ AutoSplit is always ON (manual "/" overrides per-line)
   // If the old button still exists in HTML, hide it.
@@ -6156,7 +7690,7 @@ if(el.capoInput){
 
 
   if(el.exportBtn){
-    el.exportBtn.addEventListener("click", exportFullPreview);
+    el.exportBtn.addEventListener("click", (e)=>{ try{ e.preventDefault(); e.stopPropagation(); }catch{} exportFullPreview(); });
   }
 
   function restartClockIfRunning(){
@@ -6165,7 +7699,9 @@ if(el.capoInput){
     }
   }
 
+  // ===== BPM =====
   function commitBpm(){
+    if(!el.bpmInput) return;
     let n = parseInt(el.bpmInput.value, 10);
     if(!Number.isFinite(n)) n = state.bpm || 95;
     n = clamp(n, 40, 220);
@@ -6182,7 +7718,7 @@ if(el.capoInput){
     restartClockIfRunning();
   }
 
-  el.bpmInput.addEventListener("input", () => {
+  if(el.bpmInput) el.bpmInput.addEventListener("input", () => {
     const raw = el.bpmInput.value;
     if(raw === "") return;
 
@@ -6198,10 +7734,14 @@ if(el.capoInput){
     }
   });
 
-  el.bpmInput.addEventListener("change", commitBpm);
-  el.bpmInput.addEventListener("blur", commitBpm);
+  if(el.bpmInput){
+    el.bpmInput.addEventListener("change", commitBpm);
+    el.bpmInput.addEventListener("blur", commitBpm);
+  }
 
+  // ===== CAPO (legacy; kept for compatibility) =====
   function commitCapo(){
+    if(!el.capoInput) return;
     let n = parseInt(el.capoInput.value, 10);
     if(!Number.isFinite(n)) n = 0;
     n = clamp(n, 0, 12);
@@ -6219,7 +7759,7 @@ if(el.capoInput){
     refreshDisplayedNoteCells();
   }
 
- el.capoInput.addEventListener("input", () => {
+ if(el.capoInput) el.capoInput.addEventListener("input", () => {
    
   const mode = state.transposeMode || "capo";
    
@@ -6240,8 +7780,10 @@ const v = Number.isFinite(raw) ? raw : 0;
   updateKeyFromAllNotes();
 }); 
 
-  el.capoInput.addEventListener("change", commitCapo);
-  el.capoInput.addEventListener("blur", commitCapo);
+  if(el.capoInput){
+    el.capoInput.addEventListener("change", commitCapo);
+    el.capoInput.addEventListener("blur", commitCapo);
+  }
 
   function handleInstrument(which){
     ensureCtx();
@@ -6254,9 +7796,9 @@ const v = Number.isFinite(raw) ? raw : 0;
     renderInstrumentUI();
   }
 
-  el.instAcoustic.addEventListener("click", () => handleInstrument("acoustic"));
-  el.instElectric.addEventListener("click", () => handleInstrument("electric"));
-  el.instPiano.addEventListener("click", () => handleInstrument("piano"));
+  if(el.instAcoustic) el.instAcoustic.addEventListener("click", () => handleInstrument("acoustic"));
+  if(el.instElectric) el.instElectric.addEventListener("click", () => handleInstrument("electric"));
+  if(el.instPiano) el.instPiano.addEventListener("click", () => handleInstrument("piano"));
 
   if(el.instDots){
     el.instDots.addEventListener("click", () => {
@@ -6283,26 +7825,26 @@ const v = Number.isFinite(raw) ? raw : 0;
     renderDrumUI();
   }
 
-  el.drumRock.addEventListener("click", () => handleDrums("rock"));
-  el.drumHardRock.addEventListener("click", () => handleDrums("hardrock"));
-  el.drumPop.addEventListener("click", () => handleDrums("pop"));
-  el.drumRap.addEventListener("click", () => handleDrums("rap"));
+  if(el.drumRock) el.drumRock.addEventListener("click", () => handleDrums("rock"));
+  if(el.drumHardRock) el.drumHardRock.addEventListener("click", () => handleDrums("hardrock"));
+  if(el.drumPop) el.drumPop.addEventListener("click", () => handleDrums("pop"));
+  if(el.drumRap) el.drumRap.addEventListener("click", () => handleDrums("rap"));
 
-  el.mRock.addEventListener("click", () => handleDrums("rock"));
-  el.mHardRock.addEventListener("click", () => handleDrums("hardrock"));
-  el.mPop.addEventListener("click", () => handleDrums("pop"));
-  el.mRap.addEventListener("click", () => handleDrums("rap"));
+  if(el.mRock) el.mRock.addEventListener("click", () => handleDrums("rock"));
+  if(el.mHardRock) el.mHardRock.addEventListener("click", () => handleDrums("hardrock"));
+  if(el.mPop) el.mPop.addEventListener("click", () => handleDrums("pop"));
+  if(el.mRap) el.mRap.addEventListener("click", () => handleDrums("rap"));
 
-  el.autoPlayBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
-  el.mScrollBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
+  if(el.autoPlayBtn) el.autoPlayBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
+  if(el.mScrollBtn) el.mScrollBtn.addEventListener("click", () => setAutoScroll(!state.autoScrollOn));
 
-  el.recordBtn.addEventListener("click", toggleRecording);
-  el.mRecordBtn.addEventListener("click", toggleRecording);
+  if(el.recordBtn) el.recordBtn.addEventListener("click", toggleRecording);
+  if(el.mRecordBtn) el.mRecordBtn.addEventListener("click", toggleRecording);
 
-  el.sortSelect.addEventListener("change", renderProjectsDropdown);
-  el.projectSelect.addEventListener("change", () => loadProjectById(el.projectSelect.value));
+  if(el.sortSelect) el.sortSelect.addEventListener("change", renderProjectsDropdown);
+  if(el.projectSelect) el.projectSelect.addEventListener("change", () => loadProjectById(el.projectSelect.value));
 
-  el.newProjectBtn.addEventListener("click", () => {
+  if(el.newProjectBtn) el.newProjectBtn.addEventListener("click", () => {
     const name = prompt("New project name:", "New Song");
     if(name === null) return;
     const p = defaultProject(name.trim() || "New Song");
@@ -6313,7 +7855,7 @@ const v = Number.isFinite(raw) ? raw : 0;
     renderAll();
   });
 
-  el.renameProjectBtn.addEventListener("click", () => {
+  if(el.renameProjectBtn) el.renameProjectBtn.addEventListener("click", () => {
     if(!state.project) return;
     const name = prompt("Project name:", state.project.name || "");
     if(name === null) return;
@@ -6322,7 +7864,7 @@ const v = Number.isFinite(raw) ? raw : 0;
     renderProjectsDropdown();
   });
 
-  el.deleteProjectBtn.addEventListener("click", () => {
+  if(el.deleteProjectBtn) el.deleteProjectBtn.addEventListener("click", () => {
     if(!state.project) return;
     if(!confirm(`Delete project "${state.project.name}"?`)) return;
     deleteProjectById(state.project.id);
@@ -6350,21 +7892,25 @@ if(el.beat1Btn){
 }
 
 
-  el.rBtn.addEventListener("click", () => {
-    const showing = el.rhymeDock.style.display === "block";
+  if(el.rBtn) el.rBtn.addEventListener("click", () => {
+    const showing = (el.rhymeDock && el.rhymeDock.style.display === "block");
     toggleRhymeDock(!showing);
   });
-  el.hideRhymeBtn.addEventListener("click", () => toggleRhymeDock(false));
+  if(el.hideRhymeBtn) el.hideRhymeBtn.addEventListener("click", () => toggleRhymeDock(false));
 }
 
 /***********************
 Init
 ***********************/
-function init(){
+async function init(){
+  // Yield once so the browser paints before we do any heavy work (prevents “frozen” feel)
+  await nextFrame();
+
   state.project = getCurrentProject();
 
-    injectBspCardLook(); // ✅ ADD THIS LINE
-injectHeaderMiniIconBtnStyle();
+  // Style injections are cheap, but do them after first paint
+  injectBspCardLook();
+  injectHeaderMiniIconBtnStyle();
 
   applyProjectSettingsToUI();
 
@@ -6376,28 +7922,74 @@ injectHeaderMiniIconBtnStyle();
 
   renderNoteLenUI();
   setRecordUI();
+
+  // Wiring can be a little heavy (many listeners) — yield between stages
+  await nextTick();
   wire();
-  renderAll();
+  await nextTick();
+  installClipboardImport();
+
+  // Render in chunks to avoid blocking the UI thread on mobile
+  await nextTick();
+  renderProjectsDropdown();
+  await nextTick();
+  renderTabs();
+  await nextTick();
+  renderSheet();
+  await nextTick();
+  renderRecordings();
+  await nextTick();
+  renderInstrumentUI();
+  await nextTick();
+  renderDrumUI();
+  await nextTick();
+  updateKeyFromAllNotes();
+  await nextTick();
+  setRecordUI();
+
+  // Tick visuals + misc
+  clearTick();
+  applyTick();
+  updateFullIfVisible();
+  refreshRhymesFromActive();
+  refreshDisplayedNoteCells();
+  updateAudioButtonsUI();
+
+  // These are “nice to have” UI tweaks — keep them at the end
+  ensureCapoStepToggle();
+  injectHeaderControlTightStyle();
+
   pushHistory("init"); // seed the first snapshot
-updateUndoRedoUI();
+  updateUndoRedoUI();
   installSectionSwipe();
 
   stopBeatClock();
 }
 
-try{
-  init();
-}catch(err){
-  console.error(err);
-  alert("Song Rider Pro recovered from an error. Resetting to Full view.");
+function showBootError(err){
+  console.error("SRP init crash", err);
   try{
-    if(state && state.project){
-      state.currentSection = "Full";
-      if(!state.project.fullText) state.project.fullText = buildFullTemplate();
-      if(!state.project.sections) state.project.sections = {};
+    const msg = (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err);
+    // Try to show in the UI so you don't get a blank freeze
+    const hint = document.getElementById("sheetHint");
+    if(hint) hint.textContent = "⚠️ Startup error (see console): " + msg.split("\\n")[0];
+    const inner = document.getElementById("sheetInner");
+    if(inner && !inner.innerHTML.trim()){
+      inner.innerHTML = `
+        <div style="padding:16px;">
+          <div style="font-weight:1200; margin-bottom:8px;">Song Rider Pro failed to start</div>
+          <div style="color:#555; font-weight:900; margin-bottom:10px;">
+            Open DevTools → Console and look for <span style="font-family:monospace;">SRP init crash</span>.
+          </div>
+          <pre style="white-space:pre-wrap; word-break:break-word; background:#f6f6f7; border:1px solid rgba(0,0,0,.12); padding:12px; border-radius:12px; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:12px;">${msg}</pre>
+        </div>`;
     }
+    // Also a quick alert for mobile where console is hard to reach
+    try{ alert("Song Rider Pro failed to start.\n\n" + msg.split("\\n")[0]); }catch{}
   }catch{}
-  try{ wire(); }catch{}
-  try{ renderAll(); }catch{}
 }
+
+// IMPORTANT: async errors won't be caught by try/catch unless we handle the Promise.
+init().catch(showBootError);
+
 })();
