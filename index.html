@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <meta name="theme-color" content="#e9e9ea"/>
   <title>Song Rider Pro</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=63">
+  <link rel="manifest" href="./manifest.webmanifest?v=62">
   <style>
     :root{
     --horseRunH: 74px;   /* running GIF size */
@@ -21,6 +21,8 @@
       --radius:16px;
 
       --beatHL:#ffd54a;
+
+       --hiYellow:#ffeb3b; /* highlighter yellow */
 
       --noteBlue:#5CE1FF;
       --lyricPink:#FF5FB8;
@@ -175,7 +177,7 @@
       display:flex;
       gap:8px;
       align-items:center;
-      flex-wrap:wrap;
+      flex-wrap:nowrap;
       overflow-x:hidden;
     }
 .row.nowrap{
@@ -186,8 +188,6 @@
 }
    /* ✅ allow children in the top header row to shrink instead of pushing Key off-screen */
 #panelBody .row.nowrap > *{ min-width:0; } 
-}
-
 #panelBody .row.nowrap > *{
   min-width:0;
 }
@@ -437,17 +437,185 @@
   background: var(--card);
   border-bottom:1px solid rgba(0,0,0,.06);
   display:flex; align-items:center; justify-content:space-between; gap:10px;
-  flex-wrap:wrap;
+  flex-wrap:nowrap;
 }
    
-    .sheetHeader h2{ margin:0; font-size:14px; font-weight:1100; letter-spacing:.3px; }
-    .hint{ font-size:12px; color:var(--muted); font-weight:900; }
+    .sheetHeader h2{ margin:0; font-size:13px; font-weight:1100; letter-spacing:.3px; }
+    .hint{ font-size:11px; color:var(--muted); font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* ✅ We render the Full-page hint INSIDE the title bar now. Hide the external slot. */
+    #sheetHint{ display:none; }
+
+
+    /* =========================
+       Song Part title pills (Full breaks + page heading)
+    ========================= */
+    .fullBreakPills{
+      padding:12px 12px 2px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .breakRow{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      position:relative;
+      padding:2px 0;
+    }
+
+    .breakActions{
+      position:absolute;
+      left:0;
+      right:0;
+      display:flex;
+      justify-content:center;
+      gap:10px;
+      padding:2px 0;
+      pointer-events:auto;
+    }
+    .breakActBtn{
+      width:34px;
+      height:34px;
+      border-radius:999px;
+      border:1px solid rgba(0,0,0,.18);
+      background:rgba(255,255,255,.92);
+      font-size:18px;
+      font-weight:900;
+      line-height:1;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow:0 6px 14px rgba(0,0,0,.08);
+      cursor:pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .breakActBtn:active{ transform: translateY(1px); }
+
+    .breakRow::before,
+    .breakRow::after{
+      content:"";
+      height:2px;
+      background:rgba(0,0,0,.18);
+      flex:1 1 auto;
+      border-radius:999px;
+    }
+    .breakRow::before{ margin-right:10px; }
+    .breakRow::after{ margin-left:10px; }
+
+    /* ✅ Full-page break pills should be shorter (about half the prior length) */
+    input.songPartPill{
+      width:min(220px, 34vw);
+      max-width:340px;
+      height:34px;
+      border-radius:999px;
+      border:1px solid rgba(0,0,0,.22);
+      background:var(--hiYellow);
+      padding:6px 12px;
+      font-weight:1100;
+      font-size:13px;
+      outline:none;
+      text-align:center;
+      box-shadow: 0 8px 18px rgba(0,0,0,.08);
+    }
+    input.songPartPill::placeholder{
+      color:#7a7a7a;
+      font-weight:1000;
+    }
+    /* page header title input uses the same pill, but left-aligned */
+    input.songPartPill.headingPill{
+      text-align:left;
+      box-shadow:none;
+      width:min(520px, 72vw);
+      max-width:620px;
+    }
+
+    /* ✅ Overlay pills that sit INSIDE the Full textarea */
+    .fullPillHost{ position:relative; }
+    .fullPillOverlay{
+      position:absolute;
+      left:0; right:0;
+      top:0; bottom:0;
+      pointer-events:none;
+      overflow:hidden;
+    }
+    .fullPillOverlay .breakRow{
+      position:absolute;
+      left:12px;
+      right:12px;
+      pointer-events:none;
+      z-index:5;
+    }
+    .fullPillOverlay .breakRow::before,
+    .fullPillOverlay .breakRow::after{ background:rgba(0,0,0,.14); }
+    .fullPillOverlay input.songPartPill{ pointer-events:auto; }
+
+    /* ===== Full Page (section blocks) ===== */
+ .fullSectionEditor{
+  display:flex;
+  flex-direction:column;
+  gap:24px;
+  padding:16px 12px 120px; /* bottom space */
+}
+
+/* REMOVE card look completely */
+.fullSectionCard{
+  border:none;
+  background:transparent;
+  box-shadow:none;
+  padding:0;
+  border-radius:0;
+}
+   .fullSectionHead{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  margin:10px 0 6px;
+} 
+ .fullSectionHead .fullBreakLine{
+  flex:1;
+  height:2px;
+  background:#d9d9d9;
+  border-radius:99px;
+}
+    .fullSectionHead input.songPartPill{
+      flex:0 1 52%;
+      max-width:520px;
+    }
+   textarea.fullSectionText{
+  width:100%;
+  min-height:160px;
+  height:auto;
+  resize:none;
+  overflow:hidden;
+  border:none;
+  border-radius:0;
+  padding:0 4px;
+  font-size:18px;
+  line-height:1.5;
+  background:transparent;
+  outline:none;
+}
+    textarea.fullSectionText:focus{
+      border-color:rgba(0,0,0,.22);
+      box-shadow:0 0 0 3px rgba(255,235,59,.25);
+    }
+  .fullSectionActions{
+  display:flex;
+  justify-content:center;
+  gap:16px;
+  margin:14px 0 0;
+}
+
+    /* Ensure + / × controls sit above textarea text as well */
+    .fullPillOverlay .breakActions{ z-index:6; }
 
     .sheetActions{
       display:flex;
       gap:8px;
       align-items:center;
-      flex-wrap:wrap;
+      flex-wrap:nowrap;
     }
 
    /* ✅ sheetBody must stretch AND SCROLL */
@@ -460,7 +628,13 @@
   overflow:auto;                 /* ✅ THIS fixes “frozen cards” */
   -webkit-overflow-scrolling:touch;
 }
-
+/* ✅ Full page layout: make the render target a flex child */
+#sheetInner{
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
 
     .cards{
   padding:0 12px 140px;  /* ✅ more room at bottom */
@@ -475,15 +649,14 @@
   border:1px solid rgba(0,0,0,.10);
   border-radius:14px;
   background:#fff;
-  padding:10px;
+  padding: 10px;
   scroll-margin-top: 210px;
     }
-.cardDel{
-  position:absolute;
-  top:8px;
-  right:8px;
-  width:28px;
-  height:28px;
+.cardDel,
+.cardAdd{
+  position:static;
+  width:30px;
+  height:30px;
   border-radius:10px;
   border:1px solid rgba(0,0,0,.14);
   background:#fff;
@@ -495,37 +668,35 @@
   justify-content:center;
   cursor:pointer;
   user-select:none;
+  padding:0;
 }
-.cardDel:active{
-  transform:scale(0.98);
-}
-    .cardAdd{
-  position:absolute;
-  top:8px;
-  right:44px;           /* sits just left of the X */
-  width:28px;
-  height:28px;
-  border-radius:10px;
-  border:1px solid rgba(0,0,0,.14);
-  background:#fff;
-  font-size:18px;
-  font-weight:1100;
-  line-height:1;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  cursor:pointer;
-  user-select:none;
-}
+.cardDel:active,
 .cardAdd:active{
   transform:scale(0.98);
 }
 
+
     .cardTop{
-      display:flex; align-items:center; gap:10px;
-      flex-wrap:wrap;
-      margin-bottom:8px;
-    }
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+}
+.cardTopLeft{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex:1 1 auto;
+  min-width:0;
+}
+.cardTopRight{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:0 0 auto;
+}
+
     .cardNum{
       font-weight:1100;
       font-size:12px;
@@ -623,7 +794,7 @@
       font-weight:900;
       text-align:center;
       outline:none;
-      min-height:52px;
+      min-height: 78px;
       line-height:1.15;
       resize:none;
       overflow:hidden;
@@ -636,23 +807,28 @@
     }
 
     .tick{
-      /* BSP-style flashing playline */
-      outline:none;
-      animation: tickFlash 0.45s steps(2, end) infinite;
+      box-shadow: 0 0 0 4px rgba(255,213,74,.90) inset, 0 0 0 2px rgba(0,0,0,.06);
+      outline: none;
     }
-    @keyframes tickFlash{
+
+    /* ✅ Beat Sheet Pro style: bright yellow flash INSIDE the box on each tick (border stays) */
+    @keyframes tickInnerFlash{
       0%{
-        box-shadow: 0 0 0 999px rgba(255,213,74,.70) inset, 0 0 0 2px rgba(0,0,0,.06);
-        filter:none;
-      }
-      50%{
-        box-shadow: 0 0 0 999px rgba(255,213,74,.20) inset, 0 0 0 2px rgba(0,0,0,.06);
-        filter:none;
+        background-color: rgba(255,213,74,.70);
+        filter: brightness(1.25);
       }
       100%{
-        box-shadow: 0 0 0 999px rgba(255,213,74,.70) inset, 0 0 0 2px rgba(0,0,0,.06);
-        filter:none;
+        background-color: rgba(255,213,74,0);
+        filter: brightness(1);
       }
+    }
+    .tickFlash{
+      animation: tickInnerFlash 140ms ease-out;
+      /* subtle inner burst */
+      background-image: radial-gradient(circle at 50% 50%,
+        rgba(255,213,74,.95) 0%,
+        rgba(255,213,74,.55) 35%,
+        rgba(255,213,74,0) 72%);
     }
 
     /* ✅ FULL PAGE layout: make Preview eat remaining space */
@@ -756,7 +932,7 @@
       padding:10px 12px 12px;
       display:flex;
       gap:8px;
-      flex-wrap:wrap;
+      flex-wrap:nowrap;
     }
     .rWord{
       border:1px solid rgba(0,0,0,.12);
@@ -819,8 +995,8 @@
 <body>
   <!-- ✅ Horse GIFs -->
   <div class="horseWrap" id="horseWrap" aria-hidden="true">
-    <img id="horseRight" src="./Horserunsright.gif?v=63" alt="Horse runs right"/>
-    <img id="horseLeft"  src="./Horserunsleft.gif?v=63"  alt="Horse runs left"/>
+    <img id="horseRight" src="./Horserunsright.gif?v=62" alt="Horse runs right"/>
+    <img id="horseLeft"  src="./Horserunsleft.gif?v=62"  alt="Horse runs left"/>
   </div>
 
   <header>
@@ -917,10 +1093,10 @@
 
 <main>
   <div class="sheet" id="editorRoot">
-    <!-- ✅ #sheetBody is the LOWER panel scroller; header must be INSIDE it so sticky works -->
+    <!-- ✅  is the LOWER panel scroller; header must be INSIDE it so sticky works -->
     <div id="sheetBody">
       <div class="sheetHeader">
-        <h2 id="sheetTitle">Full</h2>
+        <h2 id="sheetTitle">Full Song View</h2>
         <div class="sheetActions" id="sheetActions"></div>
         <div class="hint" id="sheetHint"></div>
       </div>
@@ -944,8 +1120,14 @@
 
   <!-- ✅ tiny helper: measure sticky header height into CSS var -->
 
-<script src="./lame.min.js?v=64"></script>
-<script src="./app.js?v=64"></script>
+<script src="./lame.min.js?v=62"></script>
+<script type="module">
+  import * as pdfjsLib from "./pdf.mjs?v=20";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.mjs?v=20";
+  window.pdfjsLib = pdfjsLib; // <-- makes your existing app.js code work unchanged
+</script>
+<!-- cache-buster -->
+<script src="./app.js?v=BR5"></script>
 
 <script>
 (() => {
