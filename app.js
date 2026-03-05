@@ -10,7 +10,6 @@ let sheetHeaderBtnLock = false;
 /***********************
 FORCE-NUKE OLD SERVICE WORKER CACHE
 ***********************/
-  
 try{
   if("serviceWorker" in navigator){
     navigator.serviceWorker.getRegistrations()
