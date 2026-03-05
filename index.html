@@ -1018,11 +1018,14 @@
     }
 
     .rhymeDock{
-      position:fixed;
-      left:0; right:0; bottom:0;
-      z-index:260;
-      display:none;
-      padding:0 12px 10px;
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
+  z-index:260;
+  display:none;
+  padding:0 12px calc(10px + env(safe-area-inset-bottom));
+  transform:translateY(0);
     }
     .rhymeBox{
   max-width:1100px;
