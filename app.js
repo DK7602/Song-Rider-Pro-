@@ -8062,6 +8062,8 @@ function isEditableEl(target){
 
 function goToSection(sec){
   if(!sec || sec === state.currentSection) return;
+  // ✅ close rhyme dock when changing pages
+  try{ if(typeof toggleRhymeDock==='function') toggleRhymeDock(false); }catch{}
   // prevent landing on a hidden/unused page
   if(sec !== "Full" && !isSectionVisible(sec)) sec = "Full";
 
@@ -8110,7 +8112,14 @@ function installSectionSwipe(){
   const DOMINANCE = 1.35;
 
   function onStart(e){
-    if(el.rhymeDock && el.rhymeDock.style.display === "block") return;
+    // ✅ Allow page-swipe even when rhyme dock is open.
+    // If the swipe starts on the rhyme chips scroller, let it scroll instead of page-switching.
+    if(el.rhymeDock && el.rhymeDock.style.display === "block"){
+      const target0 = e.target;
+      if(target0 && target0.closest && (target0.closest("#rhymeWords") || target0.closest(".rhymeWords"))){
+        return;
+      }
+    }
 
     const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
     const target = e.target;
@@ -8680,5 +8689,27 @@ function showBootError(err){
 
 // IMPORTANT: async errors won't be caught by try/catch unless we handle the Promise.
 init().catch(showBootError);
+/***********************
+KEEP RHYME BOX ABOVE KEYBOARD
+***********************/
+if (window.visualViewport) {
 
+  const dock = document.getElementById("rhymeDock");
+
+  const updateDock = () => {
+    if(!dock) return;
+
+    const vv = window.visualViewport;
+
+// how much of the bottom of the layout viewport is covered (keyboard)
+const overlap = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+
+dock.style.transform = `translateY(-${overlap}px)`;
+  };
+
+  visualViewport.addEventListener("resize", updateDock);
+  visualViewport.addEventListener("scroll", updateDock);
+
+  updateDock();
+}
 })();
