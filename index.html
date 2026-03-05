@@ -213,7 +213,7 @@
 
     .tinyBtn{
       border:1px solid rgba(0,0,0,.12);
-      background:#fff;
+      background:transparent;
       border-radius:12px;
       padding:7px 9px;
       font-weight:1100;
@@ -231,7 +231,7 @@
 
     .exportBtn{
       border:1px solid rgba(0,0,0,.12);
-      background:#fff;
+      background:transparent;
       border-radius:12px;
       padding:7px 10px;
       font-weight:1200;
@@ -249,7 +249,7 @@
       padding:7px 8px;
       border-radius:12px;
       border:1px solid rgba(0,0,0,.12);
-      background:#fff;
+      background:transparent;
       font-size:13px;
       outline:none;
       height:34px;
@@ -264,7 +264,7 @@
   padding:0 8px;                 /* ✅ compact */
   border-radius:12px;
   border:1px solid rgba(0,0,0,.12);
-  background:#fff;
+  background:transparent;
   flex:0 0 auto;
 }
 
@@ -332,7 +332,7 @@
       flex:0 0 auto;
     }
     .btn.secondary{
-      background:#fff;
+      background:transparent;
       color:#111;
       border:1px solid rgba(0,0,0,.12);
     }
@@ -343,7 +343,7 @@
       border-radius:999px;
       display:flex; align-items:center; justify-content:center;
       border:1px solid rgba(0,0,0,.12);
-      background:#fff;
+      background:transparent;
       font-size:16px;
       flex:0 0 auto;
       cursor:pointer;
@@ -392,7 +392,7 @@
   border-radius:999px;
   display:flex; align-items:center; justify-content:center;
   border:1px solid rgba(0,0,0,.12);
-  background:#fff;
+  background:transparent;
   font-size:16px;
   flex:0 0 auto;
   cursor:pointer;
@@ -505,18 +505,19 @@
 
     /* ✅ Full-page break pills should be shorter (about half the prior length) */
     input.songPartPill{
-      width:min(220px, 34vw);
-      max-width:340px;
-      height:34px;
-      border-radius:999px;
-      border:1px solid rgba(0,0,0,.22);
-      background:var(--hiYellow);
-      padding:6px 12px;
-      font-weight:1100;
-      font-size:13px;
-      outline:none;
-      text-align:center;
-      box-shadow: 0 8px 18px rgba(0,0,0,.08);
+  width:min(220px, 34vw);
+  max-width:340px;
+  height:34px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,.22);
+  background:var(--hiYellow);
+  padding:6px 12px;
+  font-weight:900;
+  font-size:15px;
+  outline:none;
+  text-align:center;
+  box-shadow: 0 8px 18px rgba(0,0,0,.08);
+  font-family:var(--sans);
     }
     input.songPartPill::placeholder{
       color:#7a7a7a;
@@ -593,6 +594,7 @@
   border-radius:0;
   padding:0 4px;
   font-size:18px;
+  font-weight:900;
   line-height:1.5;
   background:transparent;
   outline:none;
@@ -648,7 +650,7 @@
   position:relative; /* ✅ for top-right X */
   border:1px solid rgba(0,0,0,.10);
   border-radius:14px;
-  background:#fff;
+  background:transparent;
   padding: 10px;
   scroll-margin-top: 210px;
     }
@@ -659,7 +661,7 @@
   height:30px;
   border-radius:10px;
   border:1px solid rgba(0,0,0,.14);
-  background:#fff;
+  background:transparent;
   font-size:18px;
   font-weight:1100;
   line-height:1;
@@ -700,7 +702,7 @@
     .cardNum{
       font-weight:1100;
       font-size:12px;
-      background:#fff;
+      background:transparent;
       border:1px solid rgba(0,0,0,.12);
       border-radius:999px;
       padding:6px 10px;
@@ -772,10 +774,19 @@
       border-radius:12px;
       border:1px solid rgba(0,0,0,.18);
       font-size:14px;
+      font-weight:900 !important;
       outline:none;
       background:var(--lyricPink);
       color:#111;
+      font-weight:900;
       margin-bottom:10px;
+    }
+
+    /* ✅ Make ALL lower-window editable boxes bold */
+    .cards textarea,
+    .cards input.noteCell{
+      font-weight:900;
+      font-weight:900 !important;
     }
 
     .beatsRow{
@@ -787,8 +798,9 @@
       width:100%;
       border-radius:14px;
       border:1px solid rgba(0,0,0,.14);
-      background:#fff;
+      background:transparent;
       padding:10px 8px;
+      font-weight:900 !important;
       font-family:var(--mono);
       font-size:14px;
       font-weight:900;
@@ -807,29 +819,131 @@
     }
 
     .tick{
-      box-shadow: 0 0 0 4px rgba(255,213,74,.90) inset, 0 0 0 2px rgba(0,0,0,.06);
+      box-shadow: 0 0 0 6px rgba(255,213,74,.92) inset, 0 0 0 2px rgba(0,0,0,.10);
       outline: none;
+      border-radius: 14px;
     }
 
     /* ✅ Beat Sheet Pro style: bright yellow flash INSIDE the box on each tick (border stays) */
-    @keyframes tickInnerFlash{
-      0%{
-        background-color: rgba(255,213,74,.70);
-        filter: brightness(1.25);
-      }
-      100%{
-        background-color: rgba(255,213,74,0);
-        filter: brightness(1);
-      }
+    @keyframes tickFillFlash{
+      0%{ background-color: rgba(255,213,74,.95); filter: brightness(1.25); }
+      100%{ background-color: transparent; filter: brightness(1); }
     }
+
+    /* ✅ 16th-note pulse (4 flashes per beat) */
+    @keyframes tickFillFlash16{
+      0%{ background-color: rgba(255,235,59,0.0); }
+      12%{ background-color: rgba(255,235,59,0.85); }
+      25%{ background-color: rgba(255,235,59,0.0); }
+      37%{ background-color: rgba(255,235,59,0.85); }
+      50%{ background-color: rgba(255,235,59,0.0); }
+      62%{ background-color: rgba(255,235,59,0.85); }
+      75%{ background-color: rgba(255,235,59,0.0); }
+      87%{ background-color: rgba(255,235,59,0.85); }
+      100%{ background-color: rgba(255,235,59,0.0); }
+    }
+
     .tickFlash{
-      animation: tickInnerFlash 140ms ease-out;
-      /* subtle inner burst */
-      background-image: radial-gradient(circle at 50% 50%,
-        rgba(255,213,74,.95) 0%,
-        rgba(255,213,74,.55) 35%,
-        rgba(255,213,74,0) 72%);
+      animation: tickFillFlash 140ms ease-out;
     }
+    .tickFlash16{
+      /* duration is set per-beat via --beatSec */
+      animation: tickFillFlash16 var(--beatSec, 0.63s) linear;
+    }
+
+    /* ===============================
+       Full Song View (BSP-style performance)
+       - Used when AutoScroll is ON in Full
+    =============================== */
+    .fullPerf{
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      /* ✅ let #sheetBody handle scrolling (BSP-style) */
+      height:auto;
+
+      min-height:0;
+    }
+    .fullPerfScroll{
+      flex:1;
+      min-height:0;
+      overflow:visible;
+
+      -webkit-overflow-scrolling: touch;
+      background:transparent;
+      border-radius:16px;
+      border:none;
+      box-shadow:none;
+      padding:0;
+    }
+    .fullPerfSection{ margin-bottom:22px; }
+    .fullPerfHead{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin:6px 0 10px;
+    }
+    .fullPerfLine{
+      height:2px;
+      background: rgba(0,0,0,.18);
+      flex:1;
+      border-radius:999px;
+    }
+    .fullPerfPill{
+      background: var(--hiYellow);
+      border:2px solid #111;
+      color:#111;
+      border-radius:999px;
+      padding:8px 14px;
+      font-family: var(--titleFont);
+      font-weight: 1000;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      text-align:center;
+      white-space:nowrap;
+    }
+    .fullPerfRow{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap:10px;
+      margin:8px 0;
+    }
+    .fullPerfBox{
+      border:none;
+      border-radius:14px;
+      padding:10px 10px;
+      font-family: var(--mono);
+      font-size:16px;
+      font-weight: 1000;
+      line-height:1.15;
+      min-height:54px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      background:transparent;
+      word-break:break-word;
+    }
+
+    @media (orientation: landscape){
+      .fullPerfBox{
+        font-size:14px;
+        padding:8px 8px;
+        min-height:46px;
+      }
+      .fullPerfRow{ gap:8px; }
+    }
+    .fullPerfChordRow{
+      margin:6px 0;
+      font-family: var(--mono);
+      font-size:14px;
+      font-weight: 700;
+      color:#111;
+      opacity:.85;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .fullPerfActive{ }
 
     /* ✅ FULL PAGE layout: make Preview eat remaining space */
     .fullBoxWrap{
@@ -856,7 +970,7 @@
       padding:12px;
       border-radius:14px;
       border:1px solid rgba(0,0,0,.12);
-      background:#fff;
+      background:transparent;
       font-family:var(--mono);
       font-size:14px;
       outline:none;
@@ -911,13 +1025,13 @@
       padding:0 12px 10px;
     }
     .rhymeBox{
-      max-width:1100px;
-      margin:0 auto;
-      background:#fff;
-      border:1px solid rgba(0,0,0,.10);
-      border-radius:16px;
-      box-shadow:0 12px 28px rgba(0,0,0,.18);
-      overflow:hidden;
+  max-width:1100px;
+  margin:0 auto;
+  background:#ffffff;               /* ✅ solid background */
+  border:1px solid rgba(0,0,0,.10);
+  border-radius:16px;
+  box-shadow:0 12px 28px rgba(0,0,0,.18);
+  overflow:hidden;
     }
     .rhymeTop{
       padding:10px 12px;
@@ -928,21 +1042,31 @@
       border-bottom:1px solid rgba(0,0,0,.06);
       font-weight:1100;
     }
-    .rhymeWords{
-      padding:10px 12px 12px;
-      display:flex;
-      gap:8px;
-      flex-wrap:nowrap;
-    }
+.rhymeWords{
+  padding:10px 12px 12px;
+  display:flex;
+  gap:10px;
+  flex-wrap:nowrap;
+
+  overflow-x:auto;                  /* ✅ swipe left/right */
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch; /* ✅ smooth phone scrolling */
+  touch-action:pan-x;               /* ✅ allow horizontal pan */
+  scroll-behavior:smooth;
+}
     .rWord{
-      border:1px solid rgba(0,0,0,.12);
-      background:#fff;
-      border-radius:999px;
-      padding:7px 10px;
-      font-weight:1000;
-      cursor:pointer;
-      user-select:none;
-      font-size:13px;
+  border:1px solid rgba(0,0,0,.12);
+  background:#ff7ac8;               /* ✅ visible chip */
+  color:#000;
+  border-radius:999px;
+  padding:7px 10px;
+  font-weight:1100;
+  cursor:pointer;
+  user-select:none;
+  font-size:13px;
+
+  flex:0 0 auto;                    /* ✅ prevents wrapping */
+  white-space:nowrap;
     }
 /* =========================
    CAPO / STEP TOGGLE (vertical letters, always visible)
@@ -953,7 +1077,7 @@
   height:34px;
   border-radius:999px;
   border:1px solid rgba(0,0,0,.18);
-  background:#fff;
+  background:transparent;
   color:#111;
   font-weight:1100;
   font-size:11px;
