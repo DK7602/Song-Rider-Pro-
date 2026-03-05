@@ -226,7 +226,7 @@ function injectBspCardLook(){
       height: 40px !important;
       min-height: 40px !important;
       font-size: 14px !important;
-      font-weight: 700 !important;
+      font-weight: 900 !important;
       border-radius: 12px !important;
       text-align: center !important;
     }
@@ -234,7 +234,7 @@ function injectBspCardLook(){
     /* LYRICS: smaller + shorter so 2 cards show */
     textarea.lyrics{
       font-size: 17px !important;
-      font-weight: 600 !important;
+      font-weight: 900 !important;
       line-height: 1.18 !important;
       padding: 9px !important;
       border-radius: 12px !important;
@@ -244,7 +244,7 @@ function injectBspCardLook(){
     /* Beat boxes: smaller + shorter */
     textarea.beatCell{
       font-size: 13px !important;
-      font-weight: 600 !important;
+      font-weight: 900 !important;
       line-height: 1.15 !important;
       padding: 7px !important;
       border-radius: 12px !important;
@@ -393,6 +393,50 @@ style.textContent = `
 Active card + active lyrics
 ***********************/
 let lastLyricsTextarea = null;
+
+// Persist caret positions for rhyme seeding (mobile safe)
+function _rememberCaret(ta){
+  try{
+    if(!ta || ta.tagName !== "TEXTAREA") return;
+    if(typeof ta.selectionStart === "number") ta.__lastSelStart = ta.selectionStart;
+    if(typeof ta.selectionEnd === "number") ta.__lastSelEnd = ta.selectionEnd;
+  }catch{}
+}
+function _attachCaretRemember(ta){
+  if(!ta || ta.__caretRememberAttached) return;
+  ta.__caretRememberAttached = true;
+  const fn = () => _rememberCaret(ta);
+  ta.addEventListener("keyup", fn, {passive:true});
+  ta.addEventListener("click", fn, {passive:true});
+  ta.addEventListener("touchend", fn, {passive:true});
+  ta.addEventListener("input", fn, {passive:true});
+  ta.addEventListener("select", fn, {passive:true});
+}
+
+// ✅ Capture caret position BEFORE clicking the rhyme button (mobile blur can move caret to end)
+function _captureRhymeCaret(){
+  try{
+    const a = document.activeElement;
+    if(a && a.tagName === "TEXTAREA" && (a.classList.contains("lyrics") || a.classList.contains("fullBox") || a.classList.contains("fullSectionText"))){
+      _rememberCaret(a);
+      // store a short-lived "rhyme-open" caret snapshot
+      a.__rhymeSelStart = (typeof a.selectionStart === "number") ? a.selectionStart : a.__lastSelStart;
+      a.__rhymeSelTs = Date.now();
+      lastLyricsTextarea = a;
+    }else if(lastLyricsTextarea && lastLyricsTextarea.tagName === "TEXTAREA") {
+      // IMPORTANT: if the textarea is not focused, do NOT call _rememberCaret() here.
+      // On Android, blur can make selectionStart jump to end, and _rememberCaret would overwrite __lastSelStart.
+      const focused = (document.activeElement === lastLyricsTextarea);
+      if(focused) _rememberCaret(lastLyricsTextarea);
+      const snap = (focused && (typeof lastLyricsTextarea.selectionStart === "number")) ? lastLyricsTextarea.selectionStart : lastLyricsTextarea.__lastSelStart;
+      if(typeof snap === "number") lastLyricsTextarea.__rhymeSelStart = snap;
+      lastLyricsTextarea.__rhymeSelTs = Date.now();
+    }
+  }catch{}
+}
+
+
+
 let lastActiveCardEl = null;
 
 document.addEventListener("focusin", (e) => {
@@ -401,6 +445,8 @@ document.addEventListener("focusin", (e) => {
   // ✅ Track BOTH card lyrics textarea AND Full textarea
   if(t && t.tagName === "TEXTAREA" && (t.classList.contains("lyrics") || t.classList.contains("fullBox"))){
     lastLyricsTextarea = t;
+    _attachCaretRemember(t);
+    _rememberCaret(t);
 
     // Only set active card when it's a card textarea
     if(t.classList.contains("lyrics")){
@@ -425,13 +471,18 @@ document.addEventListener("pointerdown", (e) => {
 
   if(e.target && e.target.tagName === "TEXTAREA" && e.target.classList.contains("lyrics")){
     lastLyricsTextarea = e.target;
+    _attachCaretRemember(e.target);
+    _rememberCaret(e.target);
     refreshRhymesFromActive();
   }
 }, { passive:true });
 
 document.addEventListener("selectionchange", () => {
   if(!lastLyricsTextarea) return;
+  // ✅ Only update stored caret when the textarea is actually focused.
+  // Mobile can blur the textarea when you tap the Rhyme button, which can make selectionStart jump to the end.
   if(document.activeElement !== lastLyricsTextarea) return;
+  _rememberCaret(lastLyricsTextarea);
   refreshRhymesFromActive();
 });
 
@@ -1304,6 +1355,19 @@ lastChordRaw: "",
 
   autoScrollOn: false,
   playCardIndex: null,
+
+  // ✅ Full Song View (BSP-style) AutoScroll state
+  fullPerfMode: false,          // when true, Full view renders performance layout
+  fullPerfItems: [],            // [{rowEl, boxes:[el0..el3]}]
+  fullPerfLineIndex: 0,
+  fullPerfLastBeat4: -1,
+  fullPerfLastEls: [],
+  fullPerfProgramScrollUntil: 0,
+  fullPerfUserScrollUntil: 0,
+  fullPerfInitPending: false,
+  fullPerfClockStartMs: 0,
+  fullPerfBeatMs: 0,
+  fullPerfFirstBeat: false,
   
 lastAutoBar: -1,
 
@@ -1673,8 +1737,13 @@ function uiTick8(){
 
 function applyTick(){
   if(!el.sheetBody) return;
-  if(state.currentSection === "Full") return;
   if(!shouldTickRun()) return;
+
+  // ✅ Full Song View BSP-style highlight
+  if(state.currentSection === "Full"){
+    try{ applyFullPerfTick(); }catch(e){ console.error(e); }
+    return;
+  }
 
   const t8 = uiTick8();
   const nIdx = ((t8 % 8) + 8) % 8;
@@ -1729,6 +1798,249 @@ function applyTick(){
   }
 
   state.lastTickEls = touched;
+}
+
+// ===============================
+// Full Song View (BSP-style) AutoScroll + highlight
+// - Renders 4 quadrant boxes per lyric line (manual “/” overrides AutoSplit)
+// - Highlights & flashes the active quadrant on each beat
+// - Advances to next line every 4 beats and scrolls it into view
+// ===============================
+function clearFullPerfTick(){
+  (state.fullPerfLastEls || []).forEach(elm => {
+    try{ elm.classList.remove("tick","tickFlash","fullPerfActive"); }catch{}
+  });
+  state.fullPerfLastEls = [];
+}
+
+// Dedicated animation-frame driver for Full Song View performance mode.
+// Guarantees highlight + autoscroll even when the main beat clock isn't running
+// (e.g. MP3 sync loaded/paused, or silent practice with AutoScroll only).
+function startFullPerfDriver(){
+  try{
+    if(state._fullPerfRaf) return;
+    const step = () => {
+      state._fullPerfRaf = requestAnimationFrame(step);
+      if(!state.autoScrollOn || !state.fullPerfMode) return;
+      try{ applyFullPerfTick(); }catch(e){ console.error(e); }
+    };
+    state._fullPerfRaf = requestAnimationFrame(step);
+  }catch{}
+}
+
+function stopFullPerfDriver(){
+  try{
+    if(state._fullPerfRaf){
+      cancelAnimationFrame(state._fullPerfRaf);
+      state._fullPerfRaf = null;
+    }
+  }catch{}
+}
+
+function getFullPerfScrollHost(){
+  // In SRP, the main scroll container is #sheetBody.
+  // Full Perf should scroll in the same container (BSP-style),
+  // so we can preserve position when toggling AutoScroll and
+  // avoid landscape clipping issues.
+  return el?.sheetBody || document.getElementById("sheetBody") || document.scrollingElement || document.documentElement;
+}
+
+function findFirstVisibleFullPerfLineIndex(){
+  const host = getFullPerfScrollHost();
+  const items = Array.isArray(state.fullPerfItems) ? state.fullPerfItems : [];
+  if(!host || !items.length) return 0;
+
+  // We want the line that is actually at the TOP of what the user can read.
+  // If the very top row is partially clipped, start on the NEXT row (BSP feel).
+  const hostRect = host.getBoundingClientRect();
+  const viewTopScroll = host.scrollTop;
+  const viewBottomScroll = viewTopScroll + (host.clientHeight || (hostRect.bottom - hostRect.top) || 0);
+
+  const pad = 6; // small tolerance so we don't pick a barely-visible previous line
+
+  const rowTopInHost = (rowEl) => {
+    const r = rowEl.getBoundingClientRect();
+    return (r.top - hostRect.top) + viewTopScroll;
+  };
+
+  for(let i=0;i<items.length;i++){
+    const row = items[i]?.rowEl;
+    if(!row) continue;
+
+    const top = rowTopInHost(row);
+    const h = row.offsetHeight || row.getBoundingClientRect().height || 0;
+    const bottom = top + h;
+
+    // completely above viewport
+    if(bottom <= viewTopScroll + pad) continue;
+    // completely below viewport
+    if(top >= viewBottomScroll - pad) return i;
+
+    // Row intersects the top edge (partially clipped) — start on the next row.
+    if(top < viewTopScroll + pad && bottom > viewTopScroll + pad){
+      return Math.min(i + 1, items.length - 1);
+    }
+
+    // First fully-visible (or nearly fully-visible) row.
+    if(top >= viewTopScroll + pad){
+      return i;
+    }
+
+    // Fallback: if we got here, it’s visible and not clipped.
+    return i;
+  }
+
+  
+
+  return 0;
+}
+
+function findStartFullPerfLineIndexFromViewport(){
+  const host = getFullPerfScrollHost();
+  const items = Array.isArray(state.fullPerfItems) ? state.fullPerfItems : [];
+  if(!host || !items.length) return 0;
+
+  // Use elementFromPoint inside the scroll host to pick the row the user is ACTUALLY seeing at the top.
+  // This avoids "starting one line above" caused by tiny visible slivers / smooth-scroll jitter.
+  const hr = host.getBoundingClientRect();
+
+  // Pick a point a bit below the top of the visible area (and away from edges).
+  // NOTE: host is below fixed headers; hr.top is already viewport-correct.
+  const x = clamp(Math.round(hr.left + Math.min(40, (hr.width||1)/4)), 0, window.innerWidth - 1);
+  const y = clamp(Math.round(hr.top  + 14), 0, window.innerHeight - 1);
+
+  let el = document.elementFromPoint(x, y);
+  if(el){
+    // walk up to row
+    while(el && el !== document.body){
+      if(el.classList && el.classList.contains("fullPerfRow")) break;
+      el = el.parentElement;
+    }
+    if(el && el.classList && el.classList.contains("fullPerfRow")){
+      const idx = items.findIndex(it => it && it.rowEl === el);
+      if(idx >= 0) return idx;
+    }
+  }
+
+  // Fallback to rect-based scan
+  return findFirstVisibleFullPerfLineIndex();
+}
+
+function scrollFullPerfRowIntoView(rowEl){
+  const host = getFullPerfScrollHost();
+  if(!host || !rowEl) return;
+
+  try{
+    const hr = host.getBoundingClientRect();
+    const r  = rowEl.getBoundingClientRect();
+
+    // Keep a safe margin so the highlighted text is never clipped
+    // (especially in landscape).
+    const marginTop = 80;
+    const marginBot = 120;
+
+    let delta = 0;
+    if(r.top < hr.top + marginTop){
+      delta = (r.top - (hr.top + marginTop));
+    }else if(r.bottom > hr.bottom - marginBot){
+      delta = (r.bottom - (hr.bottom - marginBot));
+    }
+
+    if(Math.abs(delta) > 2){
+      state.fullPerfProgramScrollUntil = Date.now() + 650;
+      host.scrollTo({ top: Math.max(0, host.scrollTop + delta), behavior: "smooth" });
+    }
+  }catch{
+    try{ rowEl.scrollIntoView({ block:"center", behavior:"smooth" }); }catch{}
+  }
+}
+
+function advanceFullPerfLine(){
+  const items = Array.isArray(state.fullPerfItems) ? state.fullPerfItems : [];
+  if(!items.length){ state.fullPerfLineIndex = 0; return; }
+  state.fullPerfLineIndex = (Number(state.fullPerfLineIndex)||0) + 1;
+  if(state.fullPerfLineIndex >= items.length) state.fullPerfLineIndex = 0;
+}
+
+function applyFullPerfTick(){
+  if(!state.autoScrollOn) return;
+  if(!state.fullPerfMode) return;
+  if(state.fullPerfInitPending) return;
+
+  const items = Array.isArray(state.fullPerfItems) ? state.fullPerfItems : [];
+  if(!items.length) return;
+
+  // ✅ BSP-style: use a dedicated time-based quarter-note clock in Full Perf mode.
+  // This prevents quadrant skips if the UI tick timer lags/drops frames, and guarantees
+  // AutoScroll always starts at beat 1 (quadrant 1) of the starting line.
+  const bpm = clamp(Number(state.bpm)||95, 40, 260);
+  const beatMs = Math.round((60 / bpm) * 1000);
+
+  if(!state.fullPerfClockStartMs || state.fullPerfBeatMs !== beatMs){
+    state.fullPerfClockStartMs = performance.now();
+    state.fullPerfBeatMs = beatMs;
+    state.fullPerfLastBeat4 = -1;
+  }
+
+  const elapsed = Math.max(0, performance.now() - state.fullPerfClockStartMs);
+  const beat4 = Math.floor(elapsed / beatMs) % 4;
+
+  const prevBeat4 = state.fullPerfLastBeat4;
+  if(beat4 === prevBeat4) return;
+  state.fullPerfLastBeat4 = beat4;
+
+  // Initialize line index from current scroll position when turning on
+  if(!Number.isFinite(state.fullPerfLineIndex) || state.fullPerfLineIndex < 0 || state.fullPerfLineIndex >= items.length){
+    state.fullPerfLineIndex = findFirstVisibleFullPerfLineIndex();
+  }
+
+  // New line every 4 beats (when beat cycles back to 0)
+  if(beat4 === 0 && prevBeat4 !== -1){
+    // Only advance if we already highlighted something previously
+    // (prevents skipping first line on engage)
+    if(state.fullPerfLastEls && state.fullPerfLastEls.length){
+      advanceFullPerfLine();
+    }
+  }
+
+  const item = items[state.fullPerfLineIndex];
+  if(!item || !item.boxes || item.boxes.length < 4) return;
+
+  // Clear previous tick visuals
+  clearFullPerfTick();
+
+  const row = item.rowEl;
+  const box = item.boxes[beat4];
+  if(row) row.classList.add("fullPerfActive");
+  if(box){
+    box.classList.add("tick");
+
+    // ✅ 16th-note style flash (4 pulses per beat)
+    // We only have an 8th-note clock, so we simulate 16ths with a CSS animation
+    // whose duration matches ONE quarter note.
+    const beatSec = 60 / bpm;
+    try{ box.style.setProperty("--beatSec", beatSec + "s"); }catch{}
+
+    // restart flash
+    box.classList.remove("tickFlash", "tickFlash16");
+    void box.offsetWidth;
+    box.classList.add("tickFlash16");
+
+    try{
+      clearTimeout(state._fullPerfFlashTimer);
+      state._fullPerfFlashTimer = setTimeout(()=>{
+        try{ box.classList.remove("tickFlash16"); }catch{}
+      }, Math.round(beatSec*1000));
+    }catch{}
+
+    state.fullPerfLastEls = [box, row].filter(Boolean);
+  }
+
+  // Keep the active line visible
+  if(beat4 === 0) scrollFullPerfRowIntoView(row);
+
+  // After we render the very first visual beat, return to normal clock-driven beats.
+  if(state.fullPerfFirstBeat) state.fullPerfFirstBeat = false;
 }
 
 /***********************
@@ -4052,9 +4364,56 @@ function setAutoScroll(on){
   $("mScrollBtn")?.classList.toggle("on", state.autoScrollOn);
 
   if(state.autoScrollOn){
-    // If user is on Full, switch to the first real page (PAGE 1)
+    // ✅ If user is on Full, stay on Full (BSP-style Full Song View autoscroll)
     if(state.currentSection === "Full"){
-      switchToSectionForAuto(FULL_EDIT_SECTIONS[0]);
+      // ✅ Preserve current scroll position so enabling AutoScroll doesn't jump to the top
+      const prevScrollHost =
+        getFullPerfScrollHost();
+      const prevScrollTop = Number(prevScrollHost?.scrollTop) || 0;
+
+      state.fullPerfMode = true;
+      state.fullPerfInitPending = true;
+      state.fullPerfLineIndex = NaN; // initialize from visible line AFTER render
+      state.fullPerfLastBeat4 = -1;
+      state.fullPerfClockStartMs = 0;
+      state.fullPerfBeatMs = 0;
+      clearFullPerfTick();
+
+      // Re-render to performance layout so we can highlight boxes
+      try{ renderSheet(); }catch{}
+
+      // After DOM updates, restore scrollTop and lock start line to TOP-most visible row
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const host = getFullPerfScrollHost();
+          if(host){
+            host.scrollTop = prevScrollTop;
+          }
+          // Lock the start line strictly to what is visible at the top of the host right now.
+          state.fullPerfUserScrollUntil = 0;
+          state.fullPerfLockLineUntil = Date.now() + 650; // prevent scroll handler from overriding during engage
+          state.fullPerfProgramScrollUntil = Date.now() + 900; // ignore restore/render scroll events
+          state.fullPerfLineIndex = findStartFullPerfLineIndexFromViewport();
+          state.fullPerfInitPending = false;
+          clearFullPerfTick();
+
+          // ✅ Always start at beat 1 (quadrant 1) of the starting line on engage.
+          // This matches BSP: the first highlight on engage is the first quadrant,
+          // not wherever the global clock happens to be.
+          // ✅ Start Full-perf clock at Beat 1 / Quadrant 1 right now.
+          state.fullPerfClockStartMs = performance.now();
+          state.fullPerfBeatMs = Math.round((60 / clamp(Number(state.bpm)||95, 40, 260)) * 1000);
+          state.fullPerfLastBeat4 = -1;
+          state.fullPerfFirstBeat = false;
+          // ✅ Ensure Full-view highlight + scroll runs even if the main beat clock is stopped
+          // (e.g., MP3 sync is loaded/paused).
+          startFullPerfDriver();
+          try{ applyFullPerfTick(); }catch{}
+        });
+      });
+    }else{
+      state.fullPerfMode = false;
+      stopFullPerfDriver();
     }
 
     // ✅ Do NOT restart playback. We only re-base the *visual* beat + scroll position.
@@ -4064,11 +4423,27 @@ function setAutoScroll(on){
     // Re-base visual beat at the CURRENT playback position so UI starts at Beat 1 now
     state.autoScrollTickOffset = state.tick8;
 
-    resetAutoScrollToFirstCardOfActivePage();
+    if(state.currentSection !== "Full") resetAutoScrollToFirstCardOfActivePage();
 
   }else{
     state.playCardIndex = null;
     state.autoScrollTickOffset = 0;
+
+    // always stop Full perf driver when AutoScroll is OFF
+    stopFullPerfDriver();
+
+    // ✅ leaving Full performance mode
+    if(state.currentSection === "Full"){
+      state.fullPerfMode = false;
+      state.fullPerfItems = [];
+      state.fullPerfLineIndex = 0;
+      state.fullPerfLastBeat4 = -1;
+      state.fullPerfClockStartMs = 0;
+      state.fullPerfBeatMs = 0;
+      clearFullPerfTick();
+      stopFullPerfDriver();
+      try{ renderSheet(); }catch{}
+    }
 
     // If MP3 sync is playing, stop the highlight immediately when AutoScroll OFF
     if(state.audioSyncOn){
@@ -4257,6 +4632,106 @@ function autosplitBeatsFromLyrics(lyrics){
   }
 
   return boxes.map(arr => arr.join(" ").trim());
+}
+
+// ===============================
+// Full Song View (BSP-match) helpers
+// - In Full Song View performance mode we MUST behave like BSP:
+//   • Treat paragraph blocks (separated by blank lines) as ONE "bar"
+//   • From each bar, pick ONE lyric line (skip headings/chord-only)
+//   • Prefer FIRST eligible line that contains "/" (manual split)
+//   • Split into 4 beat boxes without splitting words (BSP algorithm)
+// ===============================
+function _fullPerf_isHeadingLine(line){
+  const t = String(line||"").trim();
+  if(!t) return false;
+  const up = t.toUpperCase();
+  return /^(INTRO|VERSE\s*\d+|CHORUS\s*\d+|BRIDGE|PRE\s*-?CHORUS|OUTRO|TAG|HOOK)$/.test(up);
+}
+
+function _fullPerf_isChordLine(line){
+  const t = String(line||"").trim();
+  if(!t) return true;
+  if(/^[-_]{3,}$/.test(t)) return true;
+
+  const cleaned = t.replace(/[\[\]\(\)\{\}]/g, "").trim();
+  const toks = cleaned.split(/\s+/).filter(Boolean);
+  if(!toks.length) return true;
+
+  const chordRe = /^(\d+)?[A-G](?:#|b)?(?:m|maj|min|dim|aug|sus|add)?\d*(?:\/[A-G](?:#|b)?)?$/i;
+  let chordish = 0;
+  for(const tok of toks){
+    if(tok === "|" || tok === "/"){ chordish++; continue; }
+    if(chordRe.test(tok)){ chordish++; continue; }
+  }
+  return chordish === toks.length;
+}
+
+function _fullPerf_pickLyricLineFromBar(barText){
+  const lines = String(barText||"").replace(/\r/g, "").split("\n");
+  let lastEligible = "";
+  let firstEligibleWithSlash = "";
+
+  for(let i=0;i<lines.length;i++){
+    const t = String(lines[i]||"").trim();
+    if(!t) continue;
+    if(_fullPerf_isHeadingLine(t)) continue;
+    if(_fullPerf_isChordLine(t)) continue;
+
+    lastEligible = t;
+    if(!firstEligibleWithSlash && t.includes("/")) firstEligibleWithSlash = t;
+  }
+
+  if(firstEligibleWithSlash) return firstEligibleWithSlash;
+  if(lastEligible) return lastEligible;
+  for(const raw of lines){
+    const t = String(raw||"").trim();
+    if(t) return t;
+  }
+  return "";
+}
+
+function _fullPerf_buildTargets(total){
+  const base = Math.floor(total / 4);
+  const rem = total % 4;
+  return [0,1,2,3].map(i => base + (i < rem ? 1 : 0));
+}
+
+function _fullPerf_autoSplitSyllablesClean(text){
+  const clean = String(text||"").replace(/[\/]/g, " ").trim();
+  if(!clean) return ["","","",""];
+
+  const words = clean.split(/\s+/).filter(Boolean);
+  const sylls = words.map(w => Math.max(1, countSyllablesInline(w)));
+  const total = sylls.reduce((a,b)=>a+b,0);
+  if(!total) return ["","","",""];
+
+  const targets = _fullPerf_buildTargets(total);
+  const beats = [[],[],[],[]];
+  const beatSyll = [0,0,0,0];
+  let b = 0;
+
+  for(let i=0;i<words.length;i++){
+    const w = words[i];
+    const s = sylls[i];
+
+    while(b < 3 && beatSyll[b] >= targets[b]) b++;
+
+    const wouldOvershoot = (beatSyll[b] + s) > targets[b];
+    if(wouldOvershoot && beats[b].length > 0 && b < 3){
+      b++;
+    }
+
+    beats[b].push(w);
+    beatSyll[b] += s;
+  }
+
+  return beats.map(arr => arr.join(" ").trim());
+}
+
+function _fullPerf_computeBeats(text){
+  const manual = manualBeatsFromSlashes(text);
+  return manual ? manual : _fullPerf_autoSplitSyllablesClean(text);
 }
 
 /***********************
@@ -5011,6 +5486,128 @@ function renderSheet(){
   state.playCardIndex = null;
 
 if(state.currentSection === "Full"){
+  // ✅ BSP-style Full Song View performance layout (used when AutoScroll is ON)
+  if(state.fullPerfMode){
+    if(el.sheetHint) el.sheetHint.textContent = "";
+    (el.sheetInner || el.sheetBody).innerHTML = "";
+
+    const fullText = String(state.project?.fullText || "");
+
+    // Parse blocks using the same break-line rules
+    const lines = fullText.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+    const blocks = [];
+    let cur = null;
+    const flush = () => {
+      if(!cur) return;
+      // trim leading/trailing empties
+      while(cur.body.length && String(cur.body[0]||"").trim() === "") cur.body.shift();
+      while(cur.body.length && String(cur.body[cur.body.length-1]||"").trim() === "") cur.body.pop();
+      blocks.push(cur);
+      cur = null;
+    };
+    for(const raw of lines){
+      const br = _parseBreakLine(raw);
+      if(br){
+        flush();
+        cur = { title: String(br.title||"").trim(), body: [] };
+        continue;
+      }
+      if(!cur) continue;
+      cur.body.push(String(raw ?? ""));
+    }
+    flush();
+    if(!blocks.length) blocks.push({ title:"", body:[] });
+
+    const host = document.createElement("div");
+    host.className = "fullPerf";
+
+    const scroll = document.createElement("div");
+    scroll.id = "fullPerfScroll";
+    scroll.className = "fullPerfScroll";
+
+    // Build line items for ticking
+    const items = [];
+
+    blocks.forEach((b) => {
+      const sec = document.createElement("div");
+      sec.className = "fullPerfSection";
+
+      const head = document.createElement("div");
+      head.className = "fullPerfHead";
+
+      const l1 = document.createElement("div");
+      l1.className = "fullPerfLine";
+      const pill = document.createElement("div");
+      pill.className = "fullPerfPill";
+      pill.textContent = String(b.title || "Song Part").trim() || "Song Part";
+      const l2 = document.createElement("div");
+      l2.className = "fullPerfLine";
+      head.appendChild(l1);
+      head.appendChild(pill);
+      head.appendChild(l2);
+      sec.appendChild(head);
+
+      // ✅ BSP-style Full Song View (SRP):
+      // Render EVERY eligible lyric line as its own 4-beat row (no missing first lines).
+      // - Skips headings + chord-only lines
+      // - Manual “/” split overrides AutoSplit
+      const body = Array.isArray(b.body) ? b.body : [];
+
+      for(const rawLine of body){
+        const t = String(rawLine ?? "").replace(/\s+$/g,"").trim();
+        if(!t) continue;
+        if(_fullPerf_isHeadingLine(t)) continue;
+        if(_fullPerf_isChordLine(t)) continue;
+
+        const beats = _fullPerf_computeBeats(t);
+        const row = document.createElement("div");
+        row.className = "fullPerfRow";
+
+        const boxes = [];
+        for(let i=0;i<4;i++){
+          const bx = document.createElement("div");
+          bx.className = "fullPerfBox";
+          bx.textContent = String(beats[i] || "");
+          row.appendChild(bx);
+          boxes.push(bx);
+        }
+        sec.appendChild(row);
+        items.push({ rowEl: row, boxes });
+      }
+
+      scroll.appendChild(sec);
+    });
+
+    host.appendChild(scroll);
+    (el.sheetInner || el.sheetBody).appendChild(host);
+
+    // Save items for ticking
+    state.fullPerfItems = items;
+    // When rendering while AutoScroll is ON, start near the current scroll position
+    state.fullPerfLineIndex = clamp(Number(state.fullPerfLineIndex)||0, 0, Math.max(0, items.length - 1));
+
+    // Keep nearest line selection updated ONLY on user manual scroll (prevents "bouncing")
+    const hostScroll = getFullPerfScrollHost();
+    const markUserScroll = () => { state.fullPerfUserScrollUntil = Date.now() + 900; };
+    (hostScroll || scroll).addEventListener("touchstart", markUserScroll, {passive:true});
+    (hostScroll || scroll).addEventListener("touchmove", markUserScroll, {passive:true});
+    (hostScroll || scroll).addEventListener("wheel", markUserScroll, {passive:true});
+
+    (hostScroll || scroll).addEventListener("scroll", () => {
+      if(!state.autoScrollOn) return;
+      const now = Date.now();
+      // Ignore programmatic smooth-scroll updates
+      if(now < (state.fullPerfProgramScrollUntil||0)) return;
+      // Only update while user is actively scrolling
+      if(now > (state.fullPerfUserScrollUntil||0)) return;
+      // During AutoScroll engage, ignore scroll events so we don't snap to a line above.
+      if(now < (state.fullPerfLockLineUntil||0)) return;
+      state.fullPerfLineIndex = findFirstVisibleFullPerfLineIndex();
+    }, { passive:true });
+
+    return;
+  }
+
   // ✅ Full page editor is now SECTION BLOCKS (no overlay), so:
   // - No black break lines are visible
   // - Yellow pill + buttons never overlap lyrics
@@ -5175,6 +5772,7 @@ if(state.currentSection === "Full"){
 
     const ta = document.createElement("textarea");
     ta.className = "fullSectionText";
+    _attachCaretRemember(ta);
     ta.placeholder = "Lyrics / chords...";
     ta.value = Array.isArray(b.body) ? b.body.join("\n") : "";
     autosizeTextarea(ta);
@@ -5183,6 +5781,8 @@ if(state.currentSection === "Full"){
     ta.addEventListener("input", () => {
       autosizeTextarea(ta);
       b.body = String(ta.value || "").replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+      // ✅ persist immediately so a fast refresh never loses edits
+      quickSaveFullText();
       commitDebounced();
     });
     ta.addEventListener("paste", () => setTimeout(() => autosizeTextarea(ta), 0));
@@ -5256,6 +5856,7 @@ if(state.currentSection === "Full"){
 
   const ta = document.createElement("textarea");
   ta.className = "fullBox";
+  _attachCaretRemember(ta);
   ta.addEventListener("focus", () => {
   lastLyricsTextarea = ta;     // ✅ so rhyme taps insert into Full view
   refreshRhymesFromActive();
@@ -6979,27 +7580,72 @@ function getSeedFromTextarea(ta){
     return false;
   }
 
-  // ✅ FULL view: use the previous LYRIC line's last word (skip chord lines)
-  if(ta.classList && ta.classList.contains("fullBox")){
-    const pos = (typeof ta.selectionStart === "number") ? ta.selectionStart : (ta.value || "").length;
+  // ✅ FULL view: use the previous BAR's last lyric word (skip chord lines)
+  // A "bar" in Full view is separated by blank lines. This matches BSP behavior:
+  // rhyme target comes from the last lyric line of the previous bar, not the previous line.
+  if(ta.classList && (ta.classList.contains("fullBox") || ta.classList.contains("fullSectionText"))){
+    let pos;
+    // ✅ Use caret captured right before opening the rhyme dock (prevents mobile blur moving caret to end)
+    if(typeof ta.__rhymeSelStart === "number" && typeof ta.__rhymeSelTs === "number" && (Date.now() - ta.__rhymeSelTs) < 4000){
+      pos = ta.__rhymeSelStart;
+    }else{
+      // On mobile, opening the rhyme dock can blur the textarea, which makes selectionStart jump to the end.
+      // We persist the last known caret position on the textarea itself.
+      if(document.activeElement === ta && typeof ta.selectionStart === "number"){
+        pos = ta.selectionStart;
+        try{ ta.__lastSelStart = pos; }catch{}
+      }else if(typeof ta.__lastSelStart === "number"){
+        pos = ta.__lastSelStart;
+      }else{
+        pos = (ta.value || "").length;
+      }
+    }
     const before = String(ta.value || "").slice(0, pos);
     const lines = normalizeLineBreaks(before).split("\n");
     const curIdx = lines.length - 1;
 
-    for(let i = curIdx - 1; i >= 0; i--){
+    // 1) Find the blank-line separator above the current cursor line (start of current bar)
+    let sep = -1;
+    for(let i = curIdx; i >= 0; i--){
+      const t = String(lines[i] || "").replace(/\u00A0/g," ").trim();
+      if(t === "") { sep = i; break; }
+    }
+
+    // 2) Previous bar ends just above that separator (skip any extra blanks)
+    let prevEnd = (sep >= 0) ? sep - 1 : curIdx - 1;
+    while(prevEnd >= 0 && String(lines[prevEnd]||"").trim() === "") prevEnd--;
+
+    // 3) Walk upward within the previous bar and pick the LAST eligible lyric line
+    //    (closest to the end of the bar), skipping headings/breaks/chord-only lines.
+    for(let i = prevEnd; i >= 0; i--){
       const raw = String(lines[i] || "");
       const t = raw.trim();
-      if(!t) continue;
+      if(!t){
+        // stop at bar boundary
+        break;
+      }
 
-      // skip headings + breaks + chord-input lines
       if(isSectionHeadingLine(t)) continue;
+      if(t === BREAK_LINE || t === "_") continue;
       if(looksLikeChordInputLine(t)) continue;
 
       const w = getLastWord(t);
       if(w) return w;
     }
 
-    // fallback: last word before cursor
+    // 4) Fallback: previous eligible lyric line anywhere above (older behavior)
+    for(let i = curIdx - 1; i >= 0; i--){
+      const raw = String(lines[i] || "");
+      const t = raw.trim();
+      if(!t) continue;
+      if(isSectionHeadingLine(t)) continue;
+      if(t === BREAK_LINE || t === "_") continue;
+      if(looksLikeChordInputLine(t)) continue;
+      const w = getLastWord(t);
+      if(w) return w;
+    }
+
+    // final fallback: last word before cursor
     return getLastWord(before) || "";
   }
 
@@ -7052,7 +7698,7 @@ async function fetchDatamuseNearRhymes(word, max = 24){
 function insertWordIntoLyrics(word){
   // ✅ Use the currently active textarea if it’s lyrics or fullBox
   const active = document.activeElement;
-  if(active && active.tagName === "TEXTAREA" && (active.classList.contains("lyrics") || active.classList.contains("fullBox"))){
+  if(active && active.tagName === "TEXTAREA" && (active.classList.contains("lyrics") || active.classList.contains("fullBox") || active.classList.contains("fullSectionText"))){
     lastLyricsTextarea = active;
   }
 
@@ -7137,9 +7783,31 @@ async function renderRhymes(seed){
   });
 }
 
+function getBestRhymeTextarea(){
+  // Prefer the actually-focused textarea (mobile can keep focus while dock is open)
+  const a = document.activeElement;
+  if(a && a.tagName === "TEXTAREA" && (a.classList.contains("lyrics") || a.classList.contains("fullBox") || a.classList.contains("fullSectionText"))){
+    return a;
+  }
+
+  // If Full view textarea exists and is on screen, prefer it
+  const full = document.querySelector("textarea.fullBox");
+  if(full){
+    const r = full.getBoundingClientRect();
+    const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight);
+    if(visible) return full;
+  }
+
+  // Fallback to last tracked textarea (card or full)
+  if(lastLyricsTextarea && document.contains(lastLyricsTextarea)) return lastLyricsTextarea;
+
+  return full || null;
+}
+
 function refreshRhymesFromActive(){
   if(el.rhymeDock.style.display !== "block") return;
-  const seed = getSeedFromTextarea(lastLyricsTextarea);
+  const ta = getBestRhymeTextarea();
+  const seed = getSeedFromTextarea(ta);
   renderRhymes(seed);
 }
 
@@ -7890,13 +8558,34 @@ if(el.beat1Btn){
     markBeat1Now();
   });
 }
+  // ✅ Capture caret BEFORE button click steals focus (mobile)
+  if(el.rBtn){
+    const cap = () => _captureRhymeCaret();
+    el.rBtn.addEventListener("pointerdown", cap, {passive:true});
+    el.rBtn.addEventListener("touchstart", cap, {passive:true});
+    el.rBtn.addEventListener("mousedown", cap, {passive:true});
 
+    el.rBtn.addEventListener("click", () => {
+      const showing = (el.rhymeDock && el.rhymeDock.style.display === "block");
+      toggleRhymeDock(!showing);
+    });
+  }
 
-  if(el.rBtn) el.rBtn.addEventListener("click", () => {
-    const showing = (el.rhymeDock && el.rhymeDock.style.display === "block");
-    toggleRhymeDock(!showing);
-  });
   if(el.hideRhymeBtn) el.hideRhymeBtn.addEventListener("click", () => toggleRhymeDock(false));
+
+  // ✅ When rhyme dock is open, allow swipe/drag inside the rhyme words row without triggering page swipe.
+  if(el.rhymeWords){
+    const stop = (e) => {
+      // only stop when dock is visible
+      if(el.rhymeDock && el.rhymeDock.style.display === "block"){
+        e.stopPropagation();
+      }
+    };
+    el.rhymeWords.addEventListener('touchstart', stop, {passive:true});
+    el.rhymeWords.addEventListener('touchmove', stop, {passive:true});
+    el.rhymeWords.addEventListener('pointerdown', stop, {passive:true});
+    el.rhymeWords.addEventListener('wheel', stop, {passive:true});
+  }
 }
 
 /***********************
