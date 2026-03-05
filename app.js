@@ -22,6 +22,7 @@ let sheetHeaderBtnLock = false;
 /***********************
 Utils
 ***********************/
+  
 const $ = (id) => document.getElementById(id);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const now = () => Date.now();
