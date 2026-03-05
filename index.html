@@ -1249,8 +1249,8 @@
 
 <script src="./lame.min.js?v=62"></script>
 <script type="module">
-  import * as pdfjsLib from "./pdf.mjs?v=20";
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.mjs?v=20";
+  import * as pdfjsLib from "./pdf.min.mjs?v=2"
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.min.mjs";
   window.pdfjsLib = pdfjsLib; // <-- makes your existing app.js code work unchanged
 </script>
 <!-- cache-buster -->
