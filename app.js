@@ -3399,7 +3399,7 @@ function refreshDisplayedNoteCells(){
   const semis = Math.round(getTransposeSemis()) % 12;
 
   document.querySelectorAll(".noteCell").forEach(inp => {
-    const raw = inp.dataset.raw || inp.value || "";
+    const rawconst raw = inp.dataset.raw || "";
     inp.value = (semis ? transposeChordName(raw, semis) : raw);
   });
 }
