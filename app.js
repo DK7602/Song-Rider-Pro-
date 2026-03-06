@@ -3705,8 +3705,7 @@ function playInstrumentStep(){
   const cells = card.querySelectorAll(".noteCell");
   if(!cells[nIdx]) return;
 
-  const raw = getNoteRawFromCell(cells[nIdx]);
-  if(!raw) return;
+  const raw = cells[nIdx]?.dataset?.raw || getNoteRawFromCell(cells[nIdx]);
 
   const eighthMs = Math.max(80, (state.eighthMs || 300));
 
